@@ -1,0 +1,41 @@
+version: png_to_shader_orchestrator_policy_v1
+sent_to_model: false
+description: PngToShaderOrchestrator 的确定性预算、接受和路由策略。
+
+budget:
+  max_visual_refinements: 2
+  max_compile_repairs: 2
+  max_model_calls: 8
+  max_wall_time_seconds: 300
+  max_shader_chars: 30000
+  renderer_replay_on_crash: 1
+
+acceptance:
+  min_total_improvement: 0.005
+  max_protected_regression: 0.02
+  quality_threshold: 0.12
+  stagnation_rounds: 2
+
+routes:
+  - when: cancelled
+    goto: finalize_cancelled
+  - when: wall_time_exhausted or model_budget_exhausted
+    goto: finalize_budget
+  - when: static_validation_failed or compile_failed
+    goto: repair_if_budget_else_finalize
+  - when: quality_threshold_met
+    goto: finalize_quality
+  - when: no_improvement_count_gte_stagnation_rounds
+    goto: finalize_stagnation
+  - when: visual_refinement_budget_available
+    goto: visual_critic
+  - when: otherwise
+    goto: finalize_best_effort
+
+hard_rules:
+  - 永远不能接受未通过无贴图约束的候选。
+  - 永远不能接受未通过 WebGL1 compile、link、draw 的候选。
+  - latest candidate 不等于 current_best。
+  - VisualCriticAgent 的停止建议不能突破预算和硬约束。
+  - 任一循环分支都必须消耗一个可计数预算。
+  - 结束时有可运行候选就必须返回 current_best。

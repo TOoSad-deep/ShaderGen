@@ -1,0 +1,104 @@
+[project]
+name = "shadergen"
+version = "0.0.1"
+description = "ShaderGen LangGraph 智能体。"
+authors = [
+    { name = "William Fu-Hinthorn", email = "13333726+hinthornw@users.noreply.github.com" },
+]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+    "asyncpg>=0.31.0",
+    "fastapi>=0.139.0",
+    "langchain",
+    "langchain-openai>=1.3.3",
+    "langgraph>=1.2.7",
+    "langgraph-checkpoint-postgres>=3.1.0",
+    "psycopg[binary,pool]>=3.3.3",
+    "python-dotenv>=1.0.1",
+    "python-multipart>=0.0.32",
+    "pyyaml>=6.0.3",
+]
+
+
+[project.optional-dependencies]
+dev = ["mypy>=1.11.1", "ruff>=0.6.1"]
+
+[build-system]
+requires = ["setuptools>=73.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = [
+    "agent",
+    "agent.app",
+    "agent.app.config",
+    "agent.app.contracts",
+    "agent.app.graphs",
+    "agent.app.llms",
+    "agent.app.llms.families",
+    "agent.app.messages",
+    "agent.app.memory",
+    "agent.app.context",
+    "agent.app.nodes",
+    "agent.app.observability",
+    "agent.app.parsers",
+    "agent.app.prompts",
+    "agent.app.services",
+    "agent.app.states",
+    "agent.app.tools",
+    "backend",
+    "backend.app",
+    "backend.app.api",
+    "backend.app.api.routes",
+    "backend.app.core",
+    "backend.app.database",
+    "backend.app.middleware",
+    "backend.app.schemas",
+    "backend.app.services",
+    "shaderforge",
+    "shaderforge.contracts",
+]
+[tool.setuptools.package-dir]
+"agent" = "src/agent"
+"shaderforge" = "src/shaderforge"
+
+
+[tool.setuptools.package-data]
+"*" = ["py.typed"]
+"agent.app.prompts" = ["*.yaml"]
+"backend" = ["sql/*.sql"]
+
+[tool.ruff]
+lint.select = [
+    "E",    # pycodestyle 规则
+    "F",    # pyflakes 规则
+    "I",    # isort 规则
+    "D",    # pydocstyle 规则
+    "D401", # 文档字符串首行使用祈使语气
+    "T201",
+    "UP",
+]
+lint.ignore = [
+    "UP006",
+    "UP007",
+    # 这里确实需要从 typing_extensions 导入。
+    "UP035",
+    # 放宽文档要求，不强制每个函数参数都写说明。
+    "D417",
+    "E501",
+]
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["D", "UP"]
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[dependency-groups]
+dev = [
+    "anyio>=4.7.0",
+    "langgraph-cli[inmem]>=0.4.30",
+    "mypy>=1.13.0",
+    "pytest>=9.0.3",
+    "ruff>=0.8.2",
+]

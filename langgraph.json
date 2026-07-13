@@ -1,0 +1,9 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "agent": "./src/agent/app/graphs/main_graph.py:graph",
+    "shader_generation": "./src/agent/app/graphs/shader_generation_graph.py:shader_generation_graph"
+  },
+  "env": ".env",
+  "image_distro": "wolfi"
+}

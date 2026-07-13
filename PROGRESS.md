@@ -1,0 +1,118 @@
+# 进度
+
+最后更新：2026-07-13
+
+## 当前状态
+
+Learn Harness Engineering 方法的阶段 1 已完成：最小仓库事实来源已经建立，并已通过验证。最小在线 Review 节点已完成：Agent 内部通过 `shader_generation_graph` 串联 `generate_glsl` 和 `review_render` 两个节点；前端在 WebGL 预览第一帧后提交原图、当前渲染图和 GLSL，后端调用 Agent 评审并返回渲染评估与代码修改建议。
+
+权威架构输入：
+
+- `human_doc/shaderforge-technical-architecture-aligned(1).svg`
+
+仓库事实来源文件：
+
+- `README.md`
+- `AGENTS.md`
+- `Makefile`
+- `docs/ARCHITECTURE.md`
+- `docs/DECISIONS.md`
+- `docs/FEATURES.md`
+- `PROGRESS.md`
+- `src/agent/ARCHITECTURE.md`
+- `src/agent/app/*/ARCHITECTURE.md`
+- `frontend/README.md`
+- `backend/README.md`
+
+## 当前 active 功能
+
+- `F09`：PNG 转无贴图 Shader Agent V1。2026-07-13 用户确认先实现 M0。
+
+## 下一个产品功能
+
+- `F09 M1`：实现 ShaderForge 最小事实层，包括 TargetMeasurements、无贴图 Validator、真实 WebGL1 Renderer、Basic Oracle 和 LocalArtifactStore。
+
+## 验证
+
+- 2026-07-13：完成 `F09` M0。新增首个真实 `src/shaderforge/` 子包及稳定公共入口，冻结 `webgl1_static_no_texture_v1`、8 个问题域、9 个停止原因、3 个质量档位、硬预算和 `current_best` 接受策略；`image_to_glsl.yaml` 已删除“必须 texture2D”冲突并改为版本化无贴图 Prompt，Generate Node 从 YAML 定义写入 `image_to_glsl_no_texture_v1` 审计版本。新增标准库 benchmark 生成器、10 张 192×192 确定性 PNG、能力/ROI/bbox 容差 manifest 和 SHA-256 固定证据；新增 7 个 M0 契约测试。验证：M0 定向测试 7 passed；全量单元测试 70 passed；普通集成测试 3 passed、1 skipped（PostgreSQL 专用测试按设计跳过）；`uv run ruff check src/agent src/shaderforge backend tests scripts` 通过；`make docs-check` 通过；`make check` 通过并包含 LangGraph validate 发现 2 个图和前端构建。抽查 pink_gel、arc_highlight_orb、neon_ring、rounded_rect_glow 图片显示正常。F09 继续保持 active，下一步为 M1，M1–M5 未完成前不得标记 passing。
+- 2026-07-13：完成 `F08` Shader Memory 与 Context Engineering 实现。Agent 新增版本化 `MemoryItem`、幂等 Review upsert/分页清除、纯 `ContextPolicy`/`ContextPack` GSSC Builder、`prepare_context`/`promote_memory` Node 和显式 generate/review 路由；任务 checkpoint 只保留 project、phase、iteration、GLSL hash、生成模型/时间和 Review fallback，图片、渲染图、完整 GLSL、ContextPack、选中 ID、memory status、run ID、模型调用、事件、日志和 reasoning 均使用 `UntrackedValue`。Backend 新增独立 psycopg saver/store 生命周期、严格 msgpack、独立 setup 命令、`project_id` 过程账本、单进程项目锁、Generate/Review memory status 和清除 API；无数据库时明确降级为临时记忆。Frontend 支持当前/最近 10 个 project ID、刷新恢复、新建/恢复/清除和 ephemeral/degraded 提示。验证：63 个单元测试通过；普通集成测试 3 个通过、PostgreSQL 专用测试按普通套件设计跳过；`make test-memory-postgres` 在自动创建的随机隔离数据库中通过资源重建恢复测试（1 passed），finally 删除测试数据库并复核残留数为 0；`uv run ruff check src/agent backend tests scripts` 通过；`make check` 通过；Playwright CLI 浏览器 E2E 完成上传、生成、canvas Review、刷新恢复、新建、最近项目恢复和清除，`npm --prefix frontend run e2e:memory` 通过，最终截图为 `output/playwright/memory-final.png`。未执行真实模型调用。已对配置的 ShaderGen 数据库执行 `make setup-memory-postgres`，运行时健康检查返回 `memory_status=durable`。当前目录没有 Git 元数据，无 commit。
+- 2026-07-13：用户确认开始实现 `F08`。已先同步实现前审查结论到规格与 D018，并把 `F08` 从 `not_started` 改为 `active`；后续按 Memory/Context 纯模块、Graph/State、Backend persistence/API、Frontend 项目恢复、PostgreSQL/浏览器验收的顺序推进。当前尚未完成代码与验收，不得标记为 passing。
+- 2026-07-13：完成现有 Shader Memory / Context Engineering 规格的实现前设计审查，结论为总体方向保留，但进入 `F08` 前需要修订若干契约：将单次运行的 `selected_memory_ids` / `memory_status` 移出 checkpoint；删除或明确定义当前纯 GLSL 输出无法产生的 `last_generation_summary`；为 `MemoryItem` 增加 schema 版本和更新时间并定义确定性 importance/upsert 语义；按当前 GLSL/iteration 约束 Review 选择以避免历史建议冲突；明确 checkpoint 成功而 Store 失败时的幂等重试；把 Store namespace 清除实现为分页逐项删除；将 2,000 token、50 条候选等参数收口为有默认值的策略配置；PostgreSQL 首次 setup 与生产迁移分离，并启用严格 msgpack 反序列化。另建议用本地 recent project ID 列表解决“长期保留但新建后不可返回”的孤儿项目体验。当前只完成审查，未修改设计规格、代码、API、功能状态或决策记录，`F08` 保持 `not_started`。验证：`make docs-check` 通过。当前目录没有 Git 元数据，无 commit。
+- 2026-07-13：复核 Shader Memory 与 Context Engineering 规划及当前代码事实。确认现有 `F08` / `D018` / `docs/superpowers/specs/2026-07-10-memory-context-design.md` 仍与仓库现状一致：Shader Graph 尚未接入 checkpointer/store，Generate 与 Review 仍是独立请求，API 尚无 `project_id`，`ShaderPipelineState` 仍携带图片、完整 GLSL 和过程摘要。对照 Hello-Agents 第八章分层记忆与第九章 GSSC，继续采用“借鉴方法、不引入其运行时依赖”的最小方案：任务内轻量 checkpoint、按 `project_id` 隔离的筛选后长期 Memory、约 2,000 token 的确定性 GSSC；首期不引入 embedding、向量库、图数据库、LLM 摘要或图片持久化。依赖可行性检查确认当前 `langgraph==1.2.7`、`langgraph-checkpoint==4.1.1`，`UntrackedValue` 和 `StateGraph.compile(checkpointer=..., store=...)` 可用；PostgreSQL persistence 包尚未安装，应在 F08 实现阶段加入。当前只完成规划复核，`F08` 保持 `not_started`。验证：`make docs-check` 通过。当前目录没有 Git 元数据，无 commit。
+- 2026-07-13：新增 `human_doc/图片复刻无贴图Shader方法论与技术细节.md`，将静态粉色玻璃圆片案例整理为可复用的“参考图 -> 无贴图 Shader”方法论。文档补充运行时契约、参考图量化、椭圆 SDF、Gaussian 分层、方向与径向高光、rim/haze/sheen、WebGL1 `mediump` 数值安全、完整中文注释版 GLSL、Playwright 验证骨架、Pillow/NumPy 指标脚本、四轮 RMSE 迭代、停止条件与常见失败模式；未修改 Shader、前端、后端、Prompt、API、架构或功能状态。验证：`make docs-check` 通过。当前目录没有 Git 元数据，无 commit。
+- 2026-07-10：完成静态粉色玻璃圆片 Shader 的真实 WebGL1 验证及终审修复。5 处 radial Gaussian 均改为先计算 `(radial-target)/sigma` 再平方，避免最低 WebGL1 `mediump` 下小差值先平方的潜在下溢；结构 RED 检查先确认 5 个归一化量缺失，修复后 GREEN 检查通过。保留既有阴影参数，在最多两轮边界内调整现有色团、rim 与双侧高光，并仅新增一个内部 haze 和一个细内侧 sheen：数值修复基线 RMSE `14.4407`，候选 1 为 `11.4405`，最终候选 2 为 `10.8290`；最终参考 bbox `(38, 32, 488, 501)`、渲染 bbox `(37, 31, 489, 502)`，四边均相差 1 px。Playwright CLI wrapper 在真实 WebGL1 中编译、链接、绘制成功，页面为 `ready`，最终控制台 0 errors / 0 warnings；`output/static_pink_glass_orb.png` 为 505×527，临时预览页、浏览器 session 和静态服务器均已清理。`view_image` 复核显示内部雾化、细亮边、缩短的左上高光和纯白右下高光均较终审前改善；残余差异为深左代表点略偏浅、左上高光蓝通道仍偏低，以及解析层次仍比参考平滑。验证：最终 Shader/产物/清理约束扫描通过；`make docs-check` 通过。本次未修改前端、后端、Prompt、API 或 `docs/FEATURES.md`；当前目录没有 Git 元数据，无 commit。
+- 2026-07-10：完成 Shader Memory 与 Context Engineering 设计讨论。确认采用 LangGraph 原生 checkpointer/Store、`project_id` 隔离、Hello-Agents GSSC 思路但不引入其依赖、任务内自动 checkpoint 与经筛选的项目长期记忆；首个闭环接入 Shader 生成/评审图。规格写入 `docs/superpowers/specs/2026-07-10-memory-context-design.md`，新增未开始功能 `F08` 和 D018 决策。首期没有项目列表，切换到新项目后 UI 不能返回旧 project ID，必须先提示用户按需清除当前项目记忆。当前只修改文档，尚未进入实现；设计规格待用户书面复核。验证：`make docs-check` 通过。当前目录没有 Git 元数据，无法提交 commit。
+- 2026-07-10：根据项目当前已验证能力整理阶段总结，新增 `7.10阶段总结.md`。内容覆盖仓库事实来源、分层边界、图片生成 GLSL 与在线 Review 最小闭环、模型配置、过程数据、验证体系及后续缺口；未改变功能状态、架构或 API 契约。验证：`make docs-check` 通过。
+- 2026-07-10：完成 Agent 模型层到 LLM Gateway 的目录和依赖重构。删除 `agent.app.models`，新增中立 `agent.app.contracts.llm`、具体 `agent.app.llms`、`llms/families` 和复用消息 `messages`；`LangChainLLMGateway` 统一真实模型身份、耗时、reasoning、token usage 与安全错误。基础对话、GLSL 生成和渲染评审 Node 均通过构造参数依赖 `LLMGateway`，Graph Builder 负责注入具体实现；State 和 `model_calls` 的模型名改为只使用 `LLMResponse.model_ref`，修复节点配置模型可能只写审计元数据而未控制真实调用的问题。图片消息 helper 迁移到 `messages`，reasoning 日志迁移到 `observability`，新增 AST 架构测试阻止 Node 回连具体 LLM 实现。验证：`uv run pytest tests/unit_tests -q` 通过（57 个测试）；`uv run pytest tests/integration_tests -q` 通过（1 个测试）；`uv run ruff check src/agent backend tests scripts` 通过；`make docs-check` 通过；`uv run langgraph validate` 通过并发现 2 个 graph；`make check` 通过并包含前端构建。未执行带密钥的真实模型调用。当前目录没有 Git 元数据，无法提交 commit。
+- 2026-07-08：按用户反馈拆分模型供应商配置，并修正 provider 与 model family 混用问题。新增 `src/agent/app/models/provider_config.py` 维护供应商 API key/base URL；`qwen_model.py`、`glm_model.py`、`deepseek_model.py`、`openai_model.py` 分别维护模型系列专属参数和特殊响应处理；`llm_factory.py` 改为先解析 `provider:model` 中的 provider，再按真实模型名识别 Qwen/GLM/DeepSeek/OpenAI 系列，例如 `dashscope:qwen3.7-plus` 使用 DashScope 凭据但进入 Qwen 配置。`model_config.py` 只保留通用默认模型名和布尔环境变量解析。同步补充 README 环境变量、Agent config/models 架构说明和 D013 决策记录。验证：先新增 provider 拆分和路由测试并确认 6 个预期失败；实现后目标测试通过；随后针对 `dashscope:` 不等于 Qwen 的问题新增 4 个回归测试并确认 3 个预期失败；修复后目标测试通过。未执行带密钥的真实模型调用。
+- 2026-07-08：完成 Qwen 模型工厂配置调整。`get_model()` 改名为 `get_qwen_model()`；新增 `SHADER_GEN_QWEN_ENABLE_THINKING`，为空时沿用模型默认、设为 true/false 时通过 DashScope OpenAI-compatible `extra_body.enable_thinking` 显式开关 thinking；新增 `SHADER_GEN_QWEN_OUTPUT_THINKING`，默认不保留 `reasoning_content`，显式开启时放入 `AIMessage.additional_kwargs["reasoning_content"]`。同步更新 README、Agent config/models 架构说明和 D012 决策记录。验证：先新增 5 个工厂/配置测试并确认失败，再实现后目标测试通过；`uv run ruff check src/agent/app/config/model_config.py src/agent/app/models/llm_factory.py tests/unit_tests/test_configuration.py` 通过；`uv run pytest tests/unit_tests -q` 通过（32 个测试）；`make docs-check` 通过；`make check` 通过（32 个单元测试、docs-check、LangGraph validate 发现 2 个 graph、前端构建通过）。未执行带密钥的真实模型调用。
+- 2026-07-08：按用户反馈修正 Agent 端 README 的 harness 形态。`src/agent/README.md` 从简单链接列表改为 Agent 模块接手入口，补充当前状态判断、开始前读取顺序、Agent 改动门禁、按需阅读和完成交接要求；`scripts/docs_check.py` 新增 Agent README harness router 检查；`tests/unit_tests/test_harness_contracts.py` 新增 README 契约测试和 docs-check 规则测试。同步把 `docs/FEATURES.md` 的 H01/F06 evidence 改成稳定的“单元测试通过”口径，避免硬编码测试数量导致证据反复过期。验证：先确认新增 README 契约测试和 docs-check README 规则测试按预期失败；修复后 `uv run pytest tests/unit_tests -q` 通过（27 个测试），`make docs-check` 通过，`uv run pytest tests/integration_tests -q` 通过（1 个测试），`uv run ruff check src/agent backend tests scripts` 通过，`make check` 通过（27 个单元测试、docs-check、LangGraph validate 发现 2 个 graph、前端构建通过）。
+- 2026-07-08：修复 harness/Agent 架构审查 findings。`F06` 收窄为 Agent/后端在线 Review 能力，新增 `F07` 承载浏览器端 “canvas 截图 -> review API -> UI 展示” 自动化缺口；新增 `scripts/docs_check.py` 与 `make docs-check`，并接入 `make check`；新增 `tests/unit_tests/test_harness_contracts.py` 固化 feature 状态、H01 证据、Agent service 边界、State reducer 和 docs-check 契约；新增 `agent.app.parsers` 解析边界，移出 GLSL/Review 解析逻辑；`ShaderPipelineState` 的 `model_calls`、`events`、`logs` 改为 append reducer。验证：先运行新增 harness 契约测试并确认 5 个预期失败；修复后 `uv run pytest tests/unit_tests/test_harness_contracts.py -q` 通过（5 个测试），`uv run pytest tests/unit_tests -q` 通过（25 个测试），`make docs-check` 通过，`uv run pytest tests/integration_tests -q` 通过（1 个测试），`uv run ruff check src/agent backend tests scripts` 通过，`make check` 通过（25 个单元测试、docs-check、LangGraph validate 发现 2 个 graph、前端构建通过）。
+- 2026-07-08：完成 harness 相关 Markdown 与 Agent/LangGraph 架构规范审查。确认本次未改功能状态；执行 `make check` 通过（20 个单元测试、LangGraph validate 发现 2 个 graph、前端构建通过），`uv run pytest tests/integration_tests -q` 通过（1 个集成测试），`uv run ruff check src/agent backend tests/unit_tests/test_configuration.py` 通过；额外扫描确认 `docs/FEATURES.md` 当前无 active 功能、后端源码未越过 `agent.app.services.*` 直接 import Agent 内部模型/Prompt/节点或 LangChain 消息类型。审查发现的待改进点以本次回复为准，尚未修改相关规范文档。
+- 2026-07-08：继续按用户澄清修正文档拆分粒度。`src/agent/ARCHITECTURE.md` 改为 Agent 总览和子模块索引；新增 `src/agent/app/ARCHITECTURE.md` 以及 `config`、`graphs`、`states`、`nodes`、`prompts`、`models`、`services`、`tools`、`observability` 各目录下的 `ARCHITECTURE.md`，分别承载对应模块说明和边界；`docs/ARCHITECTURE.md` 和 `docs/DECISIONS.md` 同步说明“子模块旁边也有架构文档”。验证：`uv run langgraph validate` 通过，发现 2 个 graph；`src/agent/app` 一层子目录的 `ARCHITECTURE.md` 存在性检查通过；Markdown 引用检查通过。本次仅改 Markdown，未运行代码测试。
+- 2026-07-08：按用户指出的“仓库即规范”要求拆分 Agent 文档。`src/agent/README.md` 收缩为模块入口、运行命令和事实来源索引；新增 `src/agent/ARCHITECTURE.md` 承载模块说明、目录边界、LangGraph State/Node/Edge/Graph 规则、Models/Tools/Services 边界和新增 Agent 能力流程；`docs/ARCHITECTURE.md` 的目录内规范入口改为优先指向模块旁边的 `ARCHITECTURE.md`；`docs/DECISIONS.md` 记录 D010。验证：`uv run langgraph validate` 通过，发现 2 个 graph；Markdown 引用检查和文件存在性检查通过。本次仅改 Markdown，未运行代码测试。
+- 2026-07-08：根据用户提供的 LangGraph Agent Architecture Guide 更新 `src/agent/README.md`。补充 Agent 端 State、Node、Edge、Graph、Models、Tools、Services 的落地规则，并明确当前 `agent` 与 `shader_generation` 两个图、`generate_glsl_node.py` / `review_render_node.py` 的单职责节点边界、Graph 编排职责、Service 对后端暴露公共用例入口、Prompt YAML 边界和新增 Agent 能力流程。验证：`uv run langgraph validate` 通过，发现 2 个 graph；README 关键文件引用和节点文件存在性检查通过。本次仅改 Markdown，未运行代码测试。
+- 2026-07-08：按用户指出的节点边界修正在线 Review 实现：新增 `src/agent/app/nodes/generate_glsl_node.py` 和 `src/agent/app/nodes/review_render_node.py` 两个独立节点文件，分别承载 GLSL 生成节点和渲染评审节点；删除混合节点文件；新增 `src/agent/app/graphs/shader_generation_graph.py`，图中先跑 `generate_glsl`，当 state 带有 `rendered_image` 和 `glsl` 时再进入 `review_render`；`langgraph.json` 注册 `agent` 和 `shader_generation` 两个图。`agent.app.services.shader_generation` 改为调用 graph，不再自己组装模型消息。补充测试证明节点分属两个文件，且 graph 的模型调用顺序是 `image_to_glsl` -> `shader_review`。验证：`make check` 通过，20 个单元测试通过，LangGraph validate 发现 2 个 graph 且无配置警告，前端构建通过；`uv run pytest tests/integration_tests -q` 通过，1 个测试通过；`uv run ruff check src/agent backend tests/unit_tests/test_configuration.py` 通过。
+- 2026-07-08：完成在线 Review 节点最小实现。新增 Agent `shader_review.yaml` prompt、`review_shader_render()` 公共用例和 review JSON 解析；新增 `POST /api/shader/review`，接收 `original_file`、`rendered_file` 和 `glsl`；前端在 WebGL canvas 第一帧渲染后自动提交 review，并展示评估和建议。验证：先新增目标测试并确认因缺少 review 能力失败；实现后 `uv run pytest tests/unit_tests` 通过，18 个测试通过；`uv run pytest tests/integration_tests -q` 通过，1 个测试通过；`uv run ruff check src/agent backend tests/unit_tests/test_configuration.py` 通过；`uv run langgraph validate` 通过，仍有既有 `$schema` 警告；`npm --prefix frontend run build` 通过；`make check` 通过。
+- 2026-07-08：完成项目结构 Markdown 一致性复查。补充顶层 `README.md`、`backend/README.md`、`docs/ARCHITECTURE.md` 和 `docs/DECISIONS.md` 中的新增代码落点规则：后端 route 注册到 `backend/app/api/router.py`，HTTP route 放 `backend/app/api/routes/`，schema 放 `backend/app/schemas/`，service 表达真实后端用例，SQL 放 `backend/sql/`，Agent 对后端入口放 `agent.app.services.*`，不提前创建空包。执行 Markdown 路径扫描，主事实源中未发现未标注的旧 `backend/app/routes`、`backend/app/database.py`、`backend/app/logging_config.py`、`backend/db` 或旧 Agent 平铺入口引用；剩余旧入口只出现在历史记录或“不兼容旧路径”的决策语境中。
+- 2026-07-08：完成后端内部目录重构：HTTP route 迁移到 `backend/app/api/routes/`，路由聚合入口为 `backend/app/api/router.py`；数据库连接与 schema 初始化迁移到 `backend/app/database/session.py`；请求日志中间件迁移到 `backend/app/middleware/request_logging.py`；日志配置迁移到 `backend/app/core/logging.py`；Shader 响应 schema 迁移到 `backend/app/schemas/shader.py`；手写 SQL schema 记录目录迁移为 `backend/sql/`。验证：先改测试导入并运行 `uv run pytest tests/unit_tests/test_agent_process_store.py::test_initialize_database_schema_executes_sql_files -q`，确认按预期失败于 `ModuleNotFoundError: No module named 'backend.app.database.session'`；迁移后 `uv run pytest tests/unit_tests` 通过，15 个测试通过；`uv run pytest tests/integration_tests` 通过，1 个测试通过；`uv run ruff check backend tests/unit_tests/test_configuration.py tests/unit_tests/test_agent_process_store.py` 通过；`uv run langgraph validate` 通过，仍有既有 `$schema` 警告；旧后端平铺文件和旧 SQL 目录已移除。
+- 2026-07-08：完成 Agent 内部目录彻底改造，`src/agent/` 改为 `src/agent/app/` 规范结构，后端改为只调用 `agent.app.services.shader_generation`，`langgraph.json` 指向 `src/agent/app/graphs/main_graph.py:graph`，Prompt 移至 `src/agent/app/prompts/*.yaml`。验证：先将测试导入改到新结构并运行 `uv run pytest tests/unit_tests/test_configuration.py::test_placeholder -q`，确认按预期失败于 `ModuleNotFoundError: No module named 'agent.app'`；迁移后 `uv run pytest tests/unit_tests` 通过，15 个测试通过；`uv run pytest tests/integration_tests` 通过，1 个测试通过；`uv run ruff check src/agent backend/app/services/shader.py tests/unit_tests/test_configuration.py tests/integration_tests/test_graph.py` 通过；`uv run langgraph validate` 通过，仍有既有 `$schema` 警告；后端边界扫描未发现 Agent 内部模型、Prompt 或 LangChain 消息导入。
+- 2026-07-08：前端上传改为手动开始运行后，运行 `npm --prefix frontend run build`，结果通过；Playwright 刷新 `http://127.0.0.1:5173/` 后确认初始状态存在禁用的“开始运行”按钮，预览区显示“等待上传”。
+- 2026-07-08：前端交互优化后运行 `npm --prefix frontend run build`，结果通过；使用 Playwright 打开 `http://127.0.0.1:5173/` 并检查桌面、390px 移动端截图，上传空状态和预览空状态布局正常。Playwright 控制台只有缺少 `favicon.ico` 的 404。
+- 2026-07-07：`make check` 已通过。
+  - `uv run pytest tests/unit_tests`：8 个测试通过。
+  - `uv run langgraph validate`：配置有效，发现 1 个 graph。警告：`$schema` 不是已识别的配置字段。
+  - `npm --prefix frontend run build`：通过。
+- 2026-07-07：完成文档一致性修复后再次运行 `make check`，结果通过。
+  - `uv run pytest tests/unit_tests`：8 个测试通过。
+  - `uv run langgraph validate`：配置有效，发现 1 个 graph。警告：`$schema` 不是已识别的配置字段。
+  - `npm --prefix frontend run build`：通过。
+- 2026-07-07：补充 Markdown 及时更新规则后运行 `make check`，结果通过。
+  - `uv run pytest tests/unit_tests`：8 个测试通过。
+  - `uv run langgraph validate`：配置有效，发现 1 个 graph。警告：`$schema` 不是已识别的配置字段。
+  - `npm --prefix frontend run build`：通过。
+- 2026-07-07：补充不确定性处理规则后运行 `make check`，结果通过。
+  - `uv run pytest tests/unit_tests`：8 个测试通过。
+  - `uv run langgraph validate`：配置有效，发现 1 个 graph。警告：`$schema` 不是已识别的配置字段。
+  - `npm --prefix frontend run build`：通过。
+- 2026-07-07：修复 D002 和事实源列表后运行 `make check`，结果通过。
+  - `uv run pytest tests/unit_tests`：8 个测试通过。
+  - `uv run langgraph validate`：配置有效，发现 1 个 graph。警告：`$schema` 不是已识别的配置字段。
+  - `npm --prefix frontend run build`：通过。
+
+## 备注
+
+- 2026-07-09：完成生成和评审节点 thinking 常开及思维链保存。`generate_glsl_node.py`、`review_render_node.py` 现在固定以 `thinking=on`、`capture_reasoning=true` 调用模型；新增 `nodes/model_reasoning.py` 提取并通过 `agent.model` logger 打印 `reasoning_content`；模型调用摘要携带 `reasoning_content`，后端写入 `agent_events.reasoning_content` 独立列，SQL 同步加入建表字段和 `ADD COLUMN IF NOT EXISTS`；`POST /api/shader/review` 也接入过程账本写库。验证：先新增/调整 6 个目标测试并确认失败，再实现后目标测试通过；`uv run pytest tests/unit_tests -q` 通过（41 个测试）；目标文件 `uv run ruff check ...` 通过；`make docs-check` 通过；`make check` 通过（41 个单元测试、docs-check、LangGraph validate 发现 2 个 graph、前端构建通过）。未执行带密钥的真实模型调用。
+- 2026-07-09：完成模型 thinking 的 node 级运行时配置。新增 `models/model_options.py` 定义 `model_thinking=default/on/off` 和 `capture_reasoning` 语义参数，`nodes/model_runtime_options.py` 从 LangGraph `runtime.context` 提取配置；`shader_gen_model()` / `get_provider_model()` / `get_qwen_model()` 支持调用级覆盖，Qwen 分支负责翻译为 `extra_body.enable_thinking` 和 `output_thinking`。默认行为仍沿用环境变量，node 不传配置时不改变旧路径。验证：先新增 5 个目标测试并确认失败，再实现后目标测试通过；`uv run pytest tests/unit_tests -q` 通过（40 个测试）；目标文件 `uv run ruff check ...` 通过；`make docs-check` 通过；`make check` 通过（40 个单元测试、docs-check、LangGraph validate 发现 2 个 graph、前端构建通过）。未执行带密钥的真实模型调用。当前工作目录没有 Git 元数据，无法使用 `git status`/`git diff` 复查变更。
+- 2026-07-09：重构生成和评审节点为 config 字典工厂。`generate_glsl_node.py`、`review_render_node.py` 改为 `make_generate_glsl_node(config=...)` / `make_review_render_node(config=...)` 节点工厂，`config` 字典（字段 `model`/`thinking`/`capture_reasoning`/`print_reasoning`，风格同 `model_call`）成为这两个节点模型与思维链的唯一控制源；每节点文件顶部声明默认 config 常量，图装配改为显式调用工厂。删除 `nodes/model_reasoning.py` 的 `reasoning_model_options()`；新增 `nodes/image_content.py` 抽出两节点复用的图片片段构造；两节点不再接收 `runtime` 参数。原因：原实现把这两个节点硬编码为 thinking 常开、思维链常打印，且签名里的 `runtime` 被忽略、测试反而固化了"忽略配置"，无法按节点控制是否开 thinking 或是否打印思维链；改为 config 字典后配置以 `model_call` 风格单一字典表达，"是否开 thinking"和"是否打印思维链"成为两个独立开关。默认值保持原行为（thinking 开、打印开、存库），生产行为不变；`model_calls[*].reasoning_content` 存库契约不变，`backend/` 与 SQL 不动；`model_node` 仍走 `runtime.context`，互不影响。决策记为 D016，D015 相应标注被取代。验证：改写 2 个、新增 4 个目标测试（`print_reasoning=False` 抑制打印但保留存库、`thinking="off"` 透传、`config["model"]` 流入 `model_call` 与状态）；`uv run pytest tests/unit_tests -q` 通过（45 个测试）；`uv run ruff check src/agent tests scripts` 通过；`make docs-check` 通过；`make check` 通过（45 个单元测试、docs-check、LangGraph validate 发现 2 个 graph、前端构建通过）。未执行带密钥的真实模型调用。当前工作目录没有 Git 元数据，无法使用 `git status`/`git diff` 复查变更。
+- 2026-07-08：在线 Review 节点本次未执行带密钥的真实模型调用；自动化检查使用模拟模型覆盖消息内容、图片输入和 JSON 解析。浏览器自动 e2e 覆盖“canvas 截图 -> review API -> UI 展示”完整路径已从 F06 拆为 `F07`，后续实现时补 Playwright 或等价浏览器集成检查。
+- 2026-07-08：排查 `POST /api/shader/generate` 返回 502。日志显示失败点在 `agent.app.services.shader_generation.generate_glsl_from_image()` 调用 `shader_gen_model().ainvoke()` 后，由 OpenAI SDK/httpx 抛出 `APIConnectionError: Connection error.`；当前终端用 curl 和 httpx 访问 DashScope 兼容接口可建立连接并收到 HTTP 响应，说明更像是当次后端进程到外部模型服务的临时网络/TLS/代理问题，而不是图片读取、GLSL 提取或后端路由逻辑错误。未执行带密钥的真实模型调用。
+- 2026-07-08：讨论 `PROGRESS.md` 清理策略。建议暂不设固定周期清理，只在功能 `passing` 或阶段切换时压缩已过时细节；正式规则尚待用户确认。
+- 2026-07-08：按用户反馈调整前端运行时机：上传图片只更新原图预览和文件信息，不再自动调用生成接口；用户点击“开始运行”后才请求后端，已生成后按钮显示“重新运行”。
+- 2026-07-08：讨论 Agent 与前后端解耦、A/B 测试和评估 Agent 方向。初步建议是先做最小 `agent_runner` 契约和运行变体记录，不提前拆微服务；评估 Agent 先作为离线评测/建议者读取运行账本，不进入在线生成主链路。该方向尚待用户确认，未写入正式决策。
+- 2026-07-08：检查当前架构解耦状态。结论：前端通过 `frontend/src/api/` 调后端、`src/agent/` 不反向依赖 `backend/`，整体分层基本成立；主要耦合点是旧结构下后端 service 直接组装 LangChain 消息并调用模型，旧 route 直接引用 agent 模型名和具体生成函数。评估集/评分 agent 建议先做离线评估集和最小评分 runner，复用现有 `agent_runs`/`agent_events` 账本，暂不做自动自我修复。
+- 2026-07-08：完成后端与 Agent 边界重构：当时新增 Agent 公共接口文件作为图片到 GLSL 的入口，后端 route/service 不再直接依赖 `agent.models`、`agent.prompt_loader` 或 LangChain 消息类型；该入口已在后续彻底改造中迁移为 `agent.app.services.shader_generation`。验证：`uv run pytest tests/unit_tests` 通过，15 个测试通过；目标文件 `ruff check` 通过；`uv run langgraph validate` 通过，仍有既有 `$schema` 警告。
+- 2026-07-08：讨论日志和写库职责边界。结论：浏览器前端只负责用户可见状态和必要交互埋点入口，不直接写业务库；后端负责请求日志、错误日志、数据库连接、schema 初始化和业务过程数据写入；Agent 侧只产出结构化事件/结果，由后端编排写入；后续 ShaderForge 领域层可返回评分/产物摘要，但不直接依赖 FastAPI 连接池。
+- 2026-07-08：澄清 Agent 运行过程数据获取方式。后端可以拿到 Agent 日志和模型调用数据，但不应读取 Agent 内部实现；Agent 应通过公共接口返回结构化 `events`、`logs`、`model_calls` 或接受后端传入的事件记录器，由后端统一落库。当前 `ShaderGenerationResult` 只返回 GLSL 和模型名，后续如需 token、latency、prompt_version、阶段事件，需要扩展公共接口结果或事件回调。
+- 2026-07-08：完成 Agent 运行过程数据解耦改造的最小版：`ShaderGenerationResult` 新增 `model_calls`、`events` 和 `logs`，Agent 公共接口返回模型调用摘要；后端成功路径把这些结构化摘要追加写入 `agent_events` 和 `agent_logs`，仍由后端统一管理数据库连接和过程账本。验证：`uv run pytest tests/unit_tests` 通过，15 个测试通过；目标文件 `ruff check` 通过；`uv run langgraph validate` 通过，仍有既有 `$schema` 警告；后端依赖扫描未发现 Agent 内部模型、Prompt 或 LangChain 消息导入。
+- 2026-07-08：讨论 Agent 与后端是否物理独立。当前建议：保持同一仓库、同一后端进程内调用，但维持清晰公共接口和模块边界；暂不拆独立 Agent 服务。只有出现独立扩缩容、长任务队列、资源隔离、不同发布节奏、多语言/多运行时或故障隔离需求时，再拆成独立服务。
+- 2026-07-08：完成现有前端交互优化实现：上传入口支持点击和拖拽，生成中禁用重复提交，显示文件名和大小，GLSL 区增加复制按钮，FastAPI JSON 错误改为展示 `detail` 文案。未改后端 API 契约，未扩展 F01 表单。
+- 2026-07-08：完成现有前端“上传图片 -> 生成 GLSL -> WebGL 预览”交互优化设计，规格写入 `docs/superpowers/specs/2026-07-08-frontend-interaction-design.md`。本次范围不扩展 F01 的完整任务提交表单，不改变后端 API 契约。当前工作目录没有 Git 仓库元数据，无法提交 commit。
+- 2026-07-07：将 Shader 生成接口中的过程数据写入编排抽离到 `backend/app/services/agent_process_store.py`，route 只调用服务层函数；写库日志来源改为 `backend.agent_process`。
+- 2026-07-07：完善 Agent 过程数据写库日志。`POST /api/shader/generate` 写库成功时打印 `agent.process.database.write.succeeded`，写库失败时打印 `agent.process.database.write.failed`。
+- 2026-07-07：实现 Agent 过程数据写入路径。`DATABASE_URL` 配置后后端启动会执行当时的手写 SQL 目录；新增 `backend/app/services/agent_process_store.py` 写入 `agent_runs`、`agent_events`、`agent_logs`；`POST /api/shader/generate` 在连接池可用时写入运行、事件、日志并更新运行状态。该 SQL 目录已在后续后端结构重构中迁移为 `backend/sql/`。
+- 2026-07-07：在 `agent_runs` 中新增 `glsl_model_name` 和 `vision_model_name` 字段，分别记录 GLSL 生成模型和视觉分析模型型号。
+- 2026-07-07：修复表结构审查问题：`agent_logs` 改用 `(run_id, event_seq)` 外键关联 `agent_events(run_id, seq)`，事件时间线改依赖 `(run_id, seq)` 稳定顺序，并明确 `debug` 只用于运行内关键调试摘要。
+- 2026-07-07：审查当前 `agent_runs`、`agent_events`、`agent_logs` 表结构设计。主要风险是 `agent_logs.event_id` 未约束必须属于同一个 `run_id`，以及事件时间线索引与稳定排序字段 `seq` 不完全一致；尚未修改 schema。
+- 2026-07-07：在最小 Agent 过程数据 SQL 中增加 `agent_logs` 表，用于保存挂在 `agent_runs`/`agent_events` 下的安全诊断日志摘要；普通应用日志仍继续走 Python logging。该 SQL 文件已在后续迁移到 `backend/sql/001_agent_process.sql`。
+- 2026-07-07：将 Agent 过程数据 SQL 的说明和数据库注释改为中文，并在 `AGENTS.md` 补充“文档、计划、注释尽量使用中文”的长期规则。
+- 2026-07-07：新增最小 Agent 过程数据 SQL，记录 `agent_runs` 和 `agent_events`，并在 `backend/README.md` 补充后端 SQL 目录规则。尚未接入自动建表或迁移执行；该 SQL 文件已在后续迁移到 `backend/sql/001_agent_process.sql`。
+- 2026-07-07：完成 Agent 过程数据数据库设计分析。建议先复用现有 Postgres/`asyncpg` 入口，按 `agent_runs` + `agent_events` 建最小过程数据账本；普通应用日志继续走 logging，不直接落业务库。尚未进入实现，下一步需确认数据库目标是否包含 LangGraph 中断恢复。
+- 当前代码已经有基础图片到 GLSL 路径，但尚未实现 SVG 目标流程：Routing、Agent 分析、Intent IR、DSL 节点图、Renderer、Oracle/局部损失、Search Engine、VLM/HITL 或 Store。
+- 已在 `docs/ARCHITECTURE.md` 写入后续开发采用的项目结构规范：分层 monorepo，核心领域能力进入 `src/shaderforge/`，但不提前创建空目录。
+- 已将前端细则写入 `frontend/README.md`，后端细则写入 `backend/README.md`，总架构文档只保留全局边界和目录规范入口。
+- 已同步修复入口文档：`AGENTS.md`、`README.md`、`docs/ARCHITECTURE.md` 和 `docs/FEATURES.md` 现在都指向同一套结构边界和验证规则。
+- 已补充 Markdown 及时更新规则：全局规则在 `AGENTS.md`、`README.md`、`docs/ARCHITECTURE.md`，目录细则在 `frontend/README.md` 和 `backend/README.md`。
+- 已补充不确定性处理规则：影响架构、契约、数据、安全或验收且仓库事实无法判断的问题，需要先向用户确认。
+- 已同步 `docs/DECISIONS.md` 的 D002 与本文件事实源列表，纳入 `README.md`、`frontend/README.md`、`backend/README.md`。
+- 当前工作目录没有 Git 仓库元数据，所以进度通过文件记录，而不是通过 commit 记录。
