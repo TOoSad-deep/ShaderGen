@@ -6,7 +6,7 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 
 ## 常用命令
 
-- 安装：`make setup`
+- 安装：`make setup`（包括 Playwright Chromium）
 - 初始化 Memory PostgreSQL：`make setup-memory-postgres`
 - LangGraph：`make dev-agent`
 - 后端：`make dev-backend`
@@ -15,6 +15,9 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 - Memory PostgreSQL 验收：`make test-memory-postgres`
 - 文档边界检查：`make docs-check`
 - 完整验证：`make check`
+- M5 无模型 smoke：`make benchmark-ai-off`
+- M5 真实模型 benchmark：`make benchmark-png-to-shader QUALITY_PRESET=balanced MODEL_CALL_BUDGET=80`（显式按量调用）
+- M5 人工盲评 gate：`make benchmark-gate BENCHMARK_OUTPUT=<run-dir> HUMAN_REVIEW=<review.json>`
 
 ## 硬约束
 
@@ -26,6 +29,7 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 - 架构、目录边界、命令、环境变量、功能状态或前后端契约变化时，必须同步更新对应 Markdown。
 - 对仓库事实无法确定且会影响架构、契约、数据、安全或验收的问题，先向用户确认，不要自行猜测。
 - 密钥只放 `.env`，不要提交真实 API key。
+- 真实模型 benchmark 不进入普通测试；必须使用固定 manifest、显式调用开关和整套硬预算，失败产物不得覆盖或删除。
 
 ## 按需阅读
 

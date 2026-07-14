@@ -14,12 +14,17 @@ from agent.app.contracts.llm import (
     LLMInvocationError,
     LLMResponse,
     LLMResponseError,
+    ModelIdentitySource,
     TokenUsage,
 )
-from agent.app.llms.client_factory import create_chat_model
+from agent.app.llms.client_factory import (
+    ChatModelBinding,
+    create_chat_model_binding,
+    resolved_model_reference,
+)
 from agent.app.llms.provider_config import PROVIDER_NAMES
 
-ClientFactory = Callable[[LLMCallOptions], BaseChatModel]
+ClientFactory = Callable[[LLMCallOptions], BaseChatModel | ChatModelBinding]
 
 
 class LangChainLLMGateway:
@@ -27,7 +32,7 @@ class LangChainLLMGateway:
 
     def __init__(
         self,
-        client_factory: ClientFactory = create_chat_model,
+        client_factory: ClientFactory = create_chat_model_binding,
         clock: Callable[[], float] = perf_counter,
     ) -> None:
         """注入客户端工厂和单调时钟."""
@@ -42,7 +47,8 @@ class LangChainLLMGateway:
         """调用 LangChain 客户端并返回统一响应."""
         provider = _provider_name(options.model_ref)
         try:
-            client = self._client_factory(options)
+            created = self._client_factory(options)
+            binding = _normalize_binding(created, options)
         except Exception as exc:
             raise LLMConfigurationError(
                 "LLM 配置无效。",
@@ -52,7 +58,7 @@ class LangChainLLMGateway:
 
         started_at = self._clock()
         try:
-            message = await client.ainvoke(list(messages))
+            message = await binding.client.ainvoke(list(messages))
         except Exception as exc:
             raise LLMInvocationError(
                 "LLM 调用失败。",
@@ -70,19 +76,61 @@ class LangChainLLMGateway:
                 retryable=False,
             )
 
+        model_ref, identity_source = _actual_model_ref(message, binding)
         return LLMResponse(
             message=message,
             text=message.text,
             reasoning_content=_reasoning_content(message),
-            model_ref=options.model_ref,
+            model_ref=model_ref,
             latency_ms=latency_ms,
             usage=_token_usage(message),
+            requested_model_ref=options.model_ref,
+            model_identity_source=identity_source,
         )
 
 
 def _provider_name(model_ref: str) -> str | None:
+    try:
+        provider, _ = resolved_model_reference(model_ref)
+        return provider
+    except ValueError:
+        pass
     prefix, separator, _ = model_ref.partition(":")
     return prefix if separator and prefix in PROVIDER_NAMES else None
+
+
+def _normalize_binding(
+    created: BaseChatModel | ChatModelBinding,
+    options: LLMCallOptions,
+) -> ChatModelBinding:
+    if isinstance(created, ChatModelBinding):
+        return created
+    provider, model_name = resolved_model_reference(options.model_ref)
+    return ChatModelBinding(
+        client=created,
+        requested_model_ref=options.model_ref,
+        resolved_provider=provider,
+        configured_model_name=model_name,
+    )
+
+
+def _actual_model_ref(
+    message: AIMessage,
+    binding: ChatModelBinding,
+) -> tuple[str, ModelIdentitySource]:
+    reported = message.response_metadata.get(
+        "model_name"
+    ) or message.response_metadata.get("model")
+    if isinstance(reported, str) and reported.strip():
+        name = reported.strip()
+        prefix, separator, remainder = name.partition(":")
+        if separator and prefix in PROVIDER_NAMES and remainder:
+            return name, "response_metadata"
+        return f"{binding.resolved_provider}:{name}", "response_metadata"
+    return (
+        f"{binding.resolved_provider}:{binding.configured_model_name}",
+        "configured_fallback",
+    )
 
 
 def _reasoning_content(message: AIMessage) -> str | None:

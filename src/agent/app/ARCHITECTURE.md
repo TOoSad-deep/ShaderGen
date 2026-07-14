@@ -6,13 +6,16 @@
 
 ```text
 backend/app/services
-  -> agent.app.services
+  -> agent.app.services.shader_generation / png_to_shader_v1
   -> agent.app.graphs（组合具体 Gateway）
   -> agent.app.nodes
   -> agent.app.context / memory / contracts / prompts / parsers / messages / observability
 
 agent.app.llms
   -> 实现 agent.app.contracts.llm.LLMGateway
+
+agent.app.graphs / deterministic nodes
+  -> 编排 shaderforge.public 的测量、校验、渲染、评分、选择和 Artifact 能力
 ```
 
 关键依赖方向：`graphs -> nodes -> agent.app.contracts <- agent.app.llms`。
@@ -23,14 +26,14 @@ agent.app.llms
 - `contracts/`：跨 State、Node、Graph、适配器共享的中立契约。
 - `graphs/`：LangGraph 图入口、条件边和依赖装配。
 - `states/`：图 State 和 Runtime Context 类型。
-- `nodes/`：只依赖 Gateway 抽象的主要 Node 工厂。
+- `nodes/`：主要 Node 工厂；模型角色只依赖 Gateway 抽象，M3 确定性 Node 可依赖 ShaderForge 公共能力。
 - `llms/`：LangChain Gateway、provider 配置、model-family 客户端和统一响应。
 - `messages/`：两个以上 Node 复用的消息构造 helper。
 - `memory/`：项目长期记忆结构和抽象 Store 操作。
 - `context/`：不访问 Store 的纯 GSSC Context Builder。
 - `prompts/`：Prompt YAML 和加载器。
 - `parsers/`：模型输出纯解析器。
-- `services/`：后端可调用的 Agent 用例入口。
+- `services/`：后端可调用的 Agent 用例入口；M4 的 V1 service 映射 Graph 输入/输出、隔离 checkpoint thread，并提供固定 Artifact 名称访问，不暴露 Graph 或文件路径。
 - `tools/`：Agent 可调用的外部动作能力。
 - `observability/`：reasoning 日志策略、回调、追踪和指标入口。
 

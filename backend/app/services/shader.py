@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from agent.app.services import shader_generation
+from agent.app.services import png_to_shader_v1, shader_generation
 
 MemoryUnavailableError = shader_generation.MemoryUnavailableError
-default_shader_generation_service = (
-    shader_generation.default_shader_generation_service
-)
+default_shader_generation_service = shader_generation.default_shader_generation_service
+NoValidatedShaderError = png_to_shader_v1.NoValidatedShaderError
+PublicArtifactNotFoundError = png_to_shader_v1.PublicArtifactNotFoundError
+default_png_to_shader_v1_service = png_to_shader_v1.default_png_to_shader_v1_service
 
 
 class ProjectBusyError(RuntimeError):
@@ -26,7 +28,7 @@ class ProjectLockRegistry:
         self._guard = asyncio.Lock()
 
     @asynccontextmanager
-    async def hold(self, project_id: str):
+    async def hold(self, project_id: str) -> AsyncIterator[None]:
         """占用 project_id；已占用时立即抛出冲突."""
         async with self._guard:
             if project_id in self._active:
@@ -42,6 +44,11 @@ class ProjectLockRegistry:
 def get_shader_generation_models() -> tuple[str, str]:
     """返回当前 Shader 生成链路的模型名."""
     return shader_generation.shader_generation_models()
+
+
+def get_png_to_shader_v1_models() -> tuple[str, str]:
+    """返回 PNG-to-Shader V1 的 Author 与视觉模型名."""
+    return png_to_shader_v1.png_to_shader_v1_models()
 
 
 async def generate_shader_from_image(
@@ -60,6 +67,38 @@ async def generate_shader_from_image(
         run_id=run_id,
         service=service,
     )
+
+
+async def generate_procedural_shader_from_image(
+    image: bytes,
+    content_type: str,
+    *,
+    project_id: str,
+    run_id: str,
+    quality_preset: str,
+    instruction: str,
+    service: png_to_shader_v1.PngToShaderV1Service,
+) -> png_to_shader_v1.PngToShaderV1Result:
+    """通过 Agent 公共接口执行 V1 自动闭环."""
+    return await png_to_shader_v1.generate_png_to_shader_v1(
+        image,
+        content_type,
+        project_id=project_id,
+        run_id=run_id,
+        quality_preset=quality_preset,
+        instruction=instruction,
+        service=service,
+    )
+
+
+def read_shader_run_artifact(
+    run_id: str,
+    artifact_name: str,
+    *,
+    service: png_to_shader_v1.PngToShaderV1Service,
+) -> png_to_shader_v1.PublicArtifact:
+    """通过 V1 Service 读取固定白名单 Artifact."""
+    return service.read_public_artifact(run_id, artifact_name)
 
 
 async def review_shader_render(
@@ -93,3 +132,12 @@ async def clear_shader_project_memory(
 ) -> shader_generation.ClearMemoryResult:
     """通过 Agent 公共接口清除项目 Memory."""
     return await shader_generation.clear_project_memory(project_id, service=service)
+
+
+async def clear_png_to_shader_project_memory(
+    project_id: str,
+    *,
+    service: png_to_shader_v1.PngToShaderV1Service,
+) -> png_to_shader_v1.ClearPngToShaderMemoryResult:
+    """清除 V1 checkpoint 和其长期策略 Memory."""
+    return await service.clear_memory(project_id)

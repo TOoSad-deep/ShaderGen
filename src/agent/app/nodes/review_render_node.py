@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from langchain_core.messages import HumanMessage
@@ -21,22 +22,24 @@ REVIEW_RENDER_MODEL_CONFIG = NodeModelConfig(
     call=LLMCallOptions(
         model_ref=SHADER_GEN_MODEL_NAME,
         thinking="on",
-        capture_reasoning=True,
+        capture_reasoning=False,
     ),
-    print_reasoning=True,
+    print_reasoning=False,
 )
+
+ReviewRenderNode = Callable[[ShaderPipelineState], Awaitable[ShaderPipelineState]]
 
 
 def make_review_render_node(
     gateway: LLMGateway,
     config: NodeModelConfig = REVIEW_RENDER_MODEL_CONFIG,
-):
+) -> ReviewRenderNode:
     """创建渲染评审 Gateway Node."""
 
     async def review_render(state: ShaderPipelineState) -> ShaderPipelineState:
         """根据原图、渲染图和 GLSL 返回评审 partial State."""
         context_pack = state.get("context_pack")
-        content: list[dict[str, Any]] = [
+        content: list[str | dict[Any, Any]] = [
             {"type": "text", "text": SHADER_REVIEW_PROMPT}
         ]
         if context_pack:
@@ -53,9 +56,7 @@ def make_review_render_node(
                 {"type": "text", "text": "原图："},
                 image_url_part(state["image"], state["content_type"]),
                 {"type": "text", "text": "当前渲染图："},
-                image_url_part(
-                    state["rendered_image"], state["rendered_content_type"]
-                ),
+                image_url_part(state["rendered_image"], state["rendered_content_type"]),
                 {
                     "type": "text",
                     "text": f"当前 GLSL 代码：\n```glsl\n{state['glsl']}\n```",
@@ -76,7 +77,7 @@ def make_review_render_node(
             "latency_ms": response.latency_ms,
             "output_chars": len(response.text),
         }
-        if response.reasoning_content:
+        if config.call.capture_reasoning is True and response.reasoning_content:
             model_call["reasoning_content"] = response.reasoning_content
 
         review_summary = build_review_summary(review.evaluation, review.suggestions)

@@ -1,11 +1,19 @@
+from hashlib import sha256
+
 import pytest
 from langchain_core.messages import AIMessage
 
 from agent.app.config.model_config import NodeModelConfig
 from agent.app.contracts.llm import LLMCallOptions, LLMResponse
 from agent.app.graphs.shader_generation_graph import build_shader_generation_graph
-from agent.app.nodes.generate_glsl_node import make_generate_glsl_node
-from agent.app.nodes.review_render_node import make_review_render_node
+from agent.app.nodes.generate_glsl_node import (
+    GENERATE_GLSL_MODEL_CONFIG,
+    make_generate_glsl_node,
+)
+from agent.app.nodes.review_render_node import (
+    REVIEW_RENDER_MODEL_CONFIG,
+    make_review_render_node,
+)
 
 
 class FakeGateway:
@@ -84,7 +92,32 @@ async def test_generate_node_logs_reasoning_when_enabled(caplog) -> None:
     result = await node({"image": b"image", "content_type": "image/png"})
 
     assert result["model_calls"][0]["reasoning_content"] == "生成推理"
-    assert "生成推理" in caplog.text
+    assert "生成推理" not in caplog.text
+    assert sha256("生成推理".encode()).hexdigest() in caplog.text
+
+
+@pytest.mark.anyio
+async def test_legacy_defaults_do_not_capture_unexpected_reasoning() -> None:
+    model_ref = "dashscope:qwen3.7-plus"
+    gateway = FakeGateway(
+        [
+            llm_response(
+                "void main() {}",
+                model_ref=model_ref,
+                reasoning_content="供应商意外返回的内部推理",
+            )
+        ]
+    )
+
+    result = await make_generate_glsl_node(gateway)(
+        {"image": b"image", "content_type": "image/png"}
+    )
+
+    assert GENERATE_GLSL_MODEL_CONFIG.call.capture_reasoning is False
+    assert GENERATE_GLSL_MODEL_CONFIG.print_reasoning is False
+    assert REVIEW_RENDER_MODEL_CONFIG.call.capture_reasoning is False
+    assert REVIEW_RENDER_MODEL_CONFIG.print_reasoning is False
+    assert "reasoning_content" not in result["model_calls"][0]
 
 
 @pytest.mark.anyio

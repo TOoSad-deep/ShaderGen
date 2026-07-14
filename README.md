@@ -21,13 +21,15 @@ ShaderGen/
 │   └── sql/         # 后端启动时按文件名顺序执行的手写 SQL
 ├── src/
 │   ├── agent/       # LangGraph Agent 包，内部入口为 agent.app.*
-│   └── shaderforge/ # 后续领域核心流水线，按功能需要创建
+│   └── shaderforge/ # 确定性领域核心：契约、测量、校验、渲染、评分、制品
 ├── tests/           # Python 单元测试和集成测试
 ├── docs/            # 架构、决策、功能状态
 └── human_doc/       # 用户提供的权威材料
 ```
 
-`src/shaderforge/` 不是当前必须存在的空目录；只有功能需要真实实现时才创建对应子包。
+`src/shaderforge/` 只创建已经进入 active 功能且有真实实现与测试的子包，不预建空目录。
+
+`make setup` 会同步 Python/前端依赖，并安装 M1 WebGL1 Renderer 使用的 Playwright Chromium。只需补装浏览器时可运行 `uv run playwright install chromium`。
 
 ## 常用命令
 
@@ -41,6 +43,9 @@ make test
 make docs-check
 make test-memory-postgres
 make check
+make benchmark-ai-off
+make benchmark-png-to-shader QUALITY_PRESET=balanced MODEL_CALL_BUDGET=80
+npm --prefix frontend run e2e:procedural-v1
 ```
 
 服务默认地址：
@@ -76,7 +81,11 @@ LOG_LEVEL=
 
 `DATABASE_URL` 配置后，Backend 使用独立 psycopg pool 运行 LangGraph Checkpointer/Store，并使用现有 asyncpg pool 写 Agent 过程账本。首次部署或 persistence 包升级后先执行 `make setup-memory-postgres`。`make test-memory-postgres` 优先使用 `TEST_DATABASE_URL`；未配置时会基于 `DATABASE_URL` 创建随机临时数据库，测试结束后自动删除。
 
+由于 F09 M5 自动与人工质量门禁均为 no-go，页面当前默认使用 `legacy`；`procedural_v1` 仅作为明确标注的实验模式手动选择。V1 服务端完成 WebGL1 render/evaluate/review/refine；正常结果返回 `current_best`、评分和 final Artifact，Evaluator 不可用时返回明确的 WebGL-valid `unscored_fallback`，不伪造评分。Legacy 保留“浏览器渲染后调用 `/review`”路径，并有 180 秒服务端模型 timeout。公开 Artifact API 只允许 final-render、metrics 和 manifest。
+
 `SHADER_GEN_MODEL_NAME` 支持 `provider:model` 形式，例如 `dashscope:qwen3.7-plus`。`dashscope`、`openai`、`deepseek`、`glm` 表示凭据和 base URL 来源；真实模型名再决定使用 Qwen、GLM、DeepSeek 或 OpenAI 系列配置。
+
+F09 M5 的确定性 AI-off smoke 可直接运行；真实 10 例 benchmark 会产生按量模型调用，必须使用显式命令和硬预算。报告、逐例失败证据和盲评页面写入 `output/benchmarks/png-to-shader-v1/`。当前正式 run `m5-20260713-balanced-v3` 已完成自动和 10 项独立人工盲评，两个门禁均为 `failed`，灰度 no-go；F09 保持 active。
 
 ## 开发规则
 

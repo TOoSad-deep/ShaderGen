@@ -12,4 +12,5 @@ def configure_logging() -> None:
         level=logging.WARNING,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
     )
-    logging.getLogger("backend").setLevel(level)
+    for logger_name in ("backend", "agent", "shaderforge"):
+        logging.getLogger(logger_name).setLevel(level)

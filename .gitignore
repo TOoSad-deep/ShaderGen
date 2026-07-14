@@ -169,6 +169,13 @@ frontend/*.tsbuildinfo
 frontend/vite.config.js
 frontend/vite.config.d.ts
 
+# Runtime-generated ShaderGen artifacts. Curated screenshots and golden
+# fixtures under output/playwright may still be committed explicitly.
+output/benchmarks/
+output/png-to-shader/
+output/playwright/*.log
+output/playwright/*.snapshot.txt
+
 # 本地 IDE、浏览器自动化和代理工作状态
 .DS_Store
 .idea/

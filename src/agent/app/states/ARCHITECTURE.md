@@ -6,6 +6,7 @@
 
 - `State`：基础对话图状态，继承 `MessagesState`。
 - `ShaderPipelineState`：图片到 GLSL 及渲染评审状态。
+- `PngToShaderV1State`：M3 自动闭环状态，区分小型路由摘要和当前调用的大对象/证据。
 - `Context`：LangGraph runtime context，用于传入运行时配置，例如 `model_thinking` 和 `capture_reasoning`。
 
 ## State 规则
@@ -25,3 +26,10 @@
 - 输出：`evaluation`、`suggestions`。
 - 模型元数据：`glsl_model_name`、`vision_model_name`、`review_model_name`。
 - 当前调用过程摘要：`model_calls`、`events`、`logs`，均不进入 checkpoint。
+
+## `PngToShaderV1State` 边界
+
+- checkpoint 摘要：phase、iteration、current candidate/best id 与 hash、best total loss/score summary、compile/visual/no-improvement/model 计数器、candidate sequence、stop reason。
+- `UntrackedValue`：参考图、GLSL、渲染 PNG、TargetMeasurements、完整分析/Review/Score、CandidateRecord、ContextPack、预算快照、run id、model calls/events/logs 和 final result。
+- Candidate 的可恢复真相源是 `LocalArtifactStore`，不是 checkpoint 中的大对象。M3 是同步闭环；跨进程中断恢复和异步 Run API 属于 V1.1，不能假定 `UntrackedValue` 可恢复。
+- Graph State 不保存 Renderer、Artifact Store 或 Gateway 实例；这些依赖由 Builder/运行时 registry 持有。

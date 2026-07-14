@@ -5,11 +5,23 @@ import { type DragEvent, useCallback, useEffect, useRef, useState } from "react"
 import {
   clearProjectMemory,
   generateShader,
+  resolveShaderApiUrl,
   reviewShader,
+  ShaderApiError,
+  type GenerationMode,
   type MemoryStatus,
+  type QualityPreset,
+  type ShaderApiFailure,
+  type ShaderResponse,
   type ShaderReview,
 } from "./api/shader";
-import { ShaderPreview } from "./components/ShaderPreview";
+import { FailureDetails } from "./components/FailureDetails";
+import { RunProgress } from "./components/RunProgress";
+import { ScoreSummary } from "./components/ScoreSummary";
+import {
+  ShaderPreview,
+  type ClientCompatibilityReport,
+} from "./components/ShaderPreview";
 
 const CURRENT_PROJECT_KEY = "shadergen.currentProjectId";
 const RECENT_PROJECTS_KEY = "shadergen.recentProjects";
@@ -17,6 +29,31 @@ const RECENT_PROJECTS_KEY = "shadergen.recentProjects";
 interface RecentProject {
   id: string;
   lastUsedAt: string;
+}
+
+type RequestStopKind = "user" | "timeout" | "unmount";
+
+interface ActiveGenerationRequest {
+  controller: AbortController;
+  timeoutId: number;
+  stopKind: RequestStopKind | null;
+  timeoutMs: number;
+}
+
+const DEFAULT_REQUEST_TIMEOUT_MS: Record<QualityPreset | "legacy", number> = {
+  legacy: 4 * 60 * 1000,
+  fast: 4 * 60 * 1000,
+  balanced: 7 * 60 * 1000,
+  high: 12 * 60 * 1000,
+};
+
+function generationRequestTimeoutMs(
+  generationMode: GenerationMode,
+  qualityPreset: QualityPreset,
+): number {
+  const configured = Number(import.meta.env.VITE_GENERATION_REQUEST_TIMEOUT_MS);
+  if (Number.isFinite(configured) && configured >= 10_000) return configured;
+  return DEFAULT_REQUEST_TIMEOUT_MS[generationMode === "legacy" ? "legacy" : qualityPreset];
 }
 
 function loadRecentProjects(): RecentProject[] {
@@ -47,11 +84,18 @@ export function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileInfo, setFileInfo] = useState("");
   const [glsl, setGlsl] = useState("");
+  const [generationMode, setGenerationMode] = useState<GenerationMode>("legacy");
+  const [qualityPreset, setQualityPreset] = useState<QualityPreset>("balanced");
+  const [instruction, setInstruction] = useState("");
+  const [runResult, setRunResult] = useState<ShaderResponse | null>(null);
+  const [compatibility, setCompatibility] = useState<ClientCompatibilityReport | null>(null);
   const [review, setReview] = useState<ShaderReview | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [reviewError, setReviewError] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [apiFailure, setApiFailure] = useState<ShaderApiFailure | null>(null);
+  const [requestStopNotice, setRequestStopNotice] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [copied, setCopied] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(() =>
@@ -62,6 +106,7 @@ export function App() {
   const [projectMessage, setProjectMessage] = useState("");
   const copyTimerRef = useRef<number | null>(null);
   const reviewRequestRef = useRef(0);
+  const activeGenerationRef = useRef<ActiveGenerationRequest | null>(null);
 
   useEffect(() => {
     return () => {
@@ -72,12 +117,44 @@ export function App() {
   useEffect(() => {
     return () => {
       if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+      const active = activeGenerationRef.current;
+      if (active) {
+        active.stopKind = "unmount";
+        window.clearTimeout(active.timeoutId);
+        active.controller.abort();
+      }
     };
   }, []);
 
+  const rememberProject = useCallback((id: string) => {
+    setRecentProjects((current) => {
+      const next = [
+        { id, lastUsedAt: new Date().toISOString() },
+        ...current.filter((project) => project.id !== id),
+      ].slice(0, 10);
+      localStorage.setItem(CURRENT_PROJECT_KEY, id);
+      localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(next));
+      return next;
+    });
+    setProjectId(id);
+  }, []);
+
+  function clearRunOutput() {
+    setGlsl("");
+    setRunResult(null);
+    setCompatibility(null);
+    setReview(null);
+    setReviewError("");
+    setReviewLoading(false);
+    setError("");
+    setApiFailure(null);
+    setRequestStopNotice("");
+    setCopied(false);
+    reviewRequestRef.current += 1;
+  }
+
   async function handleFile(file: File) {
     if (loading) return;
-
     if (!file.type.startsWith("image/")) {
       setError("请上传图片文件。");
       return;
@@ -86,68 +163,90 @@ export function App() {
     setImageUrl(URL.createObjectURL(file));
     setSelectedFile(file);
     setFileInfo(`${file.name} · ${formatBytes(file.size)}`);
-    setGlsl("");
-    setReview(null);
-    setReviewError("");
-    setReviewLoading(false);
-    setError("");
-    setCopied(false);
-    reviewRequestRef.current += 1;
-  }
-
-  function rememberProject(id: string) {
-    const next = [
-      { id, lastUsedAt: new Date().toISOString() },
-      ...recentProjects.filter((project) => project.id !== id),
-    ].slice(0, 10);
-    localStorage.setItem(CURRENT_PROJECT_KEY, id);
-    localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(next));
-    setProjectId(id);
-    setRecentProjects(next);
+    clearRunOutput();
   }
 
   function resetWorkspace() {
     setImageUrl(null);
     setSelectedFile(null);
     setFileInfo("");
-    setGlsl("");
-    setReview(null);
-    setReviewError("");
-    setReviewLoading(false);
-    setError("");
-    setCopied(false);
+    clearRunOutput();
     setMemoryStatus(null);
-    reviewRequestRef.current += 1;
   }
 
   async function handleRun() {
-    if (!selectedFile || loading) return;
+    if (!selectedFile || loading || activeGenerationRef.current) return;
 
-    setGlsl("");
-    setReview(null);
-    setReviewError("");
-    setReviewLoading(false);
-    setError("");
-    setCopied(false);
+    clearRunOutput();
     setLoading(true);
-    reviewRequestRef.current += 1;
+    const controller = new AbortController();
+    const timeoutMs = generationRequestTimeoutMs(generationMode, qualityPreset);
+    const active: ActiveGenerationRequest = {
+      controller,
+      timeoutId: 0,
+      stopKind: null,
+      timeoutMs,
+    };
+    active.timeoutId = window.setTimeout(() => {
+      if (activeGenerationRef.current !== active) return;
+      active.stopKind = "timeout";
+      controller.abort();
+    }, timeoutMs);
+    activeGenerationRef.current = active;
 
     try {
-      const result = await generateShader(selectedFile, projectId ?? undefined);
+      const result = await generateShader(selectedFile, {
+        projectId: projectId ?? undefined,
+        generationMode,
+        qualityPreset,
+        instruction: generationMode === "procedural_v1" ? instruction.trim() : "",
+        signal: controller.signal,
+      });
       rememberProject(result.project_id);
       setMemoryStatus(result.memory_status);
       setProjectMessage("");
+      setRunResult(result);
       setGlsl(result.glsl);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "生成失败。");
+      if (result.generation_mode === "procedural_v1") setReview(result.review ?? null);
+    } catch (reason) {
+      if (active.stopKind === "user") {
+        setRequestStopNotice(
+          "已停止等待本次响应；这里只中止了浏览器请求，没有向服务端发送取消指令。服务端任务可能仍在运行，请先查看后端日志或稍后再重试。",
+        );
+      } else if (active.stopKind === "timeout") {
+        setRequestStopNotice(
+          `浏览器等待超过 ${Math.round(active.timeoutMs / 60_000)} 分钟，已停止等待响应；这不代表服务端任务已取消。`,
+        );
+      } else if (active.stopKind !== "unmount") {
+        if (reason instanceof ShaderApiError) setApiFailure(reason.failure);
+        setError(reason instanceof Error ? reason.message : "生成失败。");
+      }
     } finally {
-      setLoading(false);
+      window.clearTimeout(active.timeoutId);
+      if (activeGenerationRef.current === active) {
+        activeGenerationRef.current = null;
+        setLoading(false);
+      }
     }
+  }
+
+  function handleStopWaiting() {
+    const active = activeGenerationRef.current;
+    if (!active || active.stopKind) return;
+    active.stopKind = "user";
+    active.controller.abort();
   }
 
   const handleRendered = useCallback(
     async (renderedImage: Blob) => {
-      if (!selectedFile || !glsl || !projectId) return;
+      if (
+        runResult?.generation_mode === "procedural_v1" ||
+        !selectedFile ||
+        !glsl ||
+        !projectId
+      ) {
+        return;
+      }
 
       const requestId = reviewRequestRef.current + 1;
       reviewRequestRef.current = requestId;
@@ -162,16 +261,20 @@ export function App() {
           setMemoryStatus(result.memory_status);
           rememberProject(result.project_id);
         }
-      } catch (err) {
+      } catch (reason) {
         if (reviewRequestRef.current === requestId) {
-          setReviewError(err instanceof Error ? err.message : "评审失败。");
+          setReviewError(reason instanceof Error ? reason.message : "评审失败。");
         }
       } finally {
         if (reviewRequestRef.current === requestId) setReviewLoading(false);
       }
     },
-    [selectedFile, glsl, projectId, recentProjects],
+    [runResult?.generation_mode, selectedFile, glsl, projectId, rememberProject],
   );
+
+  const handleCompatibility = useCallback((report: ClientCompatibilityReport) => {
+    setCompatibility(report);
+  }, []);
 
   function handleNewProject() {
     if (
@@ -198,8 +301,8 @@ export function App() {
       setProjectId(null);
       resetWorkspace();
       setProjectMessage("当前项目记忆已清除。 ");
-    } catch (err) {
-      setProjectMessage(err instanceof Error ? err.message : "清除项目记忆失败。");
+    } catch (reason) {
+      setProjectMessage(reason instanceof Error ? reason.message : "清除项目记忆失败。");
     }
   }
 
@@ -213,14 +316,12 @@ export function App() {
   function handleDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
     setDragActive(false);
-
     const file = event.dataTransfer.files[0];
     if (file) void handleFile(file);
   }
 
   async function copyGlsl() {
     if (!glsl || !navigator.clipboard) return;
-
     try {
       await navigator.clipboard.writeText(glsl);
       setCopied(true);
@@ -231,20 +332,26 @@ export function App() {
     }
   }
 
+  const isProceduralResult = runResult?.generation_mode === "procedural_v1";
+  const serverRenderUrl = runResult?.final_render_url
+    ? resolveShaderApiUrl(runResult.final_render_url)
+    : null;
   const statusText = loading
-    ? "生成中"
+    ? generationMode === "procedural_v1"
+      ? "闭环运行中"
+      : "生成中"
     : reviewLoading
       ? "评审中"
-      : error || reviewError
+      : requestStopNotice
+        ? "已停止等待"
+      : error || reviewError || compatibility?.status === "error"
         ? "需要处理"
-        : review
-          ? "已评审"
-          : glsl
-            ? "已生成"
-            : selectedFile
-              ? "准备运行"
-              : "等待上传";
-  const runText = loading ? "运行中..." : glsl ? "重新运行" : "开始运行";
+        : runResult
+          ? "已完成"
+          : selectedFile
+            ? "准备运行"
+            : "等待上传";
+  const runText = glsl ? "重新运行" : "开始运行";
   const previewEmptyText = loading ? "正在生成" : selectedFile ? "等待运行" : "等待上传";
   const codePlaceholder = selectedFile
     ? "点击“开始运行”后会在这里显示生成的 fragment shader。"
@@ -256,15 +363,75 @@ export function App() {
         <header className="topbar">
           <div>
             <h1>ShaderGen</h1>
-            <p>上传参考图，生成可预览的 fragment shader。</p>
+            <p>上传参考图，生成可评估、可复核的无贴图 fragment shader。</p>
           </div>
           <div className="topbar-actions">
             <span className={`status ${loading ? "is-loading" : ""}`}>{statusText}</span>
-            <button type="button" className="run-button" disabled={!selectedFile || loading} onClick={handleRun}>
-              {runText}
-            </button>
+            {loading ? (
+              <button type="button" className="stop-button" onClick={handleStopWaiting}>
+                停止等待
+              </button>
+            ) : (
+              <button type="button" className="run-button" disabled={!selectedFile} onClick={handleRun}>
+                {runText}
+              </button>
+            )}
           </div>
         </header>
+
+        <section className="run-config" aria-label="生成配置">
+          <label>
+            <span>生成模式</span>
+            <select
+              aria-label="生成模式"
+              value={generationMode}
+              disabled={loading}
+              onChange={(event) => {
+                setGenerationMode(event.target.value as GenerationMode);
+                clearRunOutput();
+              }}
+            >
+              <option value="legacy">Legacy 单次生成</option>
+              <option value="procedural_v1">程序化闭环 V1（实验性）</option>
+            </select>
+            {generationMode === "procedural_v1" ? (
+              <small className="experimental-note">
+                实验功能：当前质量门禁未通过，可能超时或无法生成可运行 Shader。
+              </small>
+            ) : null}
+          </label>
+          <label>
+            <span>质量档位</span>
+            <select
+              aria-label="质量档位"
+              value={qualityPreset}
+              disabled={loading || generationMode === "legacy"}
+              onChange={(event) => setQualityPreset(event.target.value as QualityPreset)}
+            >
+              <option value="fast">Fast</option>
+              <option value="balanced">Balanced</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+          <label className="instruction-field">
+            <span>补充约束</span>
+            <textarea
+              aria-label="补充约束"
+              value={instruction}
+              maxLength={2000}
+              disabled={loading || generationMode === "legacy"}
+              placeholder={
+                generationMode === "legacy"
+                  ? "Legacy 模式暂不支持补充约束。"
+                  : "例如：保留纯白背景，重点复刻左上高光。"
+              }
+              onChange={(event) => setInstruction(event.target.value)}
+            />
+            {generationMode === "legacy" ? (
+              <small className="experimental-note">补充约束仅用于程序化闭环 V1。</small>
+            ) : null}
+          </label>
+        </section>
 
         <section className="project-bar" aria-label="项目记忆">
           <div className="project-current">
@@ -272,11 +439,7 @@ export function App() {
             <span title={projectId ?? ""}>{projectId ? projectId : "下一次运行时创建"}</span>
           </div>
           <div className="project-actions">
-            <select
-              aria-label="最近项目"
-              value={projectId ?? ""}
-              onChange={(event) => restoreProject(event.target.value)}
-            >
+            <select aria-label="最近项目" value={projectId ?? ""} onChange={(event) => restoreProject(event.target.value)}>
               <option value="">最近项目</option>
               {recentProjects.map((project) => (
                 <option key={project.id} value={project.id}>
@@ -284,38 +447,31 @@ export function App() {
                 </option>
               ))}
             </select>
-            <button type="button" onClick={handleNewProject} disabled={loading || reviewLoading}>
-              新建项目
-            </button>
-            <button
-              type="button"
-              onClick={() => void handleClearMemory()}
-              disabled={!projectId || loading || reviewLoading}
-            >
+            <button type="button" onClick={handleNewProject} disabled={loading || reviewLoading}>新建项目</button>
+            <button type="button" onClick={() => void handleClearMemory()} disabled={!projectId || loading || reviewLoading}>
               清除记忆
             </button>
           </div>
         </section>
-        {memoryStatus === "ephemeral" ? (
-          <p className="memory-warning">当前使用临时记忆，后端重启后会丢失。</p>
-        ) : null}
-        {memoryStatus === "degraded" ? (
-          <p className="memory-warning is-error">长期记忆本次降级，结果仍可使用但未保证持久化。</p>
-        ) : null}
+        {memoryStatus === "ephemeral" ? <p className="memory-warning">当前使用临时记忆，后端重启后会丢失。</p> : null}
+        {memoryStatus === "degraded" ? <p className="memory-warning is-error">长期记忆本次降级，结果仍可使用但未保证持久化。</p> : null}
         {projectMessage ? <p className="project-message">{projectMessage}</p> : null}
+        {requestStopNotice ? <p className="request-stop-notice">{requestStopNotice}</p> : null}
+        {apiFailure ? <FailureDetails message={error} failure={apiFailure} /> : null}
 
-        <section className="panels">
+        <RunProgress
+          loading={loading}
+          mode={generationMode}
+          result={runResult}
+          compatibility={compatibility}
+        />
+
+        <section className={`panels ${serverRenderUrl ? "has-server-render" : ""}`}>
           <div className="panel">
-            <div className="panel-header">
-              <h2>原图</h2>
-              {fileInfo ? <span>{fileInfo}</span> : null}
-            </div>
+            <div className="panel-header"><h2>原图</h2>{fileInfo ? <span>{fileInfo}</span> : null}</div>
             <label
               className={`dropzone ${dragActive ? "is-dragging" : ""} ${loading ? "is-disabled" : ""}`}
-              onDragEnter={(event) => {
-                event.preventDefault();
-                setDragActive(true);
-              }}
+              onDragEnter={(event) => { event.preventDefault(); setDragActive(true); }}
               onDragOver={(event) => event.preventDefault()}
               onDragLeave={() => setDragActive(false)}
               onDrop={handleDrop}
@@ -330,46 +486,50 @@ export function App() {
                   event.currentTarget.value = "";
                 }}
               />
-              {imageUrl ? (
-                <img src={imageUrl} alt="上传的原图" />
-              ) : (
-                <span>
-                  拖拽图片到这里
-                  <small>或点击上传</small>
-                </span>
-              )}
+              {imageUrl ? <img src={imageUrl} alt="上传的原图" /> : <span>拖拽图片到这里<small>或点击上传</small></span>}
             </label>
           </div>
 
           <div className="panel">
-            <div className="panel-header">
-              <h2>WebGL 预览</h2>
-              {loading ? <span>正在生成...</span> : null}
-            </div>
+            <div className="panel-header"><h2>客户端 WebGL1</h2>{loading ? <span>正在生成...</span> : null}</div>
             {glsl ? (
-              <ShaderPreview imageUrl={imageUrl} glsl={glsl} onRendered={handleRendered} />
-            ) : (
-              <div className="empty">{previewEmptyText}</div>
-            )}
+              <ShaderPreview
+                imageUrl={imageUrl}
+                glsl={glsl}
+                staticMode={isProceduralResult}
+                renderWidth={runResult?.render_width}
+                renderHeight={runResult?.render_height}
+                serverRenderUrl={serverRenderUrl}
+                onRendered={handleRendered}
+                onCompatibility={isProceduralResult ? handleCompatibility : undefined}
+              />
+            ) : <div className="empty">{previewEmptyText}</div>}
           </div>
+
+          {serverRenderUrl ? (
+            <div className="panel server-render-panel">
+              <div className="panel-header">
+                <h2>服务端最终 Render</h2>
+                <span>{runResult?.unscored_fallback ? "WebGL fallback" : "current_best"}</span>
+              </div>
+              <img src={serverRenderUrl} alt="服务端最终渲染图" />
+            </div>
+          ) : null}
         </section>
 
+        <ScoreSummary score={runResult?.score} />
+
         <section className="code-panel">
-          <div className="panel-header">
-            <h2>GLSL</h2>
-            <button type="button" disabled={!glsl} onClick={copyGlsl}>
-              {copied ? "已复制" : "复制"}
-            </button>
-          </div>
-          {loading ? <p className="hint">正在分析图片并生成 GLSL...</p> : null}
-          {error ? <p className="error">{error}</p> : null}
+          <div className="panel-header"><h2>GLSL</h2><button type="button" disabled={!glsl} onClick={copyGlsl}>{copied ? "已复制" : "复制"}</button></div>
+          {loading ? <p className="hint">正在分析、编译、渲染并按评分自动修订 GLSL...</p> : null}
+          {error && !apiFailure ? <p className="error">{error}</p> : null}
           <pre>{glsl || codePlaceholder}</pre>
         </section>
 
         {glsl || reviewLoading || review ? (
           <section className="review-panel">
             <div className="panel-header">
-              <h2>Review</h2>
+              <h2>{isProceduralResult ? "自动闭环 Review" : "Review"}</h2>
               {reviewLoading ? <span>正在评审...</span> : null}
             </div>
             {reviewLoading ? <p className="hint">正在评审渲染图...</p> : null}
@@ -377,15 +537,9 @@ export function App() {
             {review ? (
               <div className="review-body">
                 <p>{review.evaluation}</p>
-                {review.suggestions.length ? (
-                  <ul>
-                    {review.suggestions.map((suggestion, index) => (
-                      <li key={`${index}-${suggestion}`}>{suggestion}</li>
-                    ))}
-                  </ul>
-                ) : null}
+                {review.suggestions.length ? <ul>{review.suggestions.map((suggestion, index) => <li key={`${index}-${suggestion}`}>{suggestion}</li>)}</ul> : null}
               </div>
-            ) : null}
+            ) : isProceduralResult ? <p className="hint">本次在进入 Critic 前已满足停止条件。</p> : null}
           </section>
         ) : null}
       </section>

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from langgraph.runtime import Runtime
@@ -12,12 +12,16 @@ from agent.app.contracts.llm import LLMCallOptions, LLMGateway
 from agent.app.states.agent_state import Context, State
 
 _MISSING = object()
+ModelNode = Callable[..., Awaitable[dict[str, Any]]]
 
 
-def make_model_node(gateway: LLMGateway):
+def make_model_node(gateway: LLMGateway) -> ModelNode:
     """创建只依赖 Gateway 的基础模型 Node."""
 
-    async def call_model(state: State, runtime: Runtime[Context] | None = None):
+    async def call_model(
+        state: State,
+        runtime: Runtime[Context] | None = None,
+    ) -> dict[str, Any]:
         """调用 Gateway 并返回消息 partial State."""
         response = await gateway.ainvoke(
             state["messages"],

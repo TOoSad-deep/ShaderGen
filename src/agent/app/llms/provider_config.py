@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from typing import Any
+
+from pydantic import SecretStr
+
+from agent.app.contracts.llm import ResponseFormat, normalize_response_format
 
 
 @dataclass(frozen=True)
@@ -13,6 +18,11 @@ class ProviderSettings:
     name: str
     api_key: str | None
     base_url: str | None
+
+    @property
+    def secret_api_key(self) -> SecretStr | None:
+        """返回 LangChain 客户端接受的脱敏 API key 类型."""
+        return SecretStr(self.api_key) if self.api_key else None
 
 
 @dataclass(frozen=True)
@@ -67,3 +77,13 @@ def provider_settings(
 
     base_url = os.getenv(provider_env.base_url_env) or provider_env.default_base_url
     return ProviderSettings(name=provider_name, api_key=api_key, base_url=base_url)
+
+
+def response_format_model_kwargs(
+    response_format: ResponseFormat | str,
+) -> dict[str, Any]:
+    """把中立输出格式映射为 OpenAI-compatible response_format."""
+    normalized = normalize_response_format(response_format)
+    if normalized == "text":
+        return {}
+    return {"response_format": {"type": normalized}}

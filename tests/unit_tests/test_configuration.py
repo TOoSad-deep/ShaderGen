@@ -26,6 +26,7 @@ from agent.app.services.shader_generation import (
     review_shader_render,
 )
 from backend.app.api.routes import shader as shader_route
+from backend.app.database import agent_memory
 from backend.app.main import app
 from backend.app.services import shader as shader_service
 
@@ -37,6 +38,22 @@ def model_family_module(name: str):
 def test_placeholder() -> None:
     # TODO: 后续在这里补充图和业务逻辑的单元测试。
     assert isinstance(graph, Pregel)
+
+
+def test_request_validation_failure_logs_safe_field_diagnostics(caplog) -> None:
+    response = TestClient(app).post(
+        "/api/shader/generate",
+        data={
+            "generation_mode": "unsupported-mode",
+            "instruction": "PRIVATE_USER_TEXT",
+        },
+    )
+
+    assert response.status_code == 422
+    assert "request.validation_failed" in caplog.text
+    assert "body.file" in caplog.text
+    assert "body.generation_mode" in caplog.text
+    assert "PRIVATE_USER_TEXT" not in caplog.text
 
 
 def test_llm_client_factory_configured() -> None:
@@ -95,10 +112,12 @@ def test_get_qwen_model_accepts_node_level_thinking_options(monkeypatch) -> None
         provider="dashscope",
         thinking="off",
         capture_reasoning=True,
+        response_format="json_object",
     )
 
     assert model.extra_body == {"enable_thinking": False}
     assert model.output_thinking is True
+    assert model.model_kwargs == {"response_format": {"type": "json_object"}}
 
 
 def test_qwen_model_drops_reasoning_content_by_default() -> None:
@@ -219,11 +238,7 @@ def test_llm_factory_routes_by_provider_and_model_family(monkeypatch) -> None:
     monkeypatch.setattr(
         qwen_model,
         "get_qwen_model",
-        lambda model,
-        provider=None,
-        temperature=0,
-        thinking="default",
-        capture_reasoning=None: (
+        lambda model, provider=None, temperature=0, thinking="default", capture_reasoning=None, response_format="text": (
             "qwen",
             provider,
             model,
@@ -233,7 +248,7 @@ def test_llm_factory_routes_by_provider_and_model_family(monkeypatch) -> None:
     monkeypatch.setattr(
         glm_model,
         "get_glm_model",
-        lambda model, provider=None, temperature=0: (
+        lambda model, provider=None, temperature=0, response_format="text": (
             "glm",
             provider,
             model,
@@ -243,7 +258,7 @@ def test_llm_factory_routes_by_provider_and_model_family(monkeypatch) -> None:
     monkeypatch.setattr(
         deepseek_model,
         "get_deepseek_model",
-        lambda model, provider=None, temperature=0: (
+        lambda model, provider=None, temperature=0, response_format="text": (
             "deepseek",
             provider,
             model,
@@ -253,7 +268,7 @@ def test_llm_factory_routes_by_provider_and_model_family(monkeypatch) -> None:
     monkeypatch.setattr(
         openai_model,
         "get_openai_model",
-        lambda model, provider=None, temperature=0: (
+        lambda model, provider=None, temperature=0, response_format="text": (
             "openai",
             provider,
             model,
@@ -301,16 +316,13 @@ def test_llm_factory_passes_node_level_options_to_qwen(monkeypatch) -> None:
     monkeypatch.setattr(
         qwen_model,
         "get_qwen_model",
-        lambda model,
-        provider=None,
-        temperature=0,
-        thinking="default",
-        capture_reasoning=None: (
+        lambda model, provider=None, temperature=0, thinking="default", capture_reasoning=None, response_format="text": (
             provider,
             model,
             temperature,
             thinking,
             capture_reasoning,
+            response_format,
         ),
     )
 
@@ -320,6 +332,7 @@ def test_llm_factory_passes_node_level_options_to_qwen(monkeypatch) -> None:
             temperature=0.1,
             thinking="on",
             capture_reasoning=True,
+            response_format="json_object",
         )
     ) == (
         "dashscope",
@@ -327,6 +340,7 @@ def test_llm_factory_passes_node_level_options_to_qwen(monkeypatch) -> None:
         0.1,
         "on",
         True,
+        "json_object",
     )
 
 
@@ -474,7 +488,9 @@ async def test_shader_generation_graph_runs_glsl_then_review_nodes() -> None:
 
 
 @pytest.mark.anyio
-async def test_backend_shader_service_delegates_to_agent_public_interface(monkeypatch) -> None:
+async def test_backend_shader_service_delegates_to_agent_public_interface(
+    monkeypatch,
+) -> None:
     class FakeResult:
         glsl = "void main() {}"
         glsl_model_name = "agent-glsl"
@@ -527,6 +543,22 @@ def test_database_health_requires_pool() -> None:
 
     assert response.status_code == 503
     assert response.json() == {"detail": "数据库连接池未初始化。"}
+
+
+def test_agent_memory_pool_checks_connection_before_checkout(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakePool:
+        check_connection = object()
+
+        def __init__(self, **kwargs) -> None:
+            captured.update(kwargs)
+
+    monkeypatch.setattr(agent_memory, "AsyncConnectionPool", FakePool)
+
+    agent_memory._pool("postgresql://user:password@127.0.0.1:5432/shadergen")
+
+    assert captured["check"] is FakePool.check_connection
 
 
 def test_database_health_uses_pool() -> None:
@@ -702,12 +734,18 @@ def test_generate_shader_logs_agent_process_write_failure(monkeypatch, caplog) -
     finally:
         del app.state.db_pool
 
-    assert response.status_code == 502
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "persistence_unavailable"
+    assert response.json()["detail"]["stage"] == "persistence"
+    assert response.json()["detail"]["retryable"] is True
     assert "agent.process.database.write.failed" in caplog.text
+    assert "persistence_stage=create_generation_run" in caplog.text
     assert "backend.agent_process" in caplog.text
 
 
-def test_review_shader_endpoint_delegates_to_agent_public_interface(monkeypatch) -> None:
+def test_review_shader_endpoint_delegates_to_agent_public_interface(
+    monkeypatch,
+) -> None:
     project_id = str(uuid4())
 
     async def fake_review_shader_render(
@@ -774,6 +812,7 @@ def test_review_shader_requires_project_id() -> None:
 
 def test_review_shader_records_agent_process(monkeypatch, caplog) -> None:
     project_id = str(uuid4())
+
     class FakeConnection:
         def __init__(self) -> None:
             self.executed = []

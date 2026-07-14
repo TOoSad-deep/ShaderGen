@@ -65,3 +65,45 @@ def test_nodes_directory_contains_no_cross_node_helper_modules() -> None:
     assert not (nodes / "image_content.py").exists()
     assert not (nodes / "model_reasoning.py").exists()
     assert not (nodes / "model_runtime_options.py").exists()
+
+
+def test_png_to_shader_parser_remains_pure() -> None:
+    parser = ROOT / "src/agent/app/parsers/png_to_shader_v1.py"
+    forbidden = (
+        "agent.app.graphs",
+        "agent.app.llms",
+        "agent.app.nodes",
+        "agent.app.prompts",
+        "shaderforge.evaluation",
+        "shaderforge.rendering",
+        "shaderforge.store",
+        "shaderforge.validation",
+    )
+
+    assert [
+        target for target in _import_targets(parser) if target.startswith(forbidden)
+    ] == []
+
+
+def test_m2_role_nodes_do_not_run_m1_fact_layer_or_store() -> None:
+    forbidden = (
+        "agent.app.llms",
+        "shaderforge.evaluation",
+        "shaderforge.rendering",
+        "shaderforge.store",
+        "shaderforge.validation",
+    )
+    violations = []
+    for name in (
+        "visual_analysis_node.py",
+        "shader_author_node.py",
+        "visual_critic_node.py",
+    ):
+        path = ROOT / "src/agent/app/nodes" / name
+        violations.extend(
+            f"{name}: {target}"
+            for target in _import_targets(path)
+            if target.startswith(forbidden)
+        )
+
+    assert violations == []

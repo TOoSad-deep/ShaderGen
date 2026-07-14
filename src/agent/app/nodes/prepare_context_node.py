@@ -2,14 +2,24 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import Any
+
 from langgraph.runtime import Runtime
 
 from agent.app.context.builder import ContextPolicy, build_context_pack
+from agent.app.memory.models import MemoryItem
 from agent.app.memory.store import list_project_memories
 from agent.app.states.agent_state import ShaderPipelineState
 
+PrepareContextNode = Callable[
+    [ShaderPipelineState, Runtime], Awaitable[ShaderPipelineState]
+]
 
-def make_prepare_context_node(policy: ContextPolicy = ContextPolicy()):
+
+def make_prepare_context_node(
+    policy: ContextPolicy = ContextPolicy(),
+) -> PrepareContextNode:
     """创建读取 Store 并调用纯 Context Builder 的节点."""
 
     async def prepare_context(
@@ -19,7 +29,7 @@ def make_prepare_context_node(policy: ContextPolicy = ContextPolicy()):
         """构造本次生成或评审需要的 ContextPack."""
         events = state.get("events", ())
         status = state.get("memory_status", "ephemeral")
-        memories = ()
+        memories: tuple[MemoryItem, ...] = ()
         error_type: str | None = None
         try:
             if runtime.store is not None:
@@ -43,7 +53,7 @@ def make_prepare_context_node(policy: ContextPolicy = ContextPolicy()):
                 "dropped_count": pack.dropped_memory_count,
             },
         }
-        new_events: tuple[dict, ...] = (context_event,)
+        new_events: tuple[dict[str, Any], ...] = (context_event,)
         if error_type:
             new_events += (
                 {

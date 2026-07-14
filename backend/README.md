@@ -21,15 +21,26 @@
 - 当前使用 Postgres 语法，配合现有 `asyncpg` 连接池。
 - 配置 `DATABASE_URL` 时，后端启动会按文件名顺序执行 `sql/*.sql`，确保表结构存在。
 - Agent 过程数据落业务表；运行内需要查询的安全诊断摘要可写入 `agent_logs`。
+- LangGraph Checkpointer/Store 使用独立 psycopg pool，并在每次借出连接前执行 `AsyncConnectionPool.check_connection`；远端关闭的陈旧连接必须在进入 Graph 前淘汰，不能通过重试整个 Graph 恢复，以免重复模型调用或候选写入。
 - `POST /api/shader/generate` 在数据库连接池可用时，会写入 `agent_runs`、`agent_events` 和 `agent_logs`。
+- `procedural_v1` 把模式、质量档位和补充约束写入 run input，把停止原因、current_best、评分和公开 Artifact URL 写入 run result；Graph 返回的每个阶段事件与 `current_best_updated` 逐项写入 `agent_events`。
+- 生成或评审终态的模型调用、阶段事件、Agent 日志和 `agent_runs` 更新使用同一个 asyncpg 显式事务；任一步失败必须整体回滚。事务先 `FOR UPDATE` 锁定 run：相同终态重放直接 no-op，不同终态重放显式报冲突，禁止静默覆盖。
 - `POST /api/shader/review` 在数据库连接池可用时，也会写入 `agent_runs`、`agent_events` 和 `agent_logs`。
-- `agent_events.reasoning_content` 保存模型返回的思维链，仅用于受控调试和评估，不进入对外 API 响应。
+- `agent_events.reasoning_content` 只允许保存节点显式 opt-in 捕获的思维链；Legacy 和 V1 默认都不捕获、不打印 reasoning，对外 API 永不返回该字段。
 - `agent_runs.project_id` 关联一次运行与 Shader 项目；清除 Memory 不删除过程账本。
-- 过程数据写库成功时记录 `agent.process.database.write.succeeded`；写库失败时记录 `agent.process.database.write.failed`。
+- 过程数据写库成功时记录 `agent.process.database.write.succeeded`；写库失败时记录 `agent.process.database.write.failed`，并带 `persistence_stage` 定位创建 run 或终态事务阶段。
+- Graph 已得到可返回的 Shader 后，终态账本提交故障记录 `shader.generate.success_persistence_failed`，但不再用数据库异常覆盖成功响应；失败账本提交故障同样不得覆盖原始类型化业务错误。
+- 生成 run 初始总账创建失败时，生成服务不得继续执行；响应映射为 503 `persistence_unavailable`、`stage=persistence`、`retryable=true`，安全日志使用 `persistence_stage=create_generation_run` 定位且不打印数据库异常原文。
 - 过程数据写入编排放在 `app/services/agent_process_store.py`；route 不直接写数据库过程表。
 - `agent_logs` 允许 `debug` 级别，但只用于运行内关键调试摘要，不接普通 debug logging。
 - 普通请求日志、普通 debug 日志、完整堆栈和基础设施日志继续走 Python logging。
-- 数据库不要保存密钥、API key、完整模型供应商原始响应或 base64 图片；思维链只允许写入 `agent_events.reasoning_content` 单列。
+- `LOG_LEVEL` 同时控制 `backend`、`agent` 和 `shaderforge` logger；默认 `INFO` 时，后端终端可直接看到 `shader.generate.*` 与 `shader.pipeline.*` 的阶段日志。
+- FastAPI 在进入 route 前产生的 422 使用 `request.validation_failed` 打印字段路径、校验类型和提示；不打印字段原值，因此可与业务闭环返回的 `shader.generate.no_validated_result` 区分。
+- V1 开始日志包含 `run_id`、`project_id`、模式、质量档和图片字节数；模型阶段日志包含剩余 wall-time/调用数和累计模型耗时；Renderer 日志区分静态校验、WebGL compile、Renderer 与 Oracle 评估；成功日志包含 candidate、fallback 状态和 loss。WebGL compiler 原文只保存在私有 compile Artifact，普通事件/数据库只写日志长度和 SHA-256。
+- V1 没有有效候选时，终端 `shader.generate.no_validated_result` 和 `agent_logs` 都记录安全诊断：`run_id`、`project_id`、停止原因、失败阶段/事件/异常类型、后端与 Graph 耗时、候选数、模型调用数与耗时和修复次数。`agent_runs.result` 在失败时也保留同一摘要，便于只查询 run 总账定位问题。
+- `agent_runs.error` 只持久化异常类型和安全停止原因，不写供应商异常原文；Python 结构化日志也不打印图片、完整 GLSL、用户补充约束或模型原始响应。
+- 安全诊断不得包含上传图片、完整 GLSL、reasoning、模型供应商原始响应、用户补充约束正文或密钥；生成失败使用稳定的 FastAPI `detail` envelope，至少包含 `message`、`code`、`run_id`、`stage`、`retryable` 和 `stop_reason`。
+- 数据库不要保存密钥、API key、完整模型供应商原始响应或 base64 图片；显式 opt-in 的思维链也只能写入 `agent_events.reasoning_content` 单列，并应配置访问控制与保留策略。
 
 ## 路由规则
 
@@ -37,10 +48,14 @@
 - route 不写 Prompt、不直接调用模型、不实现搜索/评分/渲染算法。
 - route 捕获外部调用异常时，应返回明确的 HTTP 错误；日志记录内部细节，响应给用户的信息保持可理解。
 - `POST /api/shader/review` 接收 `original_file`、`rendered_file` 和 `glsl`，由 Agent 根据原图、当前渲染图和 GLSL 返回评估与修改建议。
-- `POST /api/shader/generate` 接收可选 `project_id`；未提供时创建 UUID。Generate/Review 都返回 `memory_status`。
+- `POST /api/shader/generate` 接收可选 `project_id`、`generation_mode=legacy|procedural_v1`、`quality_preset=fast|balanced|high` 和最长 2,000 字的 `instruction`；未提供 project 时创建 UUID。前端显式发送 V1，未传 mode 的旧客户端仍默认 legacy。
+- V1 generate 响应在原有字段上增加 `run_id`、质量档位、视觉修订次数、停止原因、候选 id、`unscored_fallback`、规范化 render 尺寸、评分及 final-render/metrics/manifest URL。WebGL 有效但 evaluator 不可用的降级结果仍返回 GLSL 与 final-render，同时明确 `unscored_fallback=true`、`score=null`、`metrics_url=null`，禁止伪造评分。请求边界错误返回类型化 400/413/422；Renderer、模型供应商或运行账本不可用返回 503；全局或模型阶段超时返回 504；模型响应错误返回 502；内部 pipeline 不变量错误返回 500；编译修复耗尽仍返回类型化 422。Legacy 单次生成也有 180 秒服务端 timeout。任何失败响应都不返回 reasoning 或原始异常。
+- 成功 run 必须先通过完整 `ShaderResponse` 契约构造，再写入 `status=succeeded`；响应契约失败使用 `shader.generate.response_contract_failed`，并把过程账本标记为 failed，禁止出现“账本成功但 HTTP 500”。
+- `GET /api/shader/runs/{run_id}/artifacts/{artifact_name}` 只接受 `final-render`、`metrics`、`manifest` 三个固定名字；未知名字和不存在的 run 统一返回 404，不接受 filesystem path。
 - `POST /api/shader/review` 额外要求 `project_id`。
 - `DELETE /api/shader/projects/{project_id}/memory` 删除 checkpoint thread 和 Store Memory，不删除审计账本。
 - 单进程内同一 `project_id` 并发请求立即返回 `409 project_busy`。
+- V1 checkpoint 使用 `png-to-shader-v1:{project_id}` 与 legacy checkpoint 隔离；二者共享项目 Store。清除项目记忆会清除两类 checkpoint 和共享 Memory，但不删除过程账本或 Artifact。
 - 新增路由必须注册到 `app/api/router.py`。
 - 新增业务 route 文件按领域命名，例如 `shader.py`、`health.py`；不要创建没有真实 endpoint 的空 route。
 
@@ -73,4 +88,5 @@ make test-memory-postgres
 - HTTP 行为优先用 `fastapi.testclient.TestClient` 测试。
 - 依赖模型、数据库或外部服务时使用模拟对象；除非明确写成集成测试，不调用真实服务。
 - 跨 backend、agent、shaderforge 的流程放到 `tests/integration_tests/`。
+- M4 产品路径使用 `tests/integration_tests/test_png_to_shader_v1_api.py` 覆盖 Backend -> Agent Service -> Artifact；浏览器验收运行 `npm --prefix frontend run e2e:procedural-v1`。
 - 后端路由、service、schema、错误处理或测试规则变化时，同步更新本文档。

@@ -1,5 +1,7 @@
 """按 provider 和 model family 创建 LangChain 聊天客户端."""
 
+from dataclasses import dataclass
+
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from agent.app.contracts.llm import LLMCallOptions
@@ -7,27 +9,80 @@ from agent.app.llms.families import deepseek, glm, openai, qwen
 from agent.app.llms.provider_config import PROVIDER_NAMES
 
 MODEL_FAMILY_PREFIXES = ("qwen:", "glm:", "deepseek:", "openai:")
+DEFAULT_PROVIDER_BY_FAMILY = {
+    "qwen": "dashscope",
+    "glm": "glm",
+    "deepseek": "deepseek",
+    "openai": "openai",
+}
+
+
+@dataclass(frozen=True)
+class ChatModelBinding:
+    """真实客户端及其解析后的调用身份."""
+
+    client: BaseChatModel
+    requested_model_ref: str
+    resolved_provider: str
+    configured_model_name: str
 
 
 def create_chat_model(options: LLMCallOptions) -> BaseChatModel:
     """按调用参数创建真实 LangChain 聊天客户端."""
+    return create_chat_model_binding(options).client
+
+
+def create_chat_model_binding(options: LLMCallOptions) -> ChatModelBinding:
+    """创建客户端并保留 provider/model 解析事实供 Gateway 审计."""
     provider, model_name = _split_model_reference(options.model_ref)
     family = _model_family(provider, model_name)
+    resolved_provider = provider or DEFAULT_PROVIDER_BY_FAMILY[family]
+    client: BaseChatModel
     if family == "qwen":
-        return qwen.get_qwen_model(
+        client = qwen.get_qwen_model(
             model_name,
             provider=provider,
             temperature=options.temperature,
             thinking=options.thinking,
             capture_reasoning=options.capture_reasoning,
+            response_format=options.response_format,
         )
-    if family == "glm":
-        return glm.get_glm_model(model_name, provider, options.temperature)
-    if family == "deepseek":
-        return deepseek.get_deepseek_model(model_name, provider, options.temperature)
-    if family == "openai":
-        return openai.get_openai_model(model_name, provider, options.temperature)
-    raise ValueError(f"无法识别模型系列：{model_name}。")
+    elif family == "glm":
+        client = glm.get_glm_model(
+            model_name,
+            provider,
+            options.temperature,
+            options.response_format,
+        )
+    elif family == "deepseek":
+        client = deepseek.get_deepseek_model(
+            model_name,
+            provider,
+            options.temperature,
+            options.response_format,
+        )
+    elif family == "openai":
+        client = openai.get_openai_model(
+            model_name,
+            provider,
+            options.temperature,
+            options.response_format,
+        )
+    else:  # pragma: no cover - _model_family 已封闭分支
+        raise ValueError(f"无法识别模型系列：{model_name}。")
+    return ChatModelBinding(
+        client=client,
+        requested_model_ref=options.model_ref,
+        resolved_provider=resolved_provider,
+        configured_model_name=model_name,
+    )
+
+
+def resolved_model_reference(model_ref: str) -> tuple[str, str]:
+    """返回 model ref 最终使用的 provider 和配置模型名."""
+    provider, model_name = _split_model_reference(model_ref)
+    family = _model_family(provider, model_name)
+    return provider or DEFAULT_PROVIDER_BY_FAMILY[family], model_name
 
 
 def _split_model_reference(model_ref: str) -> tuple[str | None, str]:

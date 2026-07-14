@@ -6,24 +6,125 @@
 
 - `main_graph.py`：基础对话图，入口对象为 `graph`。
 - `shader_generation_graph.py`：Shader 生成和渲染评审图，入口对象为 `shader_generation_graph`。
+- `png_to_shader_v1_graph.py`：F09 M3 的独立 PNG-to-Shader 有界闭环，入口对象为 `png_to_shader_v1_graph`。
+- `png_to_shader_v1_routing.py`：M3 可独立单测的纯预算、停止和下一步路由规则。
 
 ## Graph 规则
 
 - Graph 只负责编排流程，不直接组装模型消息。
 - Graph 是 LLM 组合根，通过 Builder 把具体 `LangChainLLMGateway` 注入 Node 工厂。
-- 测试通过 `build_main_graph(gateway)` 和 `build_shader_generation_graph(gateway)` 注入 Fake Gateway，不 monkeypatch 具体客户端工厂。
-- Node 不决定全局流程；条件跳转写在 graph 文件的私有函数中，例如 `_next_after_generate()`。
+- 测试通过各图 Builder 注入 Fake Gateway；M3 还注入 Renderer factory、Evaluator、Artifact Store 和 clock，不 monkeypatch 具体客户端工厂。
+- Node 不决定全局流程；简单条件跳转可写在 graph 文件的私有函数中，例如 `_route_operation()`。
 - 条件边变复杂、需要复用或需要独立测试时，再抽到 graph 附近的边逻辑模块。
 - 每个对外运行的新图都必须注册到仓库根目录的 `langgraph.json`。
+- 每个 `*_graph.py` 必须在 Builder 上方维护一份紧贴实现的 ASCII 图；本文件同时维护可渲染的 Mermaid 图。
+- Mermaid 中的节点、直接边和字面量条件边必须与 `add_node`、`add_edge`、`add_conditional_edges` 一致；`make docs-check` 会静态检查遗漏和漂移。
 - 新增或修改图后运行 `uv run langgraph validate`。
 
-## 当前 `shader_generation` 流程
+## `main_graph` 基础对话图
 
-```text
-START
-  -> prepare_context
-  -> operation == generate -> generate_glsl -> END
-  -> operation == review -> review_render -> promote_memory -> END
+<!-- graph-diagram:main_graph:start -->
+```mermaid
+flowchart LR
+    START([START])
+    call_model[call_model]
+    END([END])
+    START --> call_model
+    call_model --> END
 ```
+<!-- graph-diagram:main_graph:end -->
+
+`call_model` 是单节点基础对话入口；它完成后由 LangGraph 隐式终止。
+
+## `shader_generation_graph` 生成与评审图
+
+<!-- graph-diagram:shader_generation_graph:start -->
+```mermaid
+flowchart TD
+    START([START])
+    prepare_context[prepare_context]
+    END([END])
+    START --> prepare_context
+    prepare_context -. generate .-> generate_glsl[generate_glsl]
+    prepare_context -. review .-> review_render[review_render]
+    generate_glsl --> END
+    review_render --> promote_memory[promote_memory]
+    promote_memory --> END
+```
+<!-- graph-diagram:shader_generation_graph:end -->
 
 Graph Builder 接收 checkpointer 和 Store。`project_id` 由 Agent service 映射为 `configurable.thread_id`；Backend 注入 PostgreSQL 或内存 persistence。
+
+## `png_to_shader_v1_graph` 有界闭环
+
+<!-- graph-diagram:png_to_shader_v1_graph:start -->
+```mermaid
+flowchart TD
+    START([START])
+    initialize_run[initialize_run]
+    END([END])
+    START --> initialize_run
+    initialize_run --> prepare_context[prepare_context]
+    prepare_context --> measure_target[measure_target]
+    measure_target --> visual_analysis[visual_analysis]
+
+    visual_analysis -. continue .-> persist_visual_analysis[persist_visual_analysis]
+    visual_analysis -. finalize .-> finalize[finalize]
+    persist_visual_analysis --> author_initial[author_initial]
+    author_initial -. continue .-> materialize_candidate[materialize_candidate]
+    author_initial -. finalize .-> finalize
+
+    materialize_candidate --> render_and_evaluate[render_and_evaluate]
+    render_and_evaluate --> decide_after_render[decide_after_render]
+    decide_after_render -. select .-> select_current_best[select_current_best]
+    decide_after_render -. compile_repair .-> prepare_compile_repair[prepare_compile_repair]
+    decide_after_render -. finalize .-> finalize
+
+    prepare_compile_repair --> author_compile_repair[author_compile_repair]
+    author_compile_repair -. continue .-> materialize_candidate
+    author_compile_repair -. finalize .-> finalize
+
+    select_current_best --> decide_after_selection[decide_after_selection]
+    decide_after_selection -. visual_critic .-> load_current_best[load_current_best]
+    decide_after_selection -. finalize .-> finalize
+    load_current_best --> visual_critic[visual_critic]
+    visual_critic -. continue .-> persist_visual_review[persist_visual_review]
+    visual_critic -. finalize .-> finalize
+    persist_visual_review --> author_visual_refine[author_visual_refine]
+    author_visual_refine -. continue .-> materialize_candidate
+    author_visual_refine -. finalize .-> finalize
+
+    finalize --> promote_validated_strategy[promote_validated_strategy]
+    promote_validated_strategy --> END
+
+    classDef safety fill:#fff4d6,stroke:#ad7200,stroke-width:2px
+    class select_current_best,load_current_best,finalize,promote_validated_strategy safety
+```
+<!-- graph-diagram:png_to_shader_v1_graph:end -->
+
+### 条件路由表
+
+| 路由节点 | 路由函数 | 结果 | 下一节点 | 含义 |
+|---|---|---|---|---|
+| `visual_analysis` | `model_node_outcome` | `continue` | `persist_visual_analysis` | 分析成功，保存绑定证据 |
+| `visual_analysis` | `model_node_outcome` | `finalize` | `finalize` | 模型、结构化输出或预算失败 |
+| `author_initial` | `model_node_outcome` | `continue` | `materialize_candidate` | 生成首个候选 |
+| `author_initial` | `model_node_outcome` | `finalize` | `finalize` | 无法生成候选 |
+| `decide_after_render` | `route_next_action` | `select` | `select_current_best` | 候选通过事实层，进入单调选择器 |
+| `decide_after_render` | `route_next_action` | `compile_repair` | `prepare_compile_repair` | 编译失败且仍有修复预算 |
+| `decide_after_render` | `route_next_action` | `finalize` | `finalize` | 预算耗尽或满足终止条件 |
+| `author_compile_repair` | `model_node_outcome` | `continue` | `materialize_candidate` | 修复结果作为新候选重新验证 |
+| `author_compile_repair` | `model_node_outcome` | `finalize` | `finalize` | 修复模型失败或预算耗尽 |
+| `decide_after_selection` | `route_next_action` | `visual_critic` | `load_current_best` | 从 Artifact 重载已验证 best |
+| `decide_after_selection` | `route_next_action` | `finalize` | `finalize` | 质量达标、停滞或视觉预算耗尽 |
+| `visual_critic` | `model_node_outcome` | `continue` | `persist_visual_review` | Critic 证据有效，保存 Review |
+| `visual_critic` | `model_node_outcome` | `finalize` | `finalize` | Critic 失败时保留已有 best |
+| `author_visual_refine` | `model_node_outcome` | `continue` | `materialize_candidate` | Refine 结果作为新候选重新验证 |
+| `author_visual_refine` | `model_node_outcome` | `finalize` | `finalize` | Refine 失败时保留已有 best |
+
+- 所有环路都必须经过 compile/visual/model/wall-time 计数器，且自定义预算不超过 V1 high 档；默认 recursion limit 96 是第二道保护。
+- `stop_recommendation` 不能控制 Graph；Critic 只提供证据，下一步由 `png_to_shader_v1_routing.py` 决定。
+- 黄色节点构成 `current_best` 安全边界：Critic、finalize 和 Memory 晋升只能读取选择器确认并重新加载的 best Artifact，不能把“最后一次候选”当成最终结果。
+- 唯一例外是 Evaluator 超时或失败后的 `unscored_fallback`：候选必须已经通过静态 Validator、真实 WebGL compile/draw 并具有校验过 hash 的 render Artifact；它可作为 `completed_with_best_effort` 返回，但没有 score/metrics，不进入 Selector、Critic 或长期策略 Memory，API/UI 也不得称为 `current_best`。
+- 已知模型供应商/结构化输出错误可以沿图安全 finalize 并保留已有 best；未知编程错误或不变量破坏必须越过 Graph，由 Backend 返回类型化 500，禁止伪装为 422 质量失败。
+- V1 Builder 是 run 级组合根：Renderer registry 按 project/run 隔离复用，finalize 负责关闭。M4 已通过独立 Agent Service 把该图接入 Backend persistence 生命周期，Graph 本身仍不依赖 FastAPI 或数据库连接池。

@@ -1,5 +1,12 @@
 """ShaderForge 对其他应用层开放的稳定入口."""
 
+from shaderforge.analysis import (
+    InvalidTargetImageError,
+    RegionOfInterest,
+    TargetMeasurements,
+    measure_target,
+    normalize_target_png,
+)
 from shaderforge.contracts.png_to_shader_v1 import (
     DEFAULT_ACCEPTANCE_POLICY,
     PROBLEM_DOMAINS,
@@ -14,6 +21,30 @@ from shaderforge.contracts.png_to_shader_v1 import (
     StopReason,
     budget_for_preset,
 )
+from shaderforge.evaluation import (
+    CandidateRecord,
+    CurrentBestDecision,
+    ImageSizeMismatchError,
+    MetricWeights,
+    ScoreBreakdownV1,
+    evaluate_render,
+    max_protected_regression,
+    select_current_best,
+)
+from shaderforge.rendering import (
+    CompileResult,
+    PlaywrightWebGL1Renderer,
+    RendererMetadata,
+    RendererUnavailableError,
+    RenderResult,
+    build_standalone_html,
+)
+from shaderforge.store import ArtifactRef, LocalArtifactStore, RunArtifactStore
+from shaderforge.validation import (
+    ValidationResult,
+    ValidationViolation,
+    validate_shader,
+)
 
 __all__ = [
     "DEFAULT_ACCEPTANCE_POLICY",
@@ -22,10 +53,35 @@ __all__ = [
     "STOP_REASONS",
     "WEBGL1_STATIC_NO_TEXTURE_V1",
     "AcceptancePolicy",
+    "ArtifactRef",
     "BudgetPolicy",
+    "CandidateRecord",
+    "CompileResult",
+    "CurrentBestDecision",
+    "ImageSizeMismatchError",
+    "InvalidTargetImageError",
+    "LocalArtifactStore",
+    "MetricWeights",
+    "PlaywrightWebGL1Renderer",
     "ProblemDomain",
     "QualityPreset",
+    "RegionOfInterest",
     "RenderContract",
+    "RenderResult",
+    "RendererMetadata",
+    "RendererUnavailableError",
+    "RunArtifactStore",
+    "ScoreBreakdownV1",
     "StopReason",
+    "TargetMeasurements",
+    "ValidationResult",
+    "ValidationViolation",
     "budget_for_preset",
+    "build_standalone_html",
+    "evaluate_render",
+    "max_protected_regression",
+    "measure_target",
+    "normalize_target_png",
+    "select_current_best",
+    "validate_shader",
 ]

@@ -7,9 +7,12 @@ from langgraph.store.base import BaseStore
 from agent.app.memory.models import (
     MEMORY_SCHEMA_VERSION,
     REVIEW_IMPORTANCE,
+    STRATEGY_IMPORTANCE,
     MemoryItem,
     build_review_summary,
+    build_validated_strategy_summary,
     review_memory_id,
+    strategy_memory_id,
     utc_now,
 )
 
@@ -60,6 +63,48 @@ async def upsert_review_memory(
         kind="review",
         summary=build_review_summary(evaluation, suggestions),
         importance=REVIEW_IMPORTANCE,
+        source_run_id=source_run_id,
+        glsl_sha256=glsl_sha256.lower(),
+        iteration=iteration,
+        created_at=created_at,
+        updated_at=now,
+    )
+    await store.aput(namespace, memory_id, item.to_value(), index=False)
+    return item
+
+
+async def upsert_validated_strategy_memory(
+    store: BaseStore,
+    *,
+    project_id: str,
+    source_run_id: str,
+    glsl_sha256: str,
+    iteration: int,
+    strategy_summary: str,
+    changed_problem_domain: str,
+    metric_version: str,
+    total_loss: float,
+) -> MemoryItem:
+    """幂等写入一条已通过 Renderer/Oracle/Selector 的策略 Memory."""
+    namespace = memory_namespace(project_id)
+    memory_id = strategy_memory_id(glsl_sha256)
+    existing = await store.aget(namespace, memory_id)
+    now = utc_now()
+    created_at = now
+    if existing is not None:
+        created_at = MemoryItem.from_value(dict(existing.value)).created_at
+
+    item = MemoryItem(
+        schema_version=MEMORY_SCHEMA_VERSION,
+        memory_id=memory_id,
+        kind="strategy",
+        summary=build_validated_strategy_summary(
+            strategy_summary,
+            changed_problem_domain=changed_problem_domain,
+            metric_version=metric_version,
+            total_loss=total_loss,
+        ),
+        importance=STRATEGY_IMPORTANCE,
         source_run_id=source_run_id,
         glsl_sha256=glsl_sha256.lower(),
         iteration=iteration,

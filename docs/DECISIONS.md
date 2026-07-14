@@ -105,6 +105,7 @@
 - 原因：这两个节点需要保留模型推理过程用于调试、评估和后续质量分析；独立列比塞进 JSON payload 更容易做权限、清理和查询策略。
 - 影响：`agent_events` 新增 `reasoning_content text`，SQL 包含 `ADD COLUMN IF NOT EXISTS` 兼容已有开发库；`POST /api/shader/generate` 和 `POST /api/shader/review` 在数据库连接池可用时，都会把模型调用中的思维链写库。对外 API 响应仍不返回思维链。
 - 更新（D016）：本条中"固定以 `thinking=on`、`capture_reasoning=true` 调用模型"的表述已被 D016 取代为节点工厂构造器参数控制；默认值仍与本条一致，存库契约不变。
+- 更新（D027）：Legacy 默认 `capture_reasoning=false`、`print_reasoning=false`，只有节点显式 opt-in 才可写入专列；本条的默认采集、打印和存库行为不再适用。
 
 ## D016 - 生成和评审节点改为 config 字典工厂控制 thinking
 
@@ -112,6 +113,7 @@
 - 决策：`generate_glsl_node.py` 和 `review_render_node.py` 改为节点工厂 `make_generate_glsl_node(config=...)` / `make_review_render_node(config=...)`，`config` 字典（字段 `model`/`thinking`/`capture_reasoning`/`print_reasoning`，风格同 `model_call`）是这两个节点模型与思维链的唯一控制源；图装配时显式调用工厂。`thinking` 控制是否开启模型 thinking（default/on/off），`print_reasoning` 控制是否把思维链打印到 `agent.model` logger，`capture_reasoning` 控制模型是否回吐 `reasoning_content`（打印与存库都依赖它），`model` 写入调用摘要与状态。两个节点不再接收或读取 `runtime` 参数。
 - 原因：D015 原实现把这两个节点硬编码为 thinking 常开、思维链常打印，且签名里的 `runtime` 参数被忽略，无法按节点控制是否开启 thinking 或是否打印思维链。改为 config 字典工厂后，模型与思维链配置以 `model_call` 风格的单一字典表达，"是否开 thinking"和"是否打印思维链"成为两个独立、可在装配节点时传入的开关；默认值保持 D015 行为（thinking 开、打印开、存库），生产行为不变。shader 节点与基础对话图解耦：`model_node` 仍走 `runtime.context`，互不影响。
 - 影响：`nodes/model_reasoning.py` 删除 `reasoning_model_options()`；新增 `nodes/image_content.py` 抽出两节点复用的图片片段构造；`shader_generation_graph.py` 改为用工厂装配节点；每节点文件顶部声明默认 config 字典常量。`model_calls[*].reasoning_content` 存库契约不变，`backend/` 与 SQL 不动。`Context` / `model_runtime_options.py` 仍由基础对话图使用。
+- 更新（D027）：工厂配置能力保留，但 Legacy 两个默认 config 已改为不捕获、不打印 reasoning；显式 `capture_reasoning=true` 的受控调试配置仍可使用专列。
 
 ## D017 - Agent 模型层升级为 LLM Gateway
 
@@ -133,4 +135,72 @@
 - 日期：2026-07-13
 - 决策：F09 V1 使用 `PngToShaderOrchestrator` 确定性主控和 `VisualAnalysisAgent`、`ShaderAuthorAgent`、`VisualCriticAgent` 三个模型角色；V1 先让 Author 生成受 WebGL1 无贴图契约约束的自由 GLSL，通过未来的真实 Renderer、Basic Oracle、`current_best` 和硬预算验证闭环。Effect Genome、参数搜索和独立 `StructureEvolutionAgent` 推迟到 V2。
 - 原因：现有项目只有一次生成和一次建议式 Review，最先需要验证的是浏览器渲染事实、局部评分和有限修订能否稳定提高结果。此时同时引入 Genome、搜索器、异步队列和更多 Agent 会扩大调试面，无法判断质量提升来自哪里。
-- 影响：M0 创建 `src/shaderforge/contracts/` 作为首个真实 ShaderForge 子包，冻结 `webgl1_static_no_texture_v1`、问题域、停止原因、质量档位、预算和候选接受策略；当前 `image_to_glsl.yaml` 修正为真正禁止参考图采样，并使用 YAML 版本进入模型调用审计。M1 先实现 Validator、真实 WebGL Renderer、Basic Oracle 和本地 Artifact Store；M2 才接三个子 Agent；V1 未完成全部自动化门禁前 F09 保持 active。
+- 影响：M0 创建 `src/shaderforge/contracts/` 作为首个真实 ShaderForge 子包，冻结 `webgl1_static_no_texture_v1`、问题域、停止原因、质量档位、预算和候选接受策略；当前 `image_to_glsl.yaml` 修正为真正禁止参考图采样，并使用 YAML 版本进入模型调用审计。M1 已实现 TargetMeasurements、Validator、真实 WebGL Renderer、Basic Oracle 和本地 Artifact Store；M2 才接三个子 Agent；V1 未完成全部自动化门禁前 F09 保持 active。
+
+## D020 - M1 以独立真实 WebGL1 事实层作为模型闭环的裁判
+
+- 日期：2026-07-13
+- 决策：F09 M1 的模型无关事实层统一进入 `src/shaderforge/`。参考图先用 Pillow/NumPy 产生版本化 `TargetMeasurements`；候选先过无贴图 WebGL1 静态 Validator，再由项目自有 Playwright/Chromium worker 在固定 `u_time = 0`、目标分辨率、`antialias = false`、`preserveDrawingBuffer = true` 且不创建或绑定纹理的环境中编译和渲染。Basic Oracle 首期使用 sRGB RMSE/MAE、边缘、主体 bbox/中心/面积、代表像素和 ROI loss；主体 mask 置信度低时衰减几何权重。运行产物通过路径安全、原子写入的 LocalArtifactStore 保存。
+- 原因：M2 之后的模型只能提出分析、代码和修订建议，不能同时充当“是否编译、实际画面是什么、质量是否提高”的裁判。先固定可复现的 Renderer、指标和证据格式，才能区分模型问题、Shader 问题、浏览器问题和评分问题。
+- 影响：同一 Renderer 生命周期复用 browser/page，但每次 render 新建 canvas/context，编译失败绝不返回上一帧；worker 异常最多重放一次，仍失败则抛出 `RendererUnavailableError`；结果记录 Chromium、WebGL、GLSL、vendor 和 renderer 元数据。M1 只提供可被未来 Graph 调用的公共 API，尚不改变现有 Backend/Frontend 在线路径；D009 的前端 Review 路径在 M4 接入服务端闭环前继续有效。Basic Oracle 不是最终感知指标，线性光、Lab、SSIM、VLM/HITL 和搜索指标留给后续版本按 benchmark 证据演进。
+
+## D021 - M2 采用严格角色契约和最多一次结构化修复
+
+- 日期：2026-07-13
+- 决策：VisualAnalysis、三模式 ShaderAuthor 和 VisualCritic 使用版本化 YAML System Prompt、严格 Pydantic 输出契约和纯 Parser。业务语义调用使用部署选择的 `SHADER_GEN_MODEL_NAME`，默认 `temperature=0`、`thinking=on`、`capture_reasoning=true`；合法 JSON fence 在本地解析，JSON/Schema/角色绑定失败时最多追加一次同模型结构修复，并强制 `thinking=off`、`capture_reasoning=false`，第二次失败明确终止。所有 Node 只依赖 `LLMGateway`。
+- 原因：Analyst、Author、Critic 的职责和上下文绑定必须可由 Fake Gateway 确定性验证；无限修复或让修复调用重新执行业务推理会放大成本、延迟与语义漂移。compile-repair 还需要防止模型借语法错误大规模重写视觉参数，但纯文本检查不能冒充真实浏览器裁判。
+- 影响：Parser 只接受完整 JSON object 或单个 `json` fenced code block，拒绝自然语言包裹、重复 key、非有限数、未知字段、越权 GLSL、版本/mode/candidate/domain 错配；compile-repair scope guard 比较图层、参数 manifest、保护区和真实诊断引用，但最终编译与视觉退化仍留给 M1 Renderer/Oracle。Gateway 分开记录 `requested_model_ref` 与响应元数据优先的实际 `model_ref`；`model_calls` 和 Candidate provenance 记录模型身份来源、Prompt/repair 版本、attempt、usage、输出 hash 与 GLSL hash。M2 不新增 Graph、Backend 或 Frontend 接入，M3 才装配有界循环和 current_best。
+- 更新（D024）：真实 M5 canary 后，结构化角色默认的 `thinking=on`、`capture_reasoning=true` 已改为非思考 `json_object`；最多一次修复和严格 Parser 边界保持不变。
+
+## D022 - M3 以 best Artifact 为真相源并由确定性路由控制全部循环
+
+- 日期：2026-07-13
+- 决策：F09 M3 新建独立 `png_to_shader_v1_graph`，不扩张既有 `shader_generation_graph`。Graph 负责装配 `prepare_context`、M2 三角色和 M1 事实层；`shaderforge.evaluation.select_current_best()` 是唯一候选晋级入口。候选先写入按 project/run 隔离的 Artifact，再补齐 compile、render、metrics、selection 和 review；Critic、visual-refine 和 finalize 均从 `current_best` Artifact 读取并重新校验 hash，不信任 State 中的 latest GLSL/PNG。只有 hard constraints、Oracle score 和 Selector 都通过的 best 策略可以写入长期 Memory。
+- 原因：模型输出、最新候选和最终结果不能同时充当事实与裁判。若 refine 或 repair 失败、退化或模型不可用，仍必须有一个不可被覆盖的历史可运行结果；把 GLSL、PNG、指标和 provenance 绑定为同一候选 Artifact，才能避免旧截图、新源码或错误评分串轮。独立 Graph 也避免 M4 之前影响现有在线 generate/review 路径。
+- 影响：模型调用由预算包装器统一计数，剩余一次调用时禁止额外 JSON repair；模型和 Renderer 调用使用 wall-time timeout。compile repair、visual refine、model calls、Shader chars、Renderer replay 受 `BudgetPolicy` 限制，自定义预算不得超过 V1 high 档；Graph 默认 recursion limit 为 96，覆盖 high 档全部有限路径。Renderer 通过 run 级 registry 隔离并在 finalize 关闭。第一个有效候选成为 best，后续候选必须达到 `min_total_improvement` 且 protection regression 不超过阈值，缺失保护证据也拒绝晋级。M3 只提供 Agent/ShaderForge 内部图和 Artifact/Memory 语义；Backend、Frontend、过程账本、Artifact 下载白名单和产品 API 仍属于 M4。
+
+## D023 - M4 复用阻塞 generate，并以白名单 Artifact 和双端渲染复核产品化 V1
+
+- 日期：2026-07-13
+- 决策：过渡期继续复用阻塞式 `POST /api/shader/generate`，由 `generation_mode=legacy|procedural_v1` 显式分流；V1 通过独立 `agent.app.services.png_to_shader_v1` 调用 M3 Graph，不把 Graph、Renderer 或 Artifact 路径暴露给 Route。最终结果复制到固定 `final/` 布局，并只开放 `final-render`、`metrics`、`manifest` 三个名字；run_id 到 project_id 使用 LocalArtifactStore 内部持久索引解析。前端用服务端返回的规范化 render 尺寸，以 WebGL1、`u_time=0`、不绑定参考图纹理重新编译最终 GLSL，并对客户端 canvas 与服务端 PNG 计算 RGB RMSE。
+- 原因：V1 需要在不引入任务队列、轮询协议或新服务的前提下验证完整产品路径，同时避免客户端提交任意文件路径和前端渲染环境掩盖服务端事实。固定 final Artifact 与 run 索引让 URL 在进程重启后仍可解析；双端实际像素比较比只显示两个画面更能发现分辨率、坐标、WebGL 兼容和运行契约漂移。
+- 影响：V1 checkpoint thread 使用 `png-to-shader-v1:{project_id}` 与 legacy 图隔离，但两个图共享同一项目 Store；清除项目记忆同时清除两类 checkpoint/Memory。过程账本在 run input/result JSON 中记录模式、质量、停止原因、current_best 和评分，并把 Graph 累积事件逐项写入 `agent_events`；本阶段仍是完成后一次性落账，不提供实时轮询。D009 继续适用于 legacy 的前端 canvas -> `/review` 路径，`procedural_v1` 不再额外调用 `/review`，而是展示 Graph 最后一次 Critic 结果。异步队列、实时进度、远端对象存储、鉴权下载和保留策略留待实际部署需求出现后设计。
+
+## D024 - M5 使用冻结门禁、非思考 JSON mode 和独立人工盲评
+
+- 日期：2026-07-13
+- 决策：F09 M5 使用版本化 10 例 manifest 与 `m5_gate.yaml`，运行前固定 compile/static、initial-final 改善、current_best 单调性、traceability 和 pink-gel 局部阈值。AI-off baseline 只验证 Validator/Renderer/Oracle；AI-on runner 必须显式 `--allow-model-calls` 并受整套调用硬上限。benchmark 单独把 `quality_threshold` 设为 `0` 以确保实际进入 Critic/refine，产品默认早停策略不变。三种结构化角色和 JSON repair 使用 `temperature=0`、`thinking=off`、`capture_reasoning=false`、`response_format=json_object`；原始输出和 reasoning 不落 benchmark，只保留 hash、安全错误码/字段路径、usage、模型/Prompt 身份与候选谱系。WebGL1 无扩展契约同时禁止 `fwidth/dFdx/dFdy`。
+- 原因：真实 canary 证明 thinking 模式结构化输出延迟高且会产生不可解析结果；自由文本 JSON 还会让长 GLSL 字符串出现未转义控制字符。供应商 JSON mode 只有在非思考模式下可稳定使用。benchmark 若沿用产品质量阈值，简单样例会在初稿提前停止，无法验证闭环是否真的改善；而把同轮结果用于移动阈值会失去发布门禁意义。自动指标也不能替代人对视觉偏好的判断。
+- 影响：`LLMCallOptions` 新增供应商中立 `text | json_object`，各 OpenAI-compatible family 负责请求映射；三个结构化默认配置不影响 legacy 自由文本节点。失败运行和 canary 作为证据永久保留，不覆盖成成功结果。nightly 无条件运行 AI-off，AI-on 只有仓库变量显式开启或手动 workflow 触发时才消耗预算。自动门禁全部通过后仍返回 `pending_human_review`，必须由独立评审者完成 10 项匿名 A/B 并用原运行 config 重新计算，Agent 不得替用户投票。
+- 验证结果：正式 run `m5-20260713-balanced-v3` 使用实际审计模型 `dashscope:qwen3.7-plus` 完成 10 例、70 次模型调用。compile/static/traceability/final-current_best/单调性全部通过，但 initial-final 改善率只有 10%，pink-gel 的 bbox、global color 和四个关键 ROI 均失败，因此冻结 gate 为 `failed`，灰度 no-go。人工盲评页已完成浏览器验收但未由 Agent 投票。首次正式 run 暴露 runner 在 dotenv 加载前记录通用 fallback 的问题；逐调用审计未受影响，报告 schema v2 已同时展示旧快照与实际身份，新 config schema v2 在首个模型调用前冻结角色路由和结构化调用参数，旧 schema v1 的不完整 AI-on run 禁止继续。
+- 人工复核：2026-07-14 独立评审提交 10 个完整选择，其中 9 个平局、1 个偏好 final；人工完整度通过，final 偏好率 10% 低于 50% 门槛。原始 JSON 按 SHA-256 归档，evaluate 只读取原 config 与 assignments、未调用模型；最终 gate 继续为 `failed`。
+
+## D025 - 结构化小错先做受限本地归一化，失败终态输出安全诊断
+
+- 日期：2026-07-14
+- 决策：严格 Parser 本身保持不变。只有 VisualAnalysis 的全部错误都精确指向 `regions_of_interest[*].purpose`，并且原值命中显式、版本化的语义别名表时，`structured_output` 才允许本地改值后重新执行完整 Parser；未知值或任何并存错误仍进入原有最多一次模型修复路径。V1 失败终态由 Agent 公共异常生成安全诊断，Backend 同时打印结构化摘要并写入 `agent_logs` 与失败 run result。
+- 原因：真实 422 run `b6fa41c4-a084-4999-8ac3-4600e4990d3b` 中，首次 VisualAnalysis 仅有一个 ROI purpose 枚举错误，模型调用耗时 46.8 秒；同模型重写整份 JSON 又耗时 156.7 秒，导致 300 秒 balanced wall-time 只剩约 97 秒，Author 随后超时且候选数为 0。对已知枚举别名调用大模型重写整份对象既不增加业务语义，也挤占生成候选所需预算。
+- 影响：本地归一化记录策略名、修复字段路径和源错误码，但原始模型审计仍标记 `parse_status=invalid`，不会伪装成模型直接输出合法；该路径不适用于缺字段、未知字段、绑定错误、任意枚举或 Author/Critic。后端 `LOG_LEVEL` 现在覆盖 `backend`、`agent`、`shaderforge`，终端可看到阶段、剩余预算、模型耗时、Renderer/评估状态和 finalize；FastAPI route 前置校验的 422 由 `request.validation_failed` 打印安全字段诊断，业务闭环 422 由 `shader.generate.no_validated_result` 打印终态诊断。日志与数据库摘要禁止包含图片、完整 GLSL、reasoning、原始模型响应、用户约束正文或密钥。
+
+## D026 - Metrics Artifact 显式使用 API 形态，HTTP 契约先于成功入账
+
+- 日期：2026-07-14
+- 决策：`ScoreBreakdownV1` 继续在领域内以不可变 pair tuple 保存 ROI、保护区和有效权重，但写 metrics Artifact 时必须显式调用 `to_dict()`；Agent service 对旧 pair-list Artifact 做受限兼容归一化。Backend 必须先构造并验证完整 `ShaderResponse`，通过后才批量写事件/日志并把 run 标为 succeeded；响应契约失败则按 backend response 阶段失败入账。
+- 原因：真实 run `4cb1b13a-0a10-484a-90a3-c1c392668e0e` 已生成三个候选，第三个通过 WebGL1 且 `total_loss=0.087040`，但 `RunArtifactStore.write_json(score_dataclass)` 经 `asdict()` 把三个映射字段编码为 pair-list，最终 `ShaderScore` 校验失败并返回 HTTP 500。由于旧顺序先写成功账本再构造响应，同一 run 又被错误标记为 succeeded。日志还显示 Graph finalize 后逐条远程写账本额外耗时约 55 秒。
+- 影响：新 metrics/final manifest 的映射字段稳定为 JSON object；旧 pair-list score 在 Agent service 边界规范化，不把兼容逻辑扩散到对外 schema。生成成功/失败的事件和日志改为 asyncpg 批量写入，同一次连接租约最后更新 run 状态，减少远程数据库往返；响应构造失败打印 `shader.generate.response_contract_failed` 并返回明确 500，不会再产生新的假成功记录。
+
+## D027 - M6.0 以可恢复结果、类型化失败和安全账本作为发布前可靠性边界
+
+- 日期：2026-07-14
+- 决策：在 M5 自动与人工门禁均为 no-go 时，产品默认回退到 `legacy`，`procedural_v1` 只作为明确标注的实验模式。V1 模型阶段分别使用 60/120/60/45/90 秒 cap，并保留总预算 10%、最多 30 秒给确定性修复、Renderer、Evaluator 和 finalize；Legacy 单次生成增加 180 秒服务端 timeout。Initial Author 本地修复只允许在身份字段已经正确时清空两个固定空列表；常量严格倒序 `smoothstep` 只做版本化的确定性意图修复，修后重新执行完整 Validator。Renderer 已成功而 Evaluator 超时或失败时，返回 `unscored_fallback=true`、`score=null`、`metrics_url=null` 的 WebGL-valid GLSL/render，不伪造 `current_best` 或评分。
+- 原因：真实 run `80c54e7c-573e-4a3e-b814-48539c77ff53` 在 300 秒内把大量时间花在可本地修复的固定绑定和倒序 `smoothstep` 上，最终以 `wall_time_exhausted` 丢弃了可运行候选。后续审计还发现：评分失败会遮蔽已经通过 WebGL 的 Shader、终态写库可能部分成功、FastAPI 422/供应商/Renderer/内部错误语义混杂、编译日志和 reasoning 原文可能进入普通可观测链路。
+- 影响：生成失败统一使用 `{message, code, run_id, stage, retryable, stop_reason}`；wall/model timeout、Renderer、供应商、模型配置/响应、persistence、Shader validation 和内部 pipeline 错误分别映射到稳定 504/503/502/500/422。未知内部异常不再降级成业务 422。`agent_events + agent_logs + agent_runs` 终态写入处于同一事务，先锁 run；同终态重放 no-op，不同终态拒绝覆盖。生成成功后的账本提交失败不得覆盖 HTTP 200，但会记录 `persistence_stage=outcome_commit`。
+- 安全更新：Legacy 默认继续允许模型内部 thinking，但 `capture_reasoning=false`、`print_reasoning=false`；只有节点显式 opt-in 才可把 reasoning 写入专列。D015/D016 关于 Legacy 默认采集、打印和存库的历史默认值由本决策取代。普通终端只打印 reasoning 字符数与 SHA-256；WebGL compiler 原文只留私有 compile Artifact，Graph event/数据库只写长度、SHA 和安全错误码。
+- 剩余边界：阻塞式 `POST /generate` 和浏览器 AbortController 仍不是真正的服务端任务取消；Evaluator 的 `asyncio.to_thread` 超时后线程可能在后台完成；全 Graph、Store/数据库命令和成功账本尚无统一端到端 deadline/outbox/reaper；过程账本仍按 model calls 后 events 批量排序；项目锁仅单进程有效。以上进入后续可靠性里程碑，不得被本次 M6.0 的测试通过误写成已解决。
+
+## D028 - F09 Node Lab 使用调试专用 Adapter 和不可变步骤快照
+
+- 日期：2026-07-14
+- 决策：把 PNG-to-Shader V1 的节点教学、隔离测试和故障定位设计为默认关闭的 `/api/lab/v1/*` 调试边界，并继续归属唯一 active 功能 F09。一个 allowlist Node Registry 通过通用步骤接口覆盖生产图全部 19 个节点；Validator、Renderer、Oracle、Selector 和路由另提供复用同一公共能力的友好接口。Node Lab 不直接暴露 `PngToShaderV1State`，而是为每一步保存不可变 JSON-safe 快照，把图片、GLSL、渲染图和原始模型内容转换为 Lab Artifact 引用，再由显式 Adapter 重建节点内部类型。模型步骤支持 preview、fixture、mock 和双重显式开关保护的 real 模式；V1.0 的策略 Memory 晋升只 preview，不写真实项目 Memory。
+- 原因：V1 的大对象和证据使用 `UntrackedValue`，不能把 LangGraph checkpoint 误当成可跨请求完整恢复的真相源；Backend 也不能为了调试直接 import Node、Prompt、Gateway 或领域算法。不可变 `base_step_id` 快照既能支持重试和分支，又不会覆盖产品 run、current_best 或失败证据。独立 Validator/Renderer/Oracle 接口可以把契约 Bug、基础设施故障、正常候选拒绝和视觉质量不足分开观察，同时避免为每个内部 helper 建立长期 HTTP 契约。
+- 影响：完整设计记录在 `docs/superpowers/specs/2026-07-14-node-lab-api-v1-design.md`，当前尚未创建 Route、Schema、Service、Adapter、Store、测试或前端页面，也未改变现有产品 API 和 F09 no-go 结论。实现时必须保持 Lab 默认关闭、禁止任意路径和跨 LabRun Artifact 引用、禁止 reasoning/密钥/供应商原始异常外泄，并同步更新 Backend/Agent 模块文档、环境变量说明、测试和 F09 证据。

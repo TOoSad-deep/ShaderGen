@@ -18,6 +18,11 @@ async def test_gateway_normalizes_response() -> None:
             return AIMessage(
                 content="完成",
                 additional_kwargs={"reasoning_content": "推理"},
+                response_metadata={
+                    "model_name": "qwen3.7-plus-202607",
+                    # OpenAI-compatible 客户端可能填入适配器身份，不能覆盖真实 provider。
+                    "model_provider": "openai",
+                },
                 usage_metadata={
                     "input_tokens": 3,
                     "output_tokens": 2,
@@ -42,10 +47,30 @@ async def test_gateway_normalizes_response() -> None:
     assert captured == [options]
     assert result.text == "完成"
     assert result.reasoning_content == "推理"
-    assert result.model_ref == options.model_ref
+    assert result.model_ref == "dashscope:qwen3.7-plus-202607"
+    assert result.requested_model_ref == options.model_ref
+    assert result.model_identity_source == "response_metadata"
     assert result.latency_ms == 125
     assert result.usage is not None
     assert result.usage.total_tokens == 5
+
+
+@pytest.mark.anyio
+async def test_gateway_marks_configured_model_identity_fallback() -> None:
+    class FakeClient:
+        async def ainvoke(self, messages):
+            return AIMessage(content="完成")
+
+    gateway = LangChainLLMGateway(client_factory=lambda options: FakeClient())
+
+    result = await gateway.ainvoke(
+        [HumanMessage(content="你好")],
+        LLMCallOptions(model_ref="qwen:qwen3.7-plus"),
+    )
+
+    assert result.model_ref == "dashscope:qwen3.7-plus"
+    assert result.requested_model_ref == "qwen:qwen3.7-plus"
+    assert result.model_identity_source == "configured_fallback"
 
 
 @pytest.mark.anyio

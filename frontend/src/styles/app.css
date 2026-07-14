@@ -45,6 +45,7 @@ body {
 .topbar-actions,
 .status,
 .run-button,
+.stop-button,
 .panel-header button {
   display: inline-flex;
   align-items: center;
@@ -67,6 +68,63 @@ body {
   border: 1px solid #cbd5e1;
   border-radius: 6px;
   background: white;
+}
+
+.run-config {
+  display: grid;
+  grid-template-columns: minmax(170px, 0.8fr) minmax(150px, 0.7fr) minmax(280px, 2fr);
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: white;
+}
+
+.run-config label {
+  display: grid;
+  align-content: start;
+  gap: 7px;
+  color: #334155;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.run-config select,
+.run-config textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #94a3b8;
+  border-radius: 4px;
+  background: white;
+  color: #0f172a;
+  font: inherit;
+  font-weight: 500;
+}
+
+.run-config select {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.run-config textarea {
+  min-height: 70px;
+  resize: vertical;
+  padding: 9px 10px;
+  line-height: 1.45;
+}
+
+.run-config select:disabled,
+.run-config textarea:disabled {
+  background: #f1f5f9;
+  color: #94a3b8;
+}
+
+.experimental-note {
+  color: #b45309;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.45;
 }
 
 .project-current {
@@ -105,7 +163,8 @@ body {
 }
 
 .memory-warning,
-.project-message {
+.project-message,
+.request-stop-notice {
   margin: -6px 0 16px;
   padding: 10px 12px;
   border-radius: 4px;
@@ -122,6 +181,12 @@ body {
 .project-message {
   background: #eff6ff;
   color: #1d4ed8;
+}
+
+.request-stop-notice {
+  border: 1px solid #f59e0b;
+  background: #fffbeb;
+  color: #92400e;
 }
 
 .status {
@@ -149,6 +214,15 @@ body {
   cursor: pointer;
 }
 
+.stop-button {
+  border: 1px solid #b45309;
+  border-radius: 4px;
+  padding: 0 14px;
+  background: #fffbeb;
+  color: #92400e;
+  cursor: pointer;
+}
+
 .run-button:disabled {
   border-color: #cbd5e1;
   background: #e5e7eb;
@@ -162,14 +236,151 @@ body {
   gap: 16px;
 }
 
+.panels.has-server-render {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .panel,
 .code-panel,
-.review-panel {
+.review-panel,
+.run-progress,
+.score-panel,
+.failure-panel {
   background: white;
   border: 1px solid #d1d5db;
   border-radius: 6px;
   padding: 16px;
   box-shadow: 0 1px 2px rgb(15 23 42 / 5%);
+}
+
+.run-progress {
+  margin-bottom: 16px;
+}
+
+.failure-panel {
+  margin-bottom: 16px;
+  border-color: #fecaca;
+}
+
+.failure-message {
+  margin: 0 0 12px;
+  color: #b91c1c;
+  line-height: 1.5;
+}
+
+.failure-facts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.failure-facts > div {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 4px;
+  background: #fff7ed;
+}
+
+.failure-facts dt {
+  margin-bottom: 5px;
+  color: #9a3412;
+  font-size: 12px;
+}
+
+.failure-facts dd {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: #7c2d12;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.failure-guidance {
+  margin: 12px 0 0;
+  color: #9a3412;
+  font-size: 13px;
+}
+
+.run-wait-hint {
+  margin-bottom: 0;
+}
+
+.stage-list {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: stage;
+}
+
+.stage-list li {
+  min-height: 48px;
+  padding: 10px;
+  border-radius: 4px;
+  background: #eff6ff;
+  color: #1e40af;
+  font-size: 13px;
+  line-height: 1.45;
+  counter-increment: stage;
+}
+
+.stage-list li::before {
+  content: counter(stage) ". ";
+  font-weight: 800;
+}
+
+.run-facts {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.run-facts > div {
+  min-width: 0;
+  padding: 10px;
+  border-radius: 4px;
+  background: #f8fafc;
+}
+
+.run-facts dt {
+  margin-bottom: 5px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.run-facts dd {
+  overflow-wrap: anywhere;
+  margin: 0;
+  color: #0f172a;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.run-facts .compatibility {
+  grid-column: span 2;
+}
+
+.run-facts .compatibility.is-compatible {
+  background: #ecfdf5;
+}
+
+.run-facts .compatibility.is-compatible dd {
+  color: #047857;
+}
+
+.run-facts .compatibility.is-different,
+.run-facts .compatibility.is-error {
+  background: #fef2f2;
+}
+
+.run-facts .compatibility.is-different dd,
+.run-facts .compatibility.is-error dd {
+  color: #b91c1c;
 }
 
 .panel-header {
@@ -222,6 +433,21 @@ body {
   background: #eef2f6;
 }
 
+.server-render-panel img {
+  width: 100%;
+  height: auto;
+  aspect-ratio: auto;
+  min-height: 300px;
+  display: block;
+  background: #eef2f6;
+  object-fit: contain;
+}
+
+.preview canvas {
+  height: auto;
+  aspect-ratio: auto;
+}
+
 .dropzone {
   border: 1px dashed #94a3b8;
   cursor: pointer;
@@ -269,8 +495,42 @@ body {
 }
 
 .code-panel,
-.review-panel {
+.review-panel,
+.score-panel {
   margin-top: 16px;
+}
+
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.score-grid > div {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border-radius: 4px;
+  background: #f8fafc;
+}
+
+.score-grid span {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.score-grid strong {
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 17px;
+}
+
+.score-grid .score-primary {
+  background: #eff6ff;
+}
+
+.score-grid .score-primary strong {
+  color: #1d4ed8;
 }
 
 .code-panel pre {
@@ -320,13 +580,15 @@ body {
   }
 
   .project-bar,
-  .project-actions {
+  .project-actions,
+  .run-config {
     align-items: stretch;
     flex-direction: column;
   }
 
   .status,
-  .run-button {
+  .run-button,
+  .stop-button {
     flex: 1;
   }
 
@@ -334,9 +596,29 @@ body {
     grid-template-columns: 1fr;
   }
 
+  .panels.has-server-render,
+  .stage-list,
+  .run-facts,
+  .score-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .failure-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .run-facts .compatibility {
+    grid-column: auto;
+  }
+
+  .run-config {
+    grid-template-columns: 1fr;
+  }
+
   .dropzone,
   .empty,
-  .preview canvas {
+  .preview canvas,
+  .server-render-panel img {
     min-height: 260px;
   }
 }

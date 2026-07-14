@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 from agent.app.config.model_config import SHADER_GEN_MODEL_NAME
 from agent.app.graphs.shader_generation_graph import (
@@ -14,14 +14,12 @@ from agent.app.graphs.shader_generation_graph import (
 )
 from agent.app.memory.models import MemoryStatus
 from agent.app.memory.store import clear_project_memories
+from agent.app.parsers.shader_response import ParsedShaderReview
 from agent.app.parsers.shader_response import extract_glsl as _extract_glsl
 from agent.app.parsers.shader_response import (
     parse_shader_review_response as _parse_shader_review_response,
 )
-
-
-class MemoryUnavailableError(RuntimeError):
-    """表示任务 checkpoint 无法安全读写."""
+from agent.app.services.errors import MemoryUnavailableError
 
 
 @dataclass(frozen=True)
@@ -62,7 +60,13 @@ class ClearMemoryResult:
 class ShaderGenerationService:
     """持有已注入 persistence 的 Shader Graph 服务."""
 
-    def __init__(self, graph, checkpointer, store, memory_status: MemoryStatus) -> None:
+    def __init__(
+        self,
+        graph: Any,
+        checkpointer: Any,
+        store: Any,
+        memory_status: MemoryStatus,
+    ) -> None:
         """保存已编译图和对应 persistence 资源."""
         self.graph = graph
         self.checkpointer = checkpointer
@@ -72,10 +76,11 @@ class ShaderGenerationService:
     async def invoke(self, project_id: str, state: dict[str, Any]) -> dict[str, Any]:
         """在指定项目 thread 中调用图并识别 persistence 失败."""
         try:
-            return await self.graph.ainvoke(
+            result = await self.graph.ainvoke(
                 state,
                 {"configurable": {"thread_id": project_id}},
             )
+            return cast(dict[str, Any], result)
         except Exception as exc:
             module = type(exc).__module__
             if module.startswith(("psycopg", "langgraph.checkpoint")):
@@ -94,8 +99,8 @@ class ShaderGenerationService:
 
 def create_shader_generation_service(
     *,
-    checkpointer,
-    store,
+    checkpointer: Any,
+    store: Any,
     memory_status: MemoryStatus,
 ) -> ShaderGenerationService:
     """使用外部 persistence 创建后端可注入的服务."""
@@ -121,7 +126,7 @@ def extract_glsl(text: str) -> str:
     return _extract_glsl(text)
 
 
-def parse_shader_review_response(text: str):
+def parse_shader_review_response(text: str) -> ParsedShaderReview:
     """解析模型输出的渲染评审 JSON."""
     return _parse_shader_review_response(text)
 

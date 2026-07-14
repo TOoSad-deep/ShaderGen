@@ -194,7 +194,9 @@ STOP_REASONS = tuple(reason.value for reason in StopReason)
 def budget_for_preset(preset: QualityPreset | str) -> BudgetPolicy:
     """按质量档位返回不可变的预算策略."""
     try:
-        normalized = preset if isinstance(preset, QualityPreset) else QualityPreset(preset)
+        normalized = (
+            preset if isinstance(preset, QualityPreset) else QualityPreset(preset)
+        )
     except ValueError as exc:
         allowed = ", ".join(item.value for item in QualityPreset)
         raise ValueError(f"quality preset 必须是 {allowed}。") from exc

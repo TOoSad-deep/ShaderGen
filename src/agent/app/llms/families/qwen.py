@@ -8,8 +8,15 @@ from langchain_core.outputs import ChatResult
 from langchain_openai import ChatOpenAI
 
 from agent.app.config.model_config import bool_env, optional_bool_env
-from agent.app.contracts.llm import ThinkingMode, normalize_thinking_mode
-from agent.app.llms.provider_config import provider_settings
+from agent.app.contracts.llm import (
+    ResponseFormat,
+    ThinkingMode,
+    normalize_thinking_mode,
+)
+from agent.app.llms.provider_config import (
+    provider_settings,
+    response_format_model_kwargs,
+)
 
 SHADER_GEN_QWEN_ENABLE_THINKING = optional_bool_env(
     "SHADER_GEN_QWEN_ENABLE_THINKING"
@@ -81,6 +88,7 @@ def get_qwen_model(
     temperature: float = 0,
     thinking: ThinkingMode | str | None = "default",
     capture_reasoning: bool | None = None,
+    response_format: ResponseFormat | str = "text",
 ) -> QwenChatOpenAI:
     """创建 Qwen 系列聊天客户端."""
     settings = provider_settings(provider, default_provider="dashscope")
@@ -91,8 +99,9 @@ def get_qwen_model(
     return QwenChatOpenAI(
         model=model,
         temperature=temperature,
-        api_key=settings.api_key,
+        api_key=settings.secret_api_key,
         base_url=settings.base_url,
+        model_kwargs=response_format_model_kwargs(response_format),
         extra_body=(
             None if enable_thinking is None else {"enable_thinking": enable_thinking}
         ),

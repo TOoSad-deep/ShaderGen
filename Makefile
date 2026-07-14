@@ -1,13 +1,16 @@
-.PHONY: all setup setup-memory-postgres dev dev-agent dev-backend dev-frontend check docs-check format lint test tests test_watch integration_tests test-memory-postgres docker_tests help extended_tests
+.PHONY: all setup setup-memory-postgres dev dev-agent dev-backend dev-frontend check docs-check format lint test tests test_watch integration_tests test-memory-postgres benchmark-ai-off benchmark-png-to-shader benchmark-gate docker_tests help extended_tests
 
 # Default target executed when no arguments are given to make.
 all: help
 
 # Define a variable for the test file path.
 TEST_FILE ?= tests/unit_tests/
+QUALITY_PRESET ?= balanced
+MODEL_CALL_BUDGET ?= 80
 
 setup:
 	uv sync
+	uv run playwright install chromium
 	npm --prefix frontend install
 
 setup-memory-postgres:
@@ -35,6 +38,17 @@ integration_tests:
 
 test-memory-postgres:
 	uv run python scripts/run_memory_postgres_test.py
+
+benchmark-ai-off:
+	uv run python scripts/run_png_to_shader_v1_benchmark.py --mode ai-off
+
+benchmark-png-to-shader:
+	uv run python scripts/run_png_to_shader_v1_benchmark.py --mode all --quality-preset $(QUALITY_PRESET) --allow-model-calls --model-call-budget $(MODEL_CALL_BUDGET)
+
+benchmark-gate:
+	@test -n "$(BENCHMARK_OUTPUT)" || (echo 'BENCHMARK_OUTPUT is required' && exit 2)
+	@test -n "$(HUMAN_REVIEW)" || (echo 'HUMAN_REVIEW is required' && exit 2)
+	uv run python scripts/run_png_to_shader_v1_benchmark.py --mode evaluate --output-dir "$(BENCHMARK_OUTPUT)" --human-review "$(HUMAN_REVIEW)" --require-gate-passed
 
 check:
 	uv run pytest tests/unit_tests
@@ -99,6 +113,9 @@ help:
 	@echo 'check                        - run unit tests, LangGraph validation, frontend build'
 	@echo 'docs-check                   - verify harness docs and architecture boundaries'
 	@echo 'test-memory-postgres         - verify Shader Memory against PostgreSQL'
+	@echo 'benchmark-ai-off             - run the 10-case renderer/oracle smoke without model calls'
+	@echo 'benchmark-png-to-shader      - run the cost-gated 10-case real-model benchmark'
+	@echo 'benchmark-gate               - evaluate a frozen run with HUMAN_REVIEW JSON'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'test                         - run unit tests'

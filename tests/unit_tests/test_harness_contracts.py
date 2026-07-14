@@ -105,6 +105,36 @@ def test_docs_check_resolves_from_import_targets(tmp_path) -> None:
     assert "agent.app.llms" in docs_check._imported_modules(source)
 
 
+def test_docs_check_detects_graph_diagram_edge_drift(monkeypatch) -> None:
+    spec = importlib.util.spec_from_file_location(
+        "docs_check_graph_diagrams",
+        ROOT / "scripts/docs_check.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    docs_check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(docs_check)
+    architecture = _read("src/agent/app/graphs/ARCHITECTURE.md").replace(
+        "prepare_context -. review .-> review_render",
+        "prepare_context -. review .-> missing_review_node",
+    )
+
+    def fake_read(path: str) -> str:
+        if path == "src/agent/app/graphs/ARCHITECTURE.md":
+            return architecture
+        return _read(path)
+
+    monkeypatch.setattr(docs_check, "_read", fake_read)
+    docs_check.ERRORS.clear()
+
+    docs_check._check_graph_visualizations()
+
+    assert any(
+        "prepare_context -. review .-> review_render" in error
+        for error in docs_check.ERRORS
+    )
+
+
 def test_shader_pipeline_run_summaries_are_untracked() -> None:
     hints = get_type_hints(ShaderPipelineState, include_extras=True)
 

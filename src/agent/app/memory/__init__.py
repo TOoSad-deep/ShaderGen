@@ -6,6 +6,7 @@ from agent.app.memory.store import (
     list_project_memories,
     memory_namespace,
     upsert_review_memory,
+    upsert_validated_strategy_memory,
 )
 
 __all__ = [
@@ -15,4 +16,5 @@ __all__ = [
     "list_project_memories",
     "memory_namespace",
     "upsert_review_memory",
+    "upsert_validated_strategy_memory",
 ]

@@ -10,6 +10,7 @@ MemoryKind = Literal["review", "constraint", "decision", "strategy"]
 MemoryStatus = Literal["durable", "ephemeral", "degraded"]
 MEMORY_SCHEMA_VERSION = 1
 REVIEW_IMPORTANCE = 0.5
+STRATEGY_IMPORTANCE = 0.7
 MAX_MEMORY_SUMMARY_CHARS = 2_000
 _MEMORY_KINDS = {"review", "constraint", "decision", "strategy"}
 
@@ -107,6 +108,14 @@ def review_memory_id(glsl_sha256: str) -> str:
     return f"review:{digest}"
 
 
+def strategy_memory_id(glsl_sha256: str) -> str:
+    """返回同一确定性验证 Shader 策略的稳定 Store key."""
+    digest = glsl_sha256.strip().lower()
+    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+        raise ValueError("glsl_sha256 必须是 64 位十六进制 SHA-256。")
+    return f"strategy:{digest}"
+
+
 def build_review_summary(evaluation: str, suggestions: tuple[str, ...]) -> str:
     """确定性拼接 Review 结果，不增加模型调用."""
     parts = [evaluation.strip()]
@@ -116,4 +125,23 @@ def build_review_summary(evaluation: str, suggestions: tuple[str, ...]) -> str:
     summary = "\n".join(part for part in parts if part)
     if not summary:
         raise ValueError("Review 没有可晋升的摘要。")
+    return summary[:MAX_MEMORY_SUMMARY_CHARS]
+
+
+def build_validated_strategy_summary(
+    strategy_summary: str,
+    *,
+    changed_problem_domain: str,
+    metric_version: str,
+    total_loss: float,
+) -> str:
+    """把已验证 Author 策略和确定性评分证据拼为长期摘要."""
+    strategy = strategy_summary.strip()
+    if not strategy:
+        raise ValueError("strategy_summary 不能为空。")
+    summary = (
+        f"{strategy}\n"
+        f"验证：domain={changed_problem_domain}; metric={metric_version}; "
+        f"total_loss={total_loss:.6f}"
+    )
     return summary[:MAX_MEMORY_SUMMARY_CHARS]

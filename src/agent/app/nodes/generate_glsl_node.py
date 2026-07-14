@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any
@@ -22,22 +23,24 @@ GENERATE_GLSL_MODEL_CONFIG = NodeModelConfig(
     call=LLMCallOptions(
         model_ref=SHADER_GEN_MODEL_NAME,
         thinking="on",
-        capture_reasoning=True,
+        capture_reasoning=False,
     ),
-    print_reasoning=True,
+    print_reasoning=False,
 )
+
+GenerateGlslNode = Callable[[ShaderPipelineState], Awaitable[ShaderPipelineState]]
 
 
 def make_generate_glsl_node(
     gateway: LLMGateway,
     config: NodeModelConfig = GENERATE_GLSL_MODEL_CONFIG,
-):
+) -> GenerateGlslNode:
     """创建生成 GLSL 的 Gateway Node."""
 
     async def generate_glsl(state: ShaderPipelineState) -> ShaderPipelineState:
         """根据原图生成 GLSL partial State."""
         context_pack = state.get("context_pack")
-        content: list[dict[str, Any]] = [
+        content: list[str | dict[Any, Any]] = [
             {"type": "text", "text": IMAGE_TO_GLSL_PROMPT.prompt}
         ]
         if context_pack:
@@ -66,7 +69,7 @@ def make_generate_glsl_node(
             "output_chars": len(response.text),
             "glsl_chars": len(glsl),
         }
-        if response.reasoning_content:
+        if config.call.capture_reasoning is True and response.reasoning_content:
             model_call["reasoning_content"] = response.reasoning_content
 
         iteration = int(state.get("iteration", 0)) + 1

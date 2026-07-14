@@ -1,5 +1,7 @@
 """Shader 生成、渲染评审和 Memory 晋升图."""
 
+from typing import Any, cast
+
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.store.memory import InMemoryStore
@@ -26,15 +28,29 @@ def _route_operation(state: ShaderPipelineState) -> str:
     return operation
 
 
+# 图（生成与评审）：
+#
+#   +-------+     +-----------------+    operation=generate    +---------------+
+#   | START | --> | prepare_context | -----------------------> | generate_glsl | --> END
+#   +-------+     +-----------------+                          +---------------+
+#                         |
+#                         | operation=review
+#                         v
+#                  +---------------+     +----------------+     +-----+
+#                  | review_render | --> | promote_memory | --> | END |
+#                  +---------------+     +----------------+     +-----+
+#
+# `_route_operation` 仅接受 generate / review；其他值会在路由前失败，避免进入
+# 未定义分支。
 def build_shader_generation_graph(
     gateway: LLMGateway,
     *,
-    checkpointer=None,
-    store=None,
-):
+    checkpointer: Any = None,
+    store: Any = None,
+) -> Any:
     """用指定 Gateway 构建 Shader 生成与评审图."""
     return (
-        StateGraph(ShaderPipelineState)
+        cast(Any, StateGraph(ShaderPipelineState))
         .add_node("prepare_context", make_prepare_context_node())
         .add_node(
             "generate_glsl",
@@ -67,7 +83,11 @@ shader_generation_checkpointer = InMemorySaver()
 shader_generation_store = InMemoryStore()
 
 
-def build_default_shader_generation_graph(*, checkpointer, store):
+def build_default_shader_generation_graph(
+    *,
+    checkpointer: Any,
+    store: Any,
+) -> Any:
     """使用默认真实 Gateway 和外部 persistence 构建 Shader 图."""
     return build_shader_generation_graph(
         _default_gateway,

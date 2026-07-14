@@ -79,6 +79,89 @@ def _check_agent_architecture_docs() -> None:
             )
 
 
+def _graph_endpoint(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name) and node.id in {"START", "END"}:
+        return node.id
+    return None
+
+
+def _graph_requirements(
+    source: str,
+) -> tuple[set[str], set[tuple[str, str]], set[tuple[str, str, str]]]:
+    tree = ast.parse(source)
+    nodes: set[str] = set()
+    direct_edges: set[tuple[str, str]] = set()
+    conditional_edges: set[tuple[str, str, str]] = set()
+
+    for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+        if not isinstance(call.func, ast.Attribute):
+            continue
+        if call.func.attr == "add_node" and call.args:
+            name = _graph_endpoint(call.args[0])
+            if name:
+                nodes.add(name)
+        elif call.func.attr == "add_edge" and len(call.args) >= 2:
+            source_name = _graph_endpoint(call.args[0])
+            target_name = _graph_endpoint(call.args[1])
+            if source_name and target_name:
+                direct_edges.add((source_name, target_name))
+        elif call.func.attr == "add_conditional_edges" and len(call.args) >= 3:
+            source_name = _graph_endpoint(call.args[0])
+            path_map = call.args[2]
+            if not source_name or not isinstance(path_map, ast.Dict):
+                continue
+            for key, value in zip(path_map.keys, path_map.values, strict=True):
+                if key is None:
+                    continue
+                route = _graph_endpoint(key)
+                target_name = _graph_endpoint(value)
+                if route and target_name:
+                    conditional_edges.add((source_name, route, target_name))
+
+    return nodes, direct_edges, conditional_edges
+
+
+def _graph_diagram_section(architecture: str, stem: str) -> str:
+    start = f"<!-- graph-diagram:{stem}:start -->"
+    end = f"<!-- graph-diagram:{stem}:end -->"
+    if start not in architecture or end not in architecture:
+        return ""
+    return architecture.split(start, 1)[1].split(end, 1)[0]
+
+
+def _check_graph_visualizations() -> None:
+    architecture = _read("src/agent/app/graphs/ARCHITECTURE.md")
+    graph_root = ROOT / "src/agent/app/graphs"
+
+    for path in sorted(graph_root.glob("*_graph.py")):
+        relative_path = str(path.relative_to(ROOT))
+        source = _read(relative_path)
+        _require("# 图（" in source, f"{relative_path} 缺少 Builder 上方的 ASCII 图。")
+
+        diagram = _graph_diagram_section(architecture, path.stem)
+        _require(
+            bool(diagram),
+            f"graphs/ARCHITECTURE.md 缺少 {path.stem} 的 Mermaid 区块。",
+        )
+        if not diagram:
+            continue
+
+        nodes, direct_edges, conditional_edges = _graph_requirements(source)
+        for node in sorted(nodes):
+            _require(
+                node in diagram,
+                f"{path.stem} Mermaid 缺少节点 {node}。",
+            )
+        for source_name, target_name in sorted(direct_edges):
+            edge = f"{source_name} --> {target_name}"
+            _require(edge in diagram, f"{path.stem} Mermaid 缺少直接边 {edge}。")
+        for source_name, route, target_name in sorted(conditional_edges):
+            edge = f"{source_name} -. {route} .-> {target_name}"
+            _require(edge in diagram, f"{path.stem} Mermaid 缺少条件边 {edge}。")
+
+
 def _check_agent_readme_harness_router() -> None:
     readme = _read("src/agent/README.md")
     for heading in (
@@ -151,6 +234,7 @@ def _check_backend_agent_boundary() -> None:
 def _main() -> int:
     _check_feature_state_machine()
     _check_agent_architecture_docs()
+    _check_graph_visualizations()
     _check_agent_readme_harness_router()
     _check_agent_service_boundary()
     _check_backend_agent_boundary()

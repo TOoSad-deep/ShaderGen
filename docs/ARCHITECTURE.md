@@ -19,7 +19,7 @@ ShaderGen/ShaderForge 将用户意图、参考图、约束和验收标准转成�
 - 初始设计：参考图、草图、描述。
 - 初始测试规划：验收指标、样例集。
 
-当前仓库状态：`frontend/src/App.tsx` 支持图片上传和 GLSL 预览；显式的风格、场景、约束、测试规划输入尚未实现。
+当前仓库状态：`frontend/src/App.tsx` 支持图片上传、`legacy | procedural_v1` 模式、V1 质量档位、补充约束、服务端/客户端双渲染和 GLSL/评分/停止原因展示；通用 Idea、风格、场景和测试规划结构化输入尚未实现。
 
 ### 2. 核心处理层
 
@@ -34,7 +34,7 @@ ShaderGen/ShaderForge 将用户意图、参考图、约束和验收标准转成�
 7. `Search Engine 调优`：CMA-ES、MAP-Elites、结构变异。
 8. `VLM / HITL`：模型评审、人工评审、Store 记录。
 
-当前仓库状态：`src/agent/app/graphs/main_graph.py` 保留基础对话图；`src/agent/app/graphs/shader_generation_graph.py` 使用显式 `operation` 路由串联 `prepare_context -> generate_glsl`，或 `prepare_context -> review_render -> promote_memory`。任务内轻量状态由 LangGraph Checkpointer 按 `project_id == thread_id` 保存，项目长期 Review Memory 写入版本化 Store namespace；图片、完整 GLSL、ContextPack、reasoning 和过程摘要不进入 checkpoint/Store。当前没有服务端 Renderer 时，前端先用 WebGL canvas 渲染第一帧，再把原图、当前渲染图、GLSL 和 `project_id` 发给 `POST /api/shader/review`。`backend/app/services/shader.py` 只调用 `agent.app.services.shader_generation` 公共服务；Backend 生命周期持有 LangGraph psycopg persistence pool，Agent Node 只通过 Runtime Store 接口访问 Memory。`backend/sql/001_agent_process.sql` 和 `backend/app/services/agent_process_store.py` 提供带 `project_id` 的过程账本。Intent IR、DSL、Renderer、Oracle、Search Engine、完整 VLM/HITL、ShaderForge Store 都是后续工作。
+当前仓库状态：`src/agent/app/graphs/main_graph.py` 保留基础对话图；`src/agent/app/graphs/shader_generation_graph.py` 继续服务 legacy 生成与前端 canvas Review。独立 `png_to_shader_v1_graph.py` 先运行 `prepare_context` 和参考图确定性测量，再调用 Analyst/Author/Critic，通过静态 Validator、项目自有 Playwright/Chromium WebGL1 Renderer、Basic Oracle 和 LocalArtifactStore 形成有界 initial / compile-repair / visual-refine 循环。纯 Selector 只在硬约束通过、总损失达到最小改善且保护区不超退化时更新 `current_best`；Critic/refine 与 finalize 均从 best Artifact 重载 GLSL/PNG/metrics，模型或新候选失败不会覆盖已有 best。任务内轻量状态由 LangGraph Checkpointer 保存，图片、完整 GLSL、渲染图、ContextPack、Candidate 大对象和过程摘要使用 `UntrackedValue`；项目长期 Memory 只保存精炼摘要，并且只晋升确定性验证过的 best 策略。M4 通过 `agent.app.services.png_to_shader_v1` 把该图接入 Backend：V1 使用独立 checkpoint thread 前缀但共享项目 Store，Backend 生命周期统一注入 persistence；过程事件由公共结果交给 Backend 写入账本。HTTP 只开放 final-render/metrics/manifest 白名单，前端按服务端规范化尺寸重编译 GLSL 并比较像素 RMSE。M5 以固定 10 例 manifest、AI-off smoke、成本受控 AI-on runner、运行前冻结 gate 和匿名 A/B 页面独立于产品请求执行；benchmark 只消费 Agent/ShaderForge 公共边界，不把评测逻辑放进 Backend。Intent IR、DSL、Search Engine 和完整 VLM/HITL 仍是后续工作。
 
 ### 3. 工具知识层
 
@@ -46,7 +46,7 @@ ShaderGen/ShaderForge 将用户意图、参考图、约束和验收标准转成�
 - Shader / 渲染知识：GLSL、WebGL、SDF、Noise、Blend、渲染一致性测试。
 - 数据与评测：SQLite/文件缓存、版本、谱系、评分、VLM pairwise、人工标签。
 
-当前仓库状态：已有 LangGraph、FastAPI、React、WebGL 预览、Prompt YAML、Agent 过程数据表和单元测试。F09 M0 已创建 `src/shaderforge/contracts/`，冻结 WebGL1 无贴图运行契约、问题域、停止原因、预算和候选接受策略；Renderer、Oracle、搜索和 ShaderForge 持久化层尚未实现。
+当前仓库状态：已有 LangGraph、FastAPI、React、WebGL 预览、Prompt YAML、Agent 过程数据表和单元测试。F09 M0 已冻结 WebGL1 无贴图运行契约、问题域、停止原因、预算和候选接受策略；M1 已增加 TargetMeasurements、Validator、真实 WebGL1 Renderer、Basic Oracle 和本地 Artifact Store；M2 已增加三个模型角色、严格 Parser、模型/Prompt/GLSL provenance 和一次结构化修复策略；M3 已增加独立有界 Graph、Candidate Artifact/current_best 选择、失败降级和验证后 Strategy Memory；M4 已增加产品 API、Artifact 白名单、阶段账本、结果 UI 和双端 WebGL 像素复核；M5 已增加固定 benchmark、AI-off/AI-on runner、质量门禁、盲评包和成本受控 nightly。搜索和 Effect Genome 留待后续版本，F09 是否 passing 仍由真实基准与人工盲评证据决定。
 
 ## 项目结构规范
 
@@ -87,7 +87,7 @@ ShaderGen/
 │       ├── routing/          # 任务拆解、路由策略、阶段选择
 │       ├── intent/           # Intent IR 类型、解析、约束结构化
 │       ├── dsl/              # Shader DSL 节点、图结构、变异操作
-│       ├── rendering/        # DSL 到 GLSL、渲染适配、渲染一致性检查
+│       ├── rendering/        # WebGL1 编译、渲染适配、渲染一致性检查
 │       ├── evaluation/       # Oracle、全局评分、局部损失、图像指标
 │       ├── search/           # CMA-ES、MAP-Elites、参数归一化、搜索预算
 │       ├── review/           # VLM pairwise、人工评审、评审结论
@@ -128,16 +128,24 @@ ShaderGen/
 ```text
 frontend 用户输入
   -> backend HTTP 校验
-  -> backend service 编排
+  -> backend service 按 generation_mode 分流
+  -> agent.app.services legacy 或 png_to_shader_v1 公共用例
   -> src/agent LangGraph 节点进行模型分析和策略选择
-  -> src/shaderforge 生成 Intent IR / DSL / GLSL
-  -> src/shaderforge evaluation 与 search 迭代优化
-  -> src/shaderforge review/store 记录评分、谱系和人工/模型评审
-  -> backend 返回结果
-  -> frontend 展示 GLSL 与 WebGL 预览
+  -> src/shaderforge 校验 / WebGL1 渲染 / Oracle / current_best / Artifact
+  -> backend 写过程账本并返回 GLSL、评分、停止原因和白名单 URL
+  -> frontend 展示服务端 PNG，以 WebGL1 重编译并比较像素 RMSE
 ```
 
 核心原则：`backend` 是入口，不是领域层；`agent` 是智能编排，不是算法仓库；`shaderforge` 是可测试、可复用、可脱离 HTTP 和 UI 运行的领域核心。
+
+### 在线可靠性边界
+
+- M5 质量门禁未通过期间，Frontend/HTTP 默认走 `legacy`；`procedural_v1` 必须由用户显式选择并显示实验/no-go 状态。
+- V1 的 wall-time 预算按阶段分配，模型不得占用留给确定性修复、Renderer、Evaluator 和 finalize 的保留时间；Legacy 单次模型调用也有服务端 timeout。
+- `current_best` 只能来自 Selector。只有当 Evaluator 不可用且候选已经通过静态检查和真实 WebGL 时，才允许返回明确标记的 `unscored_fallback`；它没有评分、metrics、Critic 绑定或长期 Memory 晋升资格。
+- API 错误必须区分请求校验、Shader validation、模型供应商/配置/响应、Renderer、persistence、timeout 和内部 pipeline 错误。未知内部异常不得伪装成用户可修复的 422。
+- 过程终态在单个数据库事务中提交事件、日志和 run 状态；普通日志/事件禁止完整 GLSL、图片、reasoning、供应商原文或编译器原文。原始编译证据只进入私有 Artifact。
+- 当前仍是阻塞式 API：浏览器停止等待不等于服务端取消。端到端 deadline、任务队列/cancel、outbox/reaper、多 worker 分布式锁和真实发生顺序事件属于下一可靠性阶段。
 
 ## 子包创建规则
 

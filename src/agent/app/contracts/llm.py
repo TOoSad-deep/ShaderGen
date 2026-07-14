@@ -9,7 +9,10 @@ from typing import Literal, Protocol, cast
 from langchain_core.messages import AIMessage, BaseMessage
 
 ThinkingMode = Literal["default", "on", "off"]
+ResponseFormat = Literal["text", "json_object"]
+ModelIdentitySource = Literal["response_metadata", "configured_fallback"]
 THINKING_MODES = {"default", "on", "off"}
+RESPONSE_FORMATS = {"text", "json_object"}
 
 
 def normalize_thinking_mode(value: ThinkingMode | str | None) -> ThinkingMode:
@@ -18,6 +21,13 @@ def normalize_thinking_mode(value: ThinkingMode | str | None) -> ThinkingMode:
     if normalized not in THINKING_MODES:
         raise ValueError("thinking 只能配置为 default/on/off。")
     return cast(ThinkingMode, normalized)
+
+
+def normalize_response_format(value: ResponseFormat | str) -> ResponseFormat:
+    """规范化模型输出格式语义值."""
+    if value not in RESPONSE_FORMATS:
+        raise ValueError("response_format 只能配置为 text/json_object。")
+    return cast(ResponseFormat, value)
 
 
 @dataclass(frozen=True)
@@ -37,12 +47,18 @@ class LLMCallOptions:
     temperature: float = 0
     thinking: ThinkingMode | str | None = "default"
     capture_reasoning: bool | None = None
+    response_format: ResponseFormat = "text"
 
     def __post_init__(self) -> None:
         """校验并规范化调用参数."""
         if not self.model_ref.strip():
             raise ValueError("model_ref 不能为空。")
         object.__setattr__(self, "thinking", normalize_thinking_mode(self.thinking))
+        object.__setattr__(
+            self,
+            "response_format",
+            normalize_response_format(self.response_format),
+        )
         if self.capture_reasoning is not None and not isinstance(
             self.capture_reasoning, bool
         ):
@@ -59,6 +75,8 @@ class LLMResponse:
     model_ref: str
     latency_ms: int
     usage: TokenUsage | None = None
+    requested_model_ref: str | None = None
+    model_identity_source: ModelIdentitySource = "configured_fallback"
 
 
 class LLMGateway(Protocol):

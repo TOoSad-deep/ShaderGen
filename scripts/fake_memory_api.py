@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 PROJECT_ID = "11111111-1111-4111-8111-111111111111"
+RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+ORIGIN = os.getenv("SHADERGEN_E2E_ORIGIN", "http://127.0.0.1:5173")
+PORT = int(os.getenv("SHADERGEN_FAKE_API_PORT", "8088"))
 GLSL = """precision mediump float;
 varying vec2 v_uv;
 uniform sampler2D u_image;
@@ -25,7 +29,7 @@ class Handler(BaseHTTPRequestHandler):
         return None
 
     def _cors(self) -> None:
-        self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1:5173")
+        self.send_header("Access-Control-Allow-Origin", ORIGIN)
         self.send_header("Access-Control-Allow-Methods", "POST,DELETE,OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
@@ -56,8 +60,11 @@ class Handler(BaseHTTPRequestHandler):
             self._json(
                 {
                     "project_id": PROJECT_ID,
+                    "run_id": RUN_ID,
                     "glsl": GLSL,
                     "memory_status": "ephemeral",
+                    "generation_mode": "legacy",
+                    "iterations": 0,
                 }
             )
             return
@@ -86,4 +93,4 @@ class Handler(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    ThreadingHTTPServer(("127.0.0.1", 8088), Handler).serve_forever()
+    ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
