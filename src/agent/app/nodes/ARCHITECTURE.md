@@ -14,7 +14,7 @@
 - `visual_critic_node.py`：先验证 candidate/GLSL/render 绑定，再输出只含诊断的严格 `VisualReview`。
 - `structured_output.py`：复用“一次语义调用 + 受限本地归一化 + 最多一次 JSON 修复”策略；记录安全字段路径/错误码和输出 hash，不保留原始失败输出。
 - `bounded_model_node.py`：M3 角色 Node 的共享预算包装器，按剩余 model budget 限制 JSON repair，并用角色级 timeout cap 与下游 reserve 约束模型调用；已知供应商/结构化失败可安全降级，未知内部异常必须向上抛出。
-- `png_to_shader_v1_run_nodes.py`：M3 的确定性单职责节点工厂，包括输入规范化/测量、一次性 measurement affine 根候选、Candidate Artifact、受限本地修复、真实 render/evaluate、current_best 选择输入、best Artifact 重载、Review 按轮次持久化和 finalize；不组装模型 Prompt。Evaluator 会在不覆盖确定性测量 ROI 的前提下追加 `VisualAnalysis` 语义 ROI；Evaluator 不可用时可从真实 WebGL 已验证候选生成明确的未评分 fallback。
+- `png_to_shader_v1/`：V1 确定性 Node 包。公开入口复用同一批 Graph/Node Lab 工厂，内部按运行准备、候选物化、校验、真实 WebGL1 渲染、确定性评分、current_best 选择/复核和 finalize 职责拆分；详细边界见 `png_to_shader_v1/ARCHITECTURE.md`。Evaluator 会在不覆盖确定性测量 ROI 的前提下追加 `VisualAnalysis` 语义 ROI；Evaluator 不可用时可从真实 WebGL 已验证候选生成明确的未评分 fallback。
 - `promote_validated_strategy_node.py`：只把经过 Renderer、Oracle 和 Selector 验证的 current_best 策略晋升 Memory。
 - `integrations/node_lab/`：生产 Node 向通用 Node Lab 暴露的公共 Provider；`registry.py` 维护 descriptor，`deterministic.py` / `model.py` 只做 Lab JSON/Artifact 与生产 callable 的边界适配。Node Lab 内核不导入该包的具体实现。
 
@@ -35,6 +35,7 @@
 - `model_calls` 同时记录 requested model、Gateway 返回的实际 model、身份来源、输出格式、Prompt/repair 版本、attempt、usage、输出 hash、解析状态和最多 20 条安全 validation issue；Candidate provenance 额外记录 GLSL hash。
 - Node 不决定全局流程，不持有数据库连接，不在原地修改 State。
 - Node factory 返回的 callable 同时是 Graph 与 Node Lab 的单节点调用 API。输入证据不变量（Author/provenance/GLSL、Candidate/hash、reference/measurements、best Artifact）必须由 Node 校验；Node Lab 只能适配 JSON/Artifact 形状，不能维护更严格或更宽松的平行业务规则。
+- V1 确定性 Node 通过 `nodes/png_to_shader_v1/__init__.py` 暴露稳定工厂；内部阶段 helper 不是 Graph Node。新增内部模块时必须纳入 Node Lab 递归源码指纹和架构边界扫描，不保留旧大文件兼容入口。
 - 新增生产 Graph Node 时，同步在 `integrations/node_lab` 登记 descriptor 和 binding，但禁止修改 `agent.app.lab` 或 Node Lab Service。只消费/返回 JSON-safe State 的 Node 优先用 `DirectNodeExecutor`；只有需要大对象 Artifact 化、依赖注入或输出安全投影时才写专用 Adapter。Graph 节点集合与 Provider descriptor 的一致性属于必跑测试。
 - 策略晋升同时暴露无副作用的生产 preview Node；真实 Graph 晋升与 Node Lab preview 共用同一份已验证计划构造，不允许在 Lab 内重写摘要或门禁。
 - 两个以上 Node 复用的消息 helper 放入 `app/messages/`；reasoning 日志策略放入 `app/observability/`。

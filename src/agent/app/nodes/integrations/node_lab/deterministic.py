@@ -33,7 +33,7 @@ from agent.app.lab.models import (
 from agent.app.nodes.integrations.node_lab.registry import (
     build_png_to_shader_v1_descriptors,
 )
-from agent.app.nodes.png_to_shader_v1_run_nodes import (
+from agent.app.nodes.png_to_shader_v1 import (
     NodeEvidenceError,
     RunRendererRegistry,
     make_finalize_png_to_shader_v1_node,
@@ -521,6 +521,7 @@ class DeterministicNodeExecutor:
         if node_id == "materialize_candidate":
             return await make_materialize_candidate_node(node_store)(state)
         if node_id == "render_and_evaluate":
+
             def create_renderer(_replay_on_worker_failure: int) -> ShaderRenderer:
                 usage["browser_launch_count"] += 1
                 return self._renderer_factory()

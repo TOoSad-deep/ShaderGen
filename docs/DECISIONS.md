@@ -249,7 +249,14 @@
 - 原因：自动 gate 证明 8/10 case 在 `manifest_key_rois_v1` 下改善，并验证 compile/static、traceability、current_best 与局部阈值，却不能证明人类偏好的结构、实例数量和高光/阴影语义得到保留。人工解码为 final/initial/tie `3/4/3`；`rimmed_disk`、`arc_highlight_orb`、`dual_disks`、`pink_gel` 均偏好 initial，说明低频 affine 近似可能降低像素 objective，同时损伤视觉拓扑和语义层次。
 - 影响：M6.2 优先在 Node Lab 增加结构与语义诊断，检查 topology、实例数量、轮廓/镂空、高光/阴影以及 Selector 的结构保护证据；不得加入 benchmark case id、golden、manifest 或 gate 特判。完成离线回归后，仍需重新执行真实模型 M5 和独立人工门禁；当前失败评审 JSON、报告与逐 case 产物继续只增不改保存。
 
-## D034 - 生成编排下沉 Backend Service，run 级 Renderer 使用双层清理
+## D034 - V1 确定性 Node 按流水线职责拆分
+
+- 日期：2026-07-15
+- 决策：删除 1605 行的 `png_to_shader_v1_run_nodes.py`，建立 `nodes/png_to_shader_v1/` 包，并以 `__init__.py` 作为 Graph 与 Node Lab 共用的稳定工厂入口。运行准备、候选物化、选择复核和最终收口各自独立；原本近 500 行的 `render_and_evaluate` 再拆成薄 Node 编排以及证据校验、真实 WebGL1 渲染、确定性评分三个内部阶段。旧导入路径不保留兼容层。
+- 原因：原文件同时承载运行生命周期、Artifact、候选生成、Validator、Renderer、Evaluator、Selector 和资源清理，阅读或修改单一职责时必须理解整份文件，也容易让共享 helper 与 Graph Node 边界混淆。按流水线职责拆分后，每个文件只处理一种变化原因，同时仍保留一个生产 Node 的原子状态转换契约。
+- 影响：20 个 Graph Node 名称、边、条件路由、停止路径和 `current_best` 语义完全不变，因此不产生新的 Graph 可视化节点。Node Lab descriptor 的 `source_ref` 改为实际职责模块，Provider 递归冻结嵌套 Node 源码；架构边界测试也递归扫描子包。新增包加入 `pyproject.toml`，Graph/Node Lab/测试统一改用新公开入口。
+
+## D035 - 生成编排下沉 Backend Service，run 级 Renderer 使用双层清理
 
 - 日期：2026-07-15
 - 决策：`POST /api/shader/generate` 的项目锁、模式/模型选择、Legacy timeout、Agent 调用、生成总账、失败分类和 `ShaderResponse` 契约统一下沉到 `backend.app.services.shader_generation`；Route 只保留 HTTP 上传校验、应用依赖装配与稳定用例错误到 FastAPI envelope 的映射。PNG-to-Shader V1 的 Graph Builder 与 `PngToShaderV1Service` 共享同一个 run 级 Renderer registry：正常路径仍由 `finalize` 关闭，Service `invoke()` 的 `finally` 对越过 Graph 的未知异常执行限时、幂等兜底。

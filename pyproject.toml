@@ -46,6 +46,7 @@ packages = [
     "agent.app.memory",
     "agent.app.context",
     "agent.app.nodes",
+    "agent.app.nodes.png_to_shader_v1",
     "agent.app.nodes.integrations",
     "agent.app.nodes.integrations.node_lab",
     "agent.app.observability",

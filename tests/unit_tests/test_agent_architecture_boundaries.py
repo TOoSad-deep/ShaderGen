@@ -20,10 +20,12 @@ def _import_targets(path: Path) -> list[str]:
 
 def _violations(package: str, forbidden: tuple[str, ...]) -> list[str]:
     violations = []
-    for path in sorted((ROOT / "src/agent/app" / package).glob("*.py")):
+    package_root = ROOT / "src/agent/app" / package
+    for path in sorted(package_root.rglob("*.py")):
         for target in _import_targets(path):
             if target.startswith(forbidden):
-                violations.append(f"{path.name}: {target}")
+                relative_path = path.relative_to(package_root).as_posix()
+                violations.append(f"{relative_path}: {target}")
     return violations
 
 

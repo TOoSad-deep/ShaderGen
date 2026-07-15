@@ -20,7 +20,7 @@ from agent.app.graphs.png_to_shader_v1_routing import (
 )
 from agent.app.llms.gateway import LangChainLLMGateway
 from agent.app.nodes.bounded_model_node import make_bounded_model_node
-from agent.app.nodes.png_to_shader_v1_run_nodes import (
+from agent.app.nodes.png_to_shader_v1 import (
     Clock,
     RendererFactory,
     RenderEvaluator,
