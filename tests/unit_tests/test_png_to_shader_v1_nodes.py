@@ -16,14 +16,15 @@ from agent.app.contracts.llm import LLMCallOptions, LLMResponse
 from agent.app.messages.png_to_shader_v1 import InputBindingError
 from agent.app.nodes import bounded_model_node as bounded_model_module
 from agent.app.nodes.bounded_model_node import make_bounded_model_node
-from agent.app.nodes.png_to_shader_v1 import finalization as finalization_module
 from agent.app.nodes.png_to_shader_v1 import (
+    RunRendererRegistry,
     make_finalize_png_to_shader_v1_node,
     make_materialize_candidate_node,
     make_persist_visual_review_node,
     make_prepare_measurement_seed_node,
     make_render_and_evaluate_node,
 )
+from agent.app.nodes.png_to_shader_v1 import finalization as finalization_module
 from agent.app.nodes.png_to_shader_v1 import runtime as run_nodes_runtime
 from agent.app.nodes.shader_author_node import (
     make_shader_author_compile_repair_node,
@@ -96,6 +97,41 @@ def quality_config() -> NodeModelConfig:
         ),
         print_reasoning=False,
     )
+
+
+@pytest.mark.anyio
+async def test_renderer_registry_retries_close_after_timeout() -> None:
+    class TimeoutOnceRenderer:
+        def __init__(self) -> None:
+            self.close_calls = 0
+            self.closed = False
+
+        async def render(self, _fragment_source: str, _width: int, _height: int):
+            return object()
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            if self.close_calls == 1:
+                await asyncio.Event().wait()
+            self.closed = True
+
+    renderer = TimeoutOnceRenderer()
+    registry = RunRendererRegistry(lambda _replay: renderer)  # type: ignore[arg-type]
+    key = ("project-close-retry", "run-close-retry")
+    await registry.render(
+        key,
+        replay_on_worker_failure=0,
+        fragment_source=GOLDEN_GLSL,
+        width=1,
+        height=1,
+    )
+
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(registry.close(key), timeout=0.01)
+    await registry.close(key)
+
+    assert renderer.close_calls == 2
+    assert renderer.closed is True
 
 
 def test_evaluation_measurements_merge_visual_analysis_semantic_regions() -> None:

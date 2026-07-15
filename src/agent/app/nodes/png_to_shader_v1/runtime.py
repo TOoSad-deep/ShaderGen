@@ -105,9 +105,11 @@ class RunRendererRegistry:
         """幂等移除并关闭一个 run 的 Renderer."""
         lock = self._locks.setdefault(key, asyncio.Lock())
         async with lock:
-            renderer = self._renderers.pop(key, None)
+            renderer = self._renderers.get(key)
             if renderer is not None:
                 await renderer.close()
+                # 只有关闭成功后才能移除；超时或异常时保留引用，供外层重试。
+                self._renderers.pop(key, None)
         self._locks.pop(key, None)
 
 

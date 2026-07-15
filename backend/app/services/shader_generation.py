@@ -363,6 +363,8 @@ async def execute_shader_generation(
                 instruction=command.instruction,
                 service=dependencies.procedural_service,
             )
+            if result is None:
+                raise RuntimeError("procedural_v1 未返回结果。")
     except ProjectBusyError as exc:
         duration_ms = (time.perf_counter() - command.started_at) * 1000
         logger.warning(
@@ -668,4 +670,4 @@ async def execute_shader_generation(
         )
         return response
 
-    raise RuntimeError("procedural_v1 未返回结果。")
+    raise AssertionError("受控生成路径必须返回结果或类型化失败。")

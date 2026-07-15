@@ -1,3 +1,4 @@
+import asyncio
 from hashlib import sha256
 from unittest.mock import AsyncMock
 
@@ -89,6 +90,57 @@ def test_result_hash_is_content_addressed():
 
     assert result.image_sha256 == sha256(image).hexdigest()
     assert result.to_dict()["image_size_bytes"] == len(image)
+
+
+@pytest.mark.anyio
+async def test_renderer_close_keeps_resources_for_retry_after_timeout() -> None:
+    class TimeoutOncePage:
+        def __init__(self) -> None:
+            self.close_calls = 0
+            self.closed = False
+
+        def is_closed(self) -> bool:
+            return self.closed
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            if self.close_calls == 1:
+                await asyncio.Event().wait()
+            self.closed = True
+
+    class RecordingClosable:
+        def __init__(self) -> None:
+            self.close_calls = 0
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+        async def stop(self) -> None:
+            self.close_calls += 1
+
+    renderer = PlaywrightWebGL1Renderer()
+    page = TimeoutOncePage()
+    browser = RecordingClosable()
+    playwright = RecordingClosable()
+    renderer._page = page  # type: ignore[assignment]
+    renderer._browser = browser  # type: ignore[assignment]
+    renderer._playwright = playwright  # type: ignore[assignment]
+
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(renderer.close(), timeout=0.01)
+
+    assert renderer._page is page
+    assert renderer._browser is browser
+    assert renderer._playwright is playwright
+
+    await renderer.close()
+
+    assert page.close_calls == 2
+    assert browser.close_calls == 1
+    assert playwright.close_calls == 1
+    assert renderer._page is None
+    assert renderer._browser is None
+    assert renderer._playwright is None
 
 
 @pytest.mark.anyio

@@ -11,6 +11,7 @@ load_dotenv()
 
 TRUE_ENV_VALUES = {"1", "true", "yes", "on"}
 FALSE_ENV_VALUES = {"0", "false", "no", "off"}
+DEFAULT_SHADER_GEN_MODEL_NAME = "openai:gpt-4.1"
 
 
 def _parse_bool_env(name: str, value: str) -> bool:
@@ -38,7 +39,12 @@ def bool_env(name: str, default: bool = False) -> bool:
     return _parse_bool_env(name, value)
 
 
-SHADER_GEN_MODEL_NAME = os.getenv("SHADER_GEN_MODEL_NAME", "openai:gpt-4.1")
+def model_name_env() -> str:
+    """返回当前模型配置，并在未设置时使用稳定默认值."""
+    return os.getenv("SHADER_GEN_MODEL_NAME", DEFAULT_SHADER_GEN_MODEL_NAME)
+
+
+SHADER_GEN_MODEL_NAME = model_name_env()
 
 
 @dataclass(frozen=True)

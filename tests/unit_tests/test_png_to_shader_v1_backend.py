@@ -619,6 +619,57 @@ def test_unexpected_procedural_error_maps_to_internal_pipeline_error(
     assert "PRIVATE_INTERNAL_DETAIL" not in caplog.text
 
 
+def test_empty_procedural_result_is_recorded_and_uses_typed_internal_error(
+    monkeypatch,
+) -> None:
+    calls: dict[str, object] = {}
+
+    async def fake_start(*args, **kwargs):
+        calls["start"] = kwargs
+
+    async def fake_failure(*args, **kwargs):
+        calls["failure"] = kwargs
+
+    async def empty_pipeline(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(
+        shader_generation_service,
+        "start_shader_generation_run",
+        fake_start,
+    )
+    monkeypatch.setattr(
+        shader_generation_service,
+        "record_shader_generation_failure",
+        fake_failure,
+    )
+    monkeypatch.setattr(
+        shader_generation_service,
+        "generate_procedural_shader_from_image",
+        empty_pipeline,
+    )
+    app.state.db_pool = object()
+    try:
+        response = TestClient(app, raise_server_exceptions=False).post(
+            "/api/shader/generate",
+            files={"file": ("target.png", b"image", "image/png")},
+            data={"generation_mode": "procedural_v1"},
+        )
+    finally:
+        del app.state.db_pool
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail["code"] == "internal_pipeline_error"
+    assert detail["stage"] == "pipeline"
+    assert detail["retryable"] is False
+    failure = calls["failure"]
+    assert isinstance(failure, dict)
+    assert failure["stop_reason"] == "internal_pipeline_error"
+    diagnostics = failure["diagnostics"]
+    assert isinstance(diagnostics, dict)
+    assert diagnostics["failure_error_type"] == "RuntimeError"
+
 
 def test_failure_persistence_error_does_not_mask_generation_timeout(
     monkeypatch,

@@ -4,7 +4,6 @@ from fastapi.testclient import TestClient
 from langgraph.pregel import Pregel
 
 from agent.app.config import model_config
-from agent.app.config.model_config import SHADER_GEN_MODEL_NAME
 from agent.app.contracts.llm import LLMCallOptions
 from agent.app.graphs.png_to_shader_v1_graph import png_to_shader_v1_graph
 from agent.app.llms import client_factory
@@ -37,8 +36,15 @@ def test_request_validation_failure_logs_safe_field_diagnostics(caplog) -> None:
 
 
 def test_llm_client_factory_configured() -> None:
-    assert SHADER_GEN_MODEL_NAME == "dashscope:qwen3.7-plus"
     assert callable(client_factory.create_chat_model)
+
+
+def test_model_name_env_uses_stable_default_and_allows_override(monkeypatch) -> None:
+    monkeypatch.delenv("SHADER_GEN_MODEL_NAME", raising=False)
+    assert model_config.model_name_env() == "openai:gpt-4.1"
+
+    monkeypatch.setenv("SHADER_GEN_MODEL_NAME", "dashscope:qwen3.7-plus")
+    assert model_config.model_name_env() == "dashscope:qwen3.7-plus"
 
 
 def test_qwen_thinking_env_config_parses_flags(monkeypatch) -> None:

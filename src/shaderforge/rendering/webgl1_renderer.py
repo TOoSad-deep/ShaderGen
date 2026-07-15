@@ -283,25 +283,35 @@ class PlaywrightWebGL1Renderer:
     async def close(self) -> None:
         """幂等关闭 page、browser 和 Playwright driver."""
         page, browser, playwright = self._page, self._browser, self._playwright
-        self._page = None
-        self._browser = None
-        self._playwright = None
         first_error: Exception | None = None
-        if page is not None and not page.is_closed():
-            try:
-                await page.close()
-            except (PlaywrightError, OSError) as exc:
-                first_error = exc
+        if page is not None:
+            if page.is_closed():
+                if self._page is page:
+                    self._page = None
+            else:
+                try:
+                    await page.close()
+                except (PlaywrightError, OSError) as exc:
+                    first_error = exc
+                else:
+                    if self._page is page:
+                        self._page = None
         if browser is not None:
             try:
                 await browser.close()
             except (PlaywrightError, OSError) as exc:
                 first_error = first_error or exc
+            else:
+                if self._browser is browser:
+                    self._browser = None
         if playwright is not None:
             try:
                 await playwright.stop()
             except (PlaywrightError, OSError) as exc:
                 first_error = first_error or exc
+            else:
+                if self._playwright is playwright:
+                    self._playwright = None
         if first_error is not None:
             raise first_error
 
