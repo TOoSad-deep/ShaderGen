@@ -9,7 +9,6 @@ from typing import Any, Literal, cast
 MemoryKind = Literal["review", "constraint", "decision", "strategy"]
 MemoryStatus = Literal["durable", "ephemeral", "degraded"]
 MEMORY_SCHEMA_VERSION = 1
-REVIEW_IMPORTANCE = 0.5
 STRATEGY_IMPORTANCE = 0.7
 MAX_MEMORY_SUMMARY_CHARS = 2_000
 _MEMORY_KINDS = {"review", "constraint", "decision", "strategy"}
@@ -100,32 +99,12 @@ class MemoryItem:
         )
 
 
-def review_memory_id(glsl_sha256: str) -> str:
-    """返回同一 GLSL Review 的稳定 Store key."""
-    digest = glsl_sha256.strip().lower()
-    if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
-        raise ValueError("glsl_sha256 必须是 64 位十六进制 SHA-256。")
-    return f"review:{digest}"
-
-
 def strategy_memory_id(glsl_sha256: str) -> str:
     """返回同一确定性验证 Shader 策略的稳定 Store key."""
     digest = glsl_sha256.strip().lower()
     if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
         raise ValueError("glsl_sha256 必须是 64 位十六进制 SHA-256。")
     return f"strategy:{digest}"
-
-
-def build_review_summary(evaluation: str, suggestions: tuple[str, ...]) -> str:
-    """确定性拼接 Review 结果，不增加模型调用."""
-    parts = [evaluation.strip()]
-    cleaned = [suggestion.strip() for suggestion in suggestions if suggestion.strip()]
-    if cleaned:
-        parts.append("修改建议：" + "；".join(cleaned))
-    summary = "\n".join(part for part in parts if part)
-    if not summary:
-        raise ValueError("Review 没有可晋升的摘要。")
-    return summary[:MAX_MEMORY_SUMMARY_CHARS]
 
 
 def build_validated_strategy_summary(

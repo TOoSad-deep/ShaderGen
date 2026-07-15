@@ -59,14 +59,10 @@ require_text() {
 "$PWCLI" -s="$SESSION" snapshot >/dev/null
 
 INSTRUCTION_REF="$(find_role_ref textbox '补充约束')"
-"$PWCLI" -s="$SESSION" eval 'el => el.disabled' "$INSTRUCTION_REF" | grep -q 'true'
-require_text '补充约束仅用于程序化闭环 V1'
-
-MODE_REF="$(find_role_ref combobox '生成模式')"
-"$PWCLI" -s="$SESSION" select "$MODE_REF" procedural_v1 >/dev/null
+"$PWCLI" -s="$SESSION" eval 'el => el.disabled' "$INSTRUCTION_REF" | grep -q 'false'
+require_text '程序化闭环 V1'
 QUALITY_REF="$(find_role_ref combobox '质量档位')"
 "$PWCLI" -s="$SESSION" select "$QUALITY_REF" high >/dev/null
-INSTRUCTION_REF="$(find_role_ref textbox '补充约束')"
 "$PWCLI" -s="$SESSION" fill "$INSTRUCTION_REF" '保留纯白背景和左上高光' >/dev/null
 UPLOAD_REF="$(find_upload_ref)"
 "$PWCLI" -s="$SESSION" click "$UPLOAD_REF" >/dev/null

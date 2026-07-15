@@ -28,20 +28,9 @@ Agent 只负责编排、LLM Gateway、Prompt 策略、运行时状态和公共�
 
 ## 当前图
 
-`langgraph.json` 当前注册三个图：
+`langgraph.json` 当前只注册一个图：
 
-- `agent`：入口为 `src/agent/app/graphs/main_graph.py:graph`，保留基础对话图。
-- `shader_generation`：入口为 `src/agent/app/graphs/shader_generation_graph.py:shader_generation_graph`，用于图片生成 GLSL 和渲染评审。
 - `png_to_shader_v1`：入口为 `src/agent/app/graphs/png_to_shader_v1_graph.py:png_to_shader_v1_graph`，用于 F09 的有界分析、生成、真实渲染、评分和修订闭环；M4 已通过 `agent.app.services.png_to_shader_v1` 接入 Backend/Frontend。
-
-`shader_generation` 当前流程：
-
-```text
-START
-  -> prepare_context
-  -> operation == generate -> generate_glsl -> END
-  -> operation == review -> review_render -> promote_memory -> END
-```
 
 ## 子模块规范
 

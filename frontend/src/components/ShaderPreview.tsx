@@ -110,22 +110,18 @@ async function compareRenderBlobs(
 interface ShaderPreviewProps {
   imageUrl: string | null;
   glsl: string;
-  staticMode?: boolean;
   renderWidth?: number | null;
   renderHeight?: number | null;
   serverRenderUrl?: string | null;
-  onRendered?: (image: Blob) => void;
   onCompatibility?: (report: ClientCompatibilityReport) => void;
 }
 
 export function ShaderPreview({
   imageUrl,
   glsl,
-  staticMode = false,
   renderWidth = null,
   renderHeight = null,
   serverRenderUrl = null,
-  onRendered,
   onCompatibility,
 }: ShaderPreviewProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -135,10 +131,8 @@ export function ShaderPreview({
     if (!imageUrl || !glsl || !canvasRef.current) return;
 
     let cancelled = false;
-    let frame = 0;
     let program: WebGLProgram | null = null;
     let buffer: WebGLBuffer | null = null;
-    let texture: WebGLTexture | null = null;
     let gl: WebGLRenderingContext | null = null;
 
     const image = new Image();
@@ -146,8 +140,8 @@ export function ShaderPreview({
       if (cancelled || !canvasRef.current) return;
 
       const canvas = canvasRef.current;
-      canvas.width = staticMode && renderWidth ? renderWidth : image.naturalWidth;
-      canvas.height = staticMode && renderHeight ? renderHeight : image.naturalHeight;
+      canvas.width = renderWidth ?? image.naturalWidth;
+      canvas.height = renderHeight ?? image.naturalHeight;
       gl = canvas.getContext("webgl", {
         alpha: false,
         antialias: false,
@@ -168,7 +162,6 @@ export function ShaderPreview({
         const position = gl.getAttribLocation(program, "a_position");
         const resolution = gl.getUniformLocation(program, "u_resolution");
         const time = gl.getUniformLocation(program, "u_time");
-        const imageUniform = gl.getUniformLocation(program, "u_image");
 
         buffer = gl.createBuffer();
         gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
@@ -178,19 +171,6 @@ export function ShaderPreview({
           gl.STATIC_DRAW,
         );
 
-        if (!staticMode) {
-          texture = gl.createTexture();
-          gl.activeTexture(gl.TEXTURE0);
-          gl.bindTexture(gl.TEXTURE_2D, texture);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-          gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-          gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
-        }
-
-        const startedAt = performance.now();
-        let reported = false;
         const render = () => {
           if (cancelled || !gl || !program) return;
 
@@ -200,33 +180,25 @@ export function ShaderPreview({
           gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
           gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
           gl.uniform2f(resolution, canvas.width, canvas.height);
-          gl.uniform1f(time, staticMode ? 0 : (performance.now() - startedAt) / 1000);
-          if (!staticMode) gl.uniform1i(imageUniform, 0);
+          gl.uniform1f(time, 0);
           gl.drawArrays(gl.TRIANGLES, 0, 6);
           gl.finish();
 
-          if (!reported) {
-            reported = true;
-            canvas.toBlob((blob) => {
-              if (!blob || cancelled) return;
-              onRendered?.(blob);
-              if (staticMode && serverRenderUrl && onCompatibility) {
-                void compareRenderBlobs(blob, serverRenderUrl)
-                  .then((report) => {
-                    if (!cancelled) onCompatibility(report);
-                  })
-                  .catch((reason: unknown) => {
-                    if (!cancelled) {
-                      onCompatibility({
-                        status: "error",
-                        message: reason instanceof Error ? reason.message : "兼容性复核失败。",
-                      });
-                    }
+          canvas.toBlob((blob) => {
+            if (!blob || cancelled || !serverRenderUrl || !onCompatibility) return;
+            void compareRenderBlobs(blob, serverRenderUrl)
+              .then((report) => {
+                if (!cancelled) onCompatibility(report);
+              })
+              .catch((reason: unknown) => {
+                if (!cancelled) {
+                  onCompatibility({
+                    status: "error",
+                    message: reason instanceof Error ? reason.message : "兼容性复核失败。",
                   });
-              }
-            }, "image/png");
-          }
-          if (!staticMode) frame = requestAnimationFrame(render);
+                }
+              });
+          }, "image/png");
         };
 
         setError("");
@@ -242,9 +214,7 @@ export function ShaderPreview({
 
     return () => {
       cancelled = true;
-      cancelAnimationFrame(frame);
       if (gl) {
-        if (texture) gl.deleteTexture(texture);
         if (buffer) gl.deleteBuffer(buffer);
         if (program) gl.deleteProgram(program);
       }
@@ -252,11 +222,9 @@ export function ShaderPreview({
   }, [
     imageUrl,
     glsl,
-    staticMode,
     renderWidth,
     renderHeight,
     serverRenderUrl,
-    onRendered,
     onCompatibility,
   ]);
 

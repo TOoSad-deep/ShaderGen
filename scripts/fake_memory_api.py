@@ -11,18 +11,18 @@ RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 ORIGIN = os.getenv("SHADERGEN_E2E_ORIGIN", "http://127.0.0.1:5173")
 PORT = int(os.getenv("SHADERGEN_FAKE_API_PORT", "8088"))
 GLSL = """precision mediump float;
-varying vec2 v_uv;
-uniform sampler2D u_image;
 uniform vec2 u_resolution;
 uniform float u_time;
 void main() {
-  gl_FragColor = texture2D(u_image, v_uv);
+  vec2 uv = gl_FragCoord.xy / max(u_resolution, vec2(1.0));
+  vec3 color = mix(vec3(0.95, 0.35, 0.62), vec3(0.38, 0.12, 0.48), uv.y);
+  gl_FragColor = vec4(color, 1.0);
 }
 """
 
 
 class Handler(BaseHTTPRequestHandler):
-    """实现 generate、review、clear 和 CORS."""
+    """实现 V1 generate、clear 和 CORS."""
 
     def log_message(self, format: str, *args) -> None:
         """关闭测试服务的逐请求 stderr 日志."""
@@ -63,20 +63,15 @@ class Handler(BaseHTTPRequestHandler):
                     "run_id": RUN_ID,
                     "glsl": GLSL,
                     "memory_status": "ephemeral",
-                    "generation_mode": "legacy",
-                    "iterations": 0,
-                }
-            )
-            return
-        if self.path == "/api/shader/review":
-            self._json(
-                {
-                    "project_id": PROJECT_ID,
+                    "generation_mode": "procedural_v1",
+                    "quality_preset": "balanced",
+                    "iterations": 1,
+                    "stop_reason": "quality_threshold_met",
+                    "best_candidate_id": "candidate-memory",
                     "review": {
-                        "evaluation": "浏览器评审完成。",
+                        "evaluation": "浏览器自动闭环 Review 已完成。",
                         "suggestions": ["保留当前颜色结构"],
                     },
-                    "memory_status": "ephemeral",
                 }
             )
             return

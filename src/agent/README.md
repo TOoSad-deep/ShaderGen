@@ -9,8 +9,8 @@
 - 当前 active 功能以 `docs/FEATURES.md` 为准；同一时间最多只能有一个 `active`。
 - 当前进度和下一步以 `PROGRESS.md` 为准；不要凭历史对话判断做到哪了。
 - 当前 Agent 不持有数据库连接池，不独立暴露 HTTP API。
-- 当前 LangGraph 配置在 `langgraph.json`，注册 `agent`、`shader_generation` 和 `png_to_shader_v1` 三个图。
-- 当前后端公共调用入口是 legacy 的 `agent.app.services.shader_generation` 和 V1 的 `agent.app.services.png_to_shader_v1`。
+- 当前 LangGraph 配置在 `langgraph.json`，只注册 `png_to_shader_v1` 一个图。
+- 当前后端公共调用入口是 `agent.app.services.png_to_shader_v1`。
 - 当前 Shader Memory 使用任务内 Checkpointer、项目 Store 和纯 GSSC Context Builder；数据库连接由 Backend 生命周期注入。
 
 ## 开始前
@@ -24,10 +24,8 @@
 ## 当前入口
 
 - LangGraph 配置：`langgraph.json`
-- 基础对话图：`src/agent/app/graphs/main_graph.py`
-- Shader 生成/评审图：`src/agent/app/graphs/shader_generation_graph.py`
 - PNG-to-Shader V1 有界图：`src/agent/app/graphs/png_to_shader_v1_graph.py`
-- 后端公共 service：`agent.app.services.shader_generation`、`agent.app.services.png_to_shader_v1`
+- 后端公共 service：`agent.app.services.png_to_shader_v1`
 - Prompt 文件：`src/agent/app/prompts/*.yaml`
 - 模型输出解析：`agent.app.parsers`
 - Memory：`agent.app.memory`
@@ -39,7 +37,7 @@
 - Agent 节点、状态、解析器、LLM Gateway 或 service 变化：`uv run pytest tests/unit_tests`
 - Graph 配置、节点、边、路由结果或终止语义变化：先同步源码 ASCII 图、Graphs Mermaid 和路由表，再运行 `make docs-check` 与 `uv run langgraph validate`
 - 跨后端和 Agent 的行为变化：`uv run pytest tests/integration_tests`
-- 收尾前完整验证：`make check`
+- 收尾前默认主干验证：`make check`；跨组件改动仍需追加对应集成、E2E、PostgreSQL 或 benchmark 检查。
 
 ## Graph 可视化完成定义
 

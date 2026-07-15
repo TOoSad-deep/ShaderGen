@@ -59,8 +59,7 @@ require_text() {
 "$PWCLI" -s="$SESSION" open "$VITE_ORIGIN" >/dev/null
 "$PWCLI" -s="$SESSION" snapshot >/dev/null
 
-MODE_REF="$(find_role_ref combobox '生成模式')"
-"$PWCLI" -s="$SESSION" select "$MODE_REF" legacy >/dev/null
+require_text '程序化闭环 V1'
 
 UPLOAD_REF="$(find_upload_ref)"
 "$PWCLI" -s="$SESSION" click "$UPLOAD_REF" >/dev/null

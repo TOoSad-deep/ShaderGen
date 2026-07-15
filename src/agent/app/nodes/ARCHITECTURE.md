@@ -4,11 +4,7 @@
 
 ## 当前 Node
 
-- `model_node.py`：`make_model_node(gateway)` 创建基础对话 Node，并把 Runtime Context 映射为 `LLMCallOptions`。
-- `generate_glsl_node.py`：`make_generate_glsl_node(gateway, config)` 根据原图生成 GLSL。
-- `review_render_node.py`：`make_review_render_node(gateway, config)` 根据原图、渲染图和 GLSL 生成评审结果。
 - `prepare_context_node.py`：从 Runtime Store 读取候选 Memory 并调用纯 GSSC Builder。
-- `promote_memory_node.py`：把结构化 Review 幂等晋升为项目长期 Memory。
 - `visual_analysis_node.py`：调用 VisualAnalysisAgent，把参考图和确定性测量解析成严格 `VisualAnalysis`。
 - `shader_author_node.py`：以统一工厂实现 initial、compile_repair、visual_refine 三种受限 Author 模式，并输出完整 GLSL 与 Candidate provenance。
 - `visual_critic_node.py`：先验证 candidate/GLSL/render 绑定，再输出只含诊断的严格 `VisualReview`。
@@ -25,7 +21,7 @@
 - Node 负责 Prompt 选择、LangChain 消息组装、Parser 调用、可观测性策略和 partial State 映射。
 - Gateway 负责客户端创建、模型调用、耗时、reasoning 提取、usage 和真实模型身份。
 - State 和 `model_calls` 中的模型名只使用 `LLMResponse.model_ref`。
-- V1 三个结构化角色默认 `temperature=0`、`thinking=off`、`capture_reasoning=false`、`response_format=json_object`；JSON 修复沿用同一请求模型和 JSON mode，并再次强制关闭 thinking。Legacy 自由文本节点仍可使用模型内部 thinking，但默认 `capture_reasoning=false`、`print_reasoning=false`；只有显式 opt-in 才允许 reasoning 进入专用审计列。
+- V1 三个结构化角色默认 `temperature=0`、`thinking=off`、`capture_reasoning=false`、`response_format=json_object`；JSON 修复沿用同一请求模型和 JSON mode，并再次强制关闭 thinking。
 - JSON/契约失败最多允许一次 Gateway 修复；M3 剩余 model budget 只有一次时禁止修复。VisualAnalysis 的 `regions_of_interest[*].purpose` 若全部错误都只属于显式别名表，可先在本地归一化并重新执行完整严格 Parser；该路径记录 `visual_analysis_roi_purpose_alias_v1`、字段路径和源错误码，不放宽公共 Parser，不猜测未知值，也不消耗第二次模型调用。预算内最后一次失败抛出带已有安全审计、但不含原始响应的明确错误。合法的单个 JSON fence 在本地解析，不消耗修复调用。
 - `agent.png_to_shader` logger 记录 run/project、模型阶段、剩余调用/时间预算、模型累计延迟、Renderer/静态校验/评估失败和 finalize 摘要；禁止打印图片、完整 GLSL、reasoning、供应商原始响应和密钥。
 - 模型阶段 cap 为 VisualAnalysis 60 秒、Initial Author 120 秒、compile repair 60 秒、Critic 45 秒、visual refine 90 秒，并为下游保留总 wall-time 的 10%、最多 30 秒。Renderer、Evaluator 和 3 秒 bounded close 不得消耗或覆盖已有可返回 best 的事实。

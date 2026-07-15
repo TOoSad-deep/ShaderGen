@@ -198,7 +198,7 @@ async def start_shader_generation_run(
     size_bytes: int,
     glsl_model_name: str,
     vision_model_name: str,
-    generation_mode: str = "legacy",
+    generation_mode: str = "procedural_v1",
     quality_preset: str | None = None,
     instruction: str = "",
 ) -> None:
@@ -223,41 +223,6 @@ async def start_shader_generation_run(
         logger.error(
             "agent.process.database.write.failed run_id=%s "
             "persistence_stage=create_generation_run error_type=%s",
-            run_id,
-            type(error).__name__,
-        )
-        raise
-
-
-async def start_shader_review_run(
-    pool,
-    *,
-    run_id: UUID,
-    project_id: UUID,
-    original_content_type: str,
-    original_size_bytes: int,
-    rendered_content_type: str,
-    rendered_size_bytes: int,
-    glsl_chars: int,
-) -> None:
-    """写入 Shader 渲染评审运行记录."""
-    try:
-        await create_agent_run(
-            pool,
-            run_id=run_id,
-            project_id=project_id,
-            input={
-                "original_content_type": original_content_type,
-                "original_size_bytes": original_size_bytes,
-                "rendered_content_type": rendered_content_type,
-                "rendered_size_bytes": rendered_size_bytes,
-                "glsl_chars": glsl_chars,
-            },
-        )
-    except Exception as error:
-        logger.error(
-            "agent.process.database.write.failed run_id=%s "
-            "persistence_stage=create_review_run error_type=%s",
             run_id,
             type(error).__name__,
         )
@@ -371,119 +336,6 @@ async def record_shader_generation_success(
         raise
 
 
-async def record_shader_review_success(
-    pool,
-    *,
-    run_id: UUID,
-    model_name: str,
-    evaluation: str,
-    suggestion_count: int,
-    model_calls: Iterable[Mapping[str, Any]] | None = None,
-    events: Iterable[Mapping[str, Any]] | None = None,
-    logs: Iterable[Mapping[str, Any]] | None = None,
-) -> None:
-    """写入 Shader 渲染评审成功后的事件、日志和状态."""
-    try:
-        seq = 1
-        wrote_model_call = False
-        event_rows: list[tuple[Any, ...]] = []
-        log_rows: list[tuple[Any, ...]] = []
-        for model_call in model_calls or ():
-            payload = dict(model_call)
-            reasoning_content = _pop_reasoning_content(payload)
-            event_rows.append(
-                (
-                    run_id,
-                    seq,
-                    "review",
-                    "model_call",
-                    _jsonb(payload),
-                    reasoning_content,
-                )
-            )
-            seq += 1
-            wrote_model_call = True
-        if not wrote_model_call:
-            event_rows.append(
-                (
-                    run_id,
-                    seq,
-                    "review",
-                    "model_call",
-                    _jsonb(
-                        {
-                            "model": model_name,
-                            "suggestion_count": suggestion_count,
-                        }
-                    ),
-                    None,
-                )
-            )
-            seq += 1
-        for event in events or ():
-            payload = dict(event.get("payload", {}))
-            reasoning_content = _pop_reasoning_content(payload)
-            if not reasoning_content and event.get("reasoning_content"):
-                reasoning_content = str(event["reasoning_content"])
-            event_rows.append(
-                (
-                    run_id,
-                    seq,
-                    str(event.get("stage", "review")),
-                    str(event.get("event_type", "completed")),
-                    _jsonb(payload),
-                    reasoning_content,
-                )
-            )
-            seq += 1
-        for log in logs or ():
-            log_rows.append(
-                (
-                    run_id,
-                    log.get("event_seq"),
-                    str(log.get("level", "info")),
-                    str(log.get("source", "agent")),
-                    str(log.get("message", "")),
-                    _jsonb(dict(log.get("context", {}))),
-                )
-            )
-        log_rows.append(
-            (
-                run_id,
-                1,
-                "info",
-                "backend.shader",
-                "渲染评审完成",
-                _jsonb({"model": model_name, "suggestion_count": suggestion_count}),
-            )
-        )
-        await _persist_generation_outcome(
-            pool,
-            event_rows=event_rows,
-            log_rows=log_rows,
-            run_id=run_id,
-            status="succeeded",
-            result={
-                "evaluation": evaluation,
-                "suggestion_count": suggestion_count,
-            },
-            error=None,
-        )
-        logger.info(
-            "agent.process.database.write.succeeded run_id=%s status=succeeded "
-            "persistence_stage=outcome_transaction",
-            run_id,
-        )
-    except Exception as error:
-        logger.error(
-            "agent.process.database.write.failed run_id=%s status=succeeded "
-            "persistence_stage=outcome_transaction error_type=%s",
-            run_id,
-            type(error).__name__,
-        )
-        raise
-
-
 async def record_shader_generation_failure(
     pool,
     *,
@@ -571,47 +423,6 @@ async def record_shader_generation_failure(
                 error,
                 stop_reason or "generation_failed",
             ),
-        )
-        logger.info(
-            "agent.process.database.write.succeeded run_id=%s status=failed "
-            "persistence_stage=outcome_transaction",
-            run_id,
-        )
-    except Exception as error:
-        logger.error(
-            "agent.process.database.write.failed run_id=%s status=failed "
-            "persistence_stage=outcome_transaction error_type=%s",
-            run_id,
-            type(error).__name__,
-        )
-        raise
-
-
-async def record_shader_review_failure(
-    pool,
-    *,
-    run_id: UUID,
-    error: Exception,
-) -> None:
-    """写入 Shader 渲染评审失败后的日志和状态."""
-    try:
-        await _persist_generation_outcome(
-            pool,
-            event_rows=[],
-            log_rows=[
-                (
-                    run_id,
-                    None,
-                    "error",
-                    "backend.shader",
-                    "评审渲染图失败",
-                    _jsonb({"error_type": type(error).__name__}),
-                )
-            ],
-            run_id=run_id,
-            status="failed",
-            result={},
-            error=_safe_error_summary(error, "review_failed"),
         )
         logger.info(
             "agent.process.database.write.succeeded run_id=%s status=failed "

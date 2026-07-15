@@ -80,7 +80,7 @@ def _default_renderer_factory(
 #                  +-----------------------+-----------------------+------------------+
 #                  | select                | compile_repair        | finalize         |
 #                  v                       v                       v                  |
-# select_current_best -> candidate_portfolio      prepare_compile_repair              |
+# select_current_best                             prepare_compile_repair              |
 #                  |         |                     -> author_compile_repair -----------+
 #                  | seed    | decide                         | continue
 #                  v         v                                v

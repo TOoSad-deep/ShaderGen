@@ -15,7 +15,7 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 - 单元测试：`make test`
 - Memory PostgreSQL 验收：`make test-memory-postgres`
 - 文档边界检查：`make docs-check`
-- 完整验证：`make check`
+- 默认主干验证（单元测试、docs-check、LangGraph validate、前端构建）：`make check`
 - M5 无模型 smoke：`make benchmark-ai-off`
 - Node Lab AI-off：`make benchmark-node-lab-ai-off`
 - Node Lab 五模型角色离线 fixture：`make benchmark-node-lab-model`

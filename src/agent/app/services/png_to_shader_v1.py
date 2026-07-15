@@ -291,7 +291,7 @@ class PngToShaderV1Service:
 
     @staticmethod
     def thread_id(project_id: str) -> str:
-        """把 V1 checkpoint 与 legacy Graph 的同项目 thread 隔离."""
+        """使用稳定前缀构造 V1 项目 checkpoint thread id."""
         return f"png-to-shader-v1:{project_id}"
 
     async def invoke(self, project_id: str, state: dict[str, Any]) -> dict[str, Any]:
@@ -311,9 +311,12 @@ class PngToShaderV1Service:
             raise
 
     async def clear_memory(self, project_id: str) -> ClearPngToShaderMemoryResult:
-        """清除 V1 checkpoint 和该项目的共享长期 Memory."""
+        """清除 V1/历史 checkpoint 和该项目的共享长期 Memory."""
         try:
             await self.checkpointer.adelete_thread(self.thread_id(project_id))
+            # 下线的 legacy Graph 使用裸 project_id 作为 thread id；继续清理它，
+            # 避免升级后项目删除操作遗留无入口可访问的历史 checkpoint。
+            await self.checkpointer.adelete_thread(project_id)
             deleted = await clear_project_memories(self.store, project_id)
         except Exception as exc:
             raise MemoryUnavailableError("清除 PNG-to-Shader 记忆失败。") from exc

@@ -19,7 +19,7 @@ ShaderGen/ShaderForge 将用户意图、参考图、约束和验收标准转成�
 - 初始设计：参考图、草图、描述。
 - 初始测试规划：验收指标、样例集。
 
-当前仓库状态：`frontend/src/App.tsx` 支持图片上传、`legacy | procedural_v1` 模式、V1 质量档位、补充约束、服务端/客户端双渲染和 GLSL/评分/停止原因展示；通用 Idea、风格、场景和测试规划结构化输入尚未实现。
+当前仓库状态：`frontend/src/App.tsx` 支持图片上传、V1 质量档位、补充约束、服务端/客户端双渲染和 GLSL/评分/停止原因展示；通用 Idea、风格、场景和测试规划结构化输入尚未实现。
 
 ### 2. 核心处理层
 
@@ -34,7 +34,7 @@ ShaderGen/ShaderForge 将用户意图、参考图、约束和验收标准转成�
 7. `Search Engine 调优`：CMA-ES、MAP-Elites、结构变异。
 8. `VLM / HITL`：模型评审、人工评审、Store 记录。
 
-当前仓库状态：`src/agent/app/graphs/main_graph.py` 保留基础对话图；`src/agent/app/graphs/shader_generation_graph.py` 继续服务 legacy 生成与前端 canvas Review。独立 `png_to_shader_v1_graph.py` 先运行 `prepare_context` 和参考图确定性测量，再调用 Analyst/Author/Critic，通过静态 Validator、项目自有 Playwright/Chromium WebGL1 Renderer、Basic Oracle 和 LocalArtifactStore 形成有界 initial / compile-repair / visual-refine 循环。首个成功 model best 后还会生成一次与 case/manifest/gate 无关的 measurement affine 独立根候选；它不消耗模型或视觉迭代预算，但必须经过同一事实层与 Selector。生产 Oracle 保留确定性测量 ROI，并追加严格 VisualAnalysis 的语义 ROI。纯 Selector 只在硬约束通过、总损失达到最小改善且保护区不超退化时更新 `current_best`；Critic/refine 与 finalize 均从 best Artifact 重载 GLSL/PNG/metrics，模型或新候选失败不会覆盖已有 best。任务内轻量状态由 LangGraph Checkpointer 保存，图片、完整 GLSL、渲染图、ContextPack、Candidate 大对象和过程摘要使用 `UntrackedValue`；项目长期 Memory 只保存精炼摘要，并且只晋升确定性验证过的 best 策略。M4 通过 `agent.app.services.png_to_shader_v1` 把该图接入 Backend：V1 使用独立 checkpoint thread 前缀但共享项目 Store，Backend 生命周期统一注入 persistence；过程事件由公共结果交给 Backend 写入账本。HTTP 只开放 final-render/metrics/manifest 白名单，前端按服务端规范化尺寸重编译 GLSL 并比较像素 RMSE。
+当前仓库只保留 `png_to_shader_v1_graph.py` 一个对外 Graph。它先运行 `prepare_context` 和参考图确定性测量，再调用 Analyst/Author/Critic，通过静态 Validator、项目自有 Playwright/Chromium WebGL1 Renderer、Basic Oracle 和 LocalArtifactStore 形成有界 initial / compile-repair / visual-refine 循环。首个成功 model best 后还会生成一次与 case/manifest/gate 无关的 measurement affine 独立根候选；它不消耗模型或视觉迭代预算，但必须经过同一事实层与 Selector。生产 Oracle 保留确定性测量 ROI，并追加严格 VisualAnalysis 的语义 ROI。纯 Selector 只在硬约束通过、总损失达到最小改善且保护区不超退化时更新 `current_best`；Critic/refine 与 finalize 均从 best Artifact 重载 GLSL/PNG/metrics，模型或新候选失败不会覆盖已有 best。任务内轻量状态由 LangGraph Checkpointer 保存，图片、完整 GLSL、渲染图、ContextPack、Candidate 大对象和过程摘要使用 `UntrackedValue`；项目长期 Memory 只保存精炼摘要，并且只晋升确定性验证过的 best 策略。`agent.app.services.png_to_shader_v1` 把该图接入 Backend：V1 使用稳定的 checkpoint thread 前缀和项目 Store，Backend 生命周期统一注入 persistence；过程事件由公共结果交给 Backend 写入账本。HTTP 只开放 final-render/metrics/manifest 白名单，前端按服务端规范化尺寸重编译 GLSL 并比较像素 RMSE。旧基础对话图、legacy 生成/独立 Review 图及其产品入口已下线。
 
 Node Lab 以 transport-free Application API 和通用 `NodeProvider` 协议复用生产 Node。Harness 内核不导入任何具体 Node/Graph，pipeline id、descriptor、执行模式、routing capability 与 Adapter 均由生产侧 `agent.app.nodes.integrations.node_lab` Provider 提供。当前 PNG-to-Shader Provider 暴露 20 个图节点、机器可读示例和离线成功/拒绝路径；15 个非模型节点通过 Artifact facade 直接调用生产 Node factory/routing，五个模型节点调用生产角色 Node factory 与 bounded wrapper。新 Node 只在生产 Provider 登记 descriptor/binding，不修改 Node Lab 内核或 Service；Lab 只负责输入投影、私有 Artifact 和副作用门禁，不维护 initialize/materialize/render/select/finalize/promotion 的平行语义。完整 ContextPack、GLSL、图片、模型原始内容只存 Lab Artifact，策略 Memory 只 preview。八个确定性 capability、不可变步骤、真实 node target、scenario/pipeline、Renderer cold/warm、transport AI-off 和独立模型角色 benchmark 共用同一 Harness；失败/中断证据不可覆盖。可选 `/api/lab/v1/*` 仅在显式环境开关下注册，不进入产品 API；HTTP batch 只接受仓库内三个固定 AI-off suite id。`scripts/run_node_lab_cli.py`、Swagger 和 `/lab` 工作台分别提供自动化、HTTP 与人工入口，只消费公共 Application API/descriptor。
 
@@ -133,8 +133,8 @@ ShaderGen/
 ```text
 frontend 用户输入
   -> backend HTTP 校验
-  -> backend service 按 generation_mode 分流
-  -> agent.app.services legacy 或 png_to_shader_v1 公共用例
+  -> backend service 调用 PNG-to-Shader V1 用例
+  -> agent.app.services.png_to_shader_v1 公共用例
   -> src/agent LangGraph 节点进行模型分析和策略选择
   -> src/shaderforge 校验 / WebGL1 渲染 / Oracle / current_best / Artifact
   -> backend 写过程账本并返回 GLSL、评分、停止原因和白名单 URL
@@ -145,8 +145,8 @@ frontend 用户输入
 
 ### 在线可靠性边界
 
-- M5 质量门禁未通过期间，Frontend/HTTP 默认走 `legacy`；`procedural_v1` 必须由用户显式选择并显示实验/no-go 状态。
-- V1 的 wall-time 预算按阶段分配，模型不得占用留给确定性修复、Renderer、Evaluator 和 finalize 的保留时间；Legacy 单次模型调用也有服务端 timeout。
+- M5 人工质量门禁未通过期间，Frontend/HTTP 仍只提供 `procedural_v1`，但必须明确显示实验/no-go 状态；“唯一实现路径”不等于“已获准灰度发布”。
+- V1 的 wall-time 预算按阶段分配，模型不得占用留给确定性修复、Renderer、Evaluator 和 finalize 的保留时间。
 - `current_best` 只能来自 Selector。只有当 Evaluator 不可用且候选已经通过静态检查和真实 WebGL 时，才允许返回明确标记的 `unscored_fallback`；它没有评分、metrics、Critic 绑定或长期 Memory 晋升资格。
 - API 错误必须区分请求校验、Shader validation、模型供应商/配置/响应、Renderer、persistence、timeout 和内部 pipeline 错误。未知内部异常不得伪装成用户可修复的 422。
 - 过程终态在单个数据库事务中提交事件、日志和 run 状态；普通日志/事件禁止完整 GLSL、图片、reasoning、供应商原文或编译器原文。原始编译证据只进入私有 Artifact。

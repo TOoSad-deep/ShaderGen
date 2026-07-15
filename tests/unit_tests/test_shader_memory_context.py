@@ -12,7 +12,6 @@ from agent.app.memory.store import (
     clear_project_memories,
     list_project_memories,
     memory_namespace,
-    upsert_review_memory,
 )
 from backend.app.services.shader import ProjectBusyError, ProjectLockRegistry
 
@@ -42,36 +41,27 @@ def memory_item(
 
 
 @pytest.mark.anyio
-async def test_review_memory_upsert_preserves_created_at_and_refreshes_value() -> None:
+async def test_historical_review_memory_remains_readable() -> None:
     store = InMemoryStore()
-    digest = sha256(b"shader").hexdigest()
-
-    first = await upsert_review_memory(
-        store,
-        project_id="project-1",
-        source_run_id="run-1",
-        glsl_sha256=digest,
+    item = memory_item(
+        "review-historical",
+        kind="review",
+        summary="历史评审建议：保留主体轮廓。",
+        glsl_sha256=sha256(b"historical").hexdigest(),
         iteration=1,
-        evaluation="初次评审",
-        suggestions=("提高亮度",),
     )
-    second = await upsert_review_memory(
-        store,
-        project_id="project-1",
-        source_run_id="run-2",
-        glsl_sha256=digest,
-        iteration=2,
-        evaluation="再次评审",
-        suggestions=("降低饱和度",),
+    await store.aput(
+        memory_namespace("project-historical"),
+        item.memory_id,
+        item.to_value(),
+        index=False,
     )
 
-    memories = await list_project_memories(store, "project-1")
-    assert len(memories) == 1
-    assert second.created_at == first.created_at
-    assert second.updated_at >= first.updated_at
-    assert second.source_run_id == "run-2"
-    assert second.iteration == 2
-    assert "降低饱和度" in second.summary
+    memories = await list_project_memories(store, "project-historical")
+    pack = build_context_pack({"phase": "generated", "iteration": 2}, memories)
+
+    assert memories == (item,)
+    assert pack.recent_reviews == ("历史评审建议：保留主体轮廓。",)
 
 
 def test_context_builder_prioritizes_current_shader_review() -> None:

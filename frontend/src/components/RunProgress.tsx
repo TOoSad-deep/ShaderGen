@@ -1,4 +1,4 @@
-import type { GenerationMode, ShaderResponse } from "../api/shader";
+import type { ShaderResponse } from "../api/shader";
 import type { ClientCompatibilityReport } from "./ShaderPreview";
 
 const STOP_REASON_LABELS: Record<string, string> = {
@@ -15,12 +15,11 @@ const STOP_REASON_LABELS: Record<string, string> = {
 
 interface RunProgressProps {
   loading: boolean;
-  mode: GenerationMode;
   result: ShaderResponse | null;
   compatibility: ClientCompatibilityReport | null;
 }
 
-export function RunProgress({ loading, mode, result, compatibility }: RunProgressProps) {
+export function RunProgress({ loading, result, compatibility }: RunProgressProps) {
   if (!loading && !result) return null;
 
   return (
@@ -28,27 +27,21 @@ export function RunProgress({ loading, mode, result, compatibility }: RunProgres
       <div className="panel-header">
         <h2>运行进度</h2>
         <span>
-          {loading
-            ? mode === "procedural_v1"
-              ? "服务端实验性自动闭环执行中"
-              : "服务端单次生成中"
-            : "已完成"}
+          {loading ? "服务端实验性自动闭环执行中" : "已完成"}
         </span>
       </div>
-      {loading && mode === "procedural_v1" ? (
+      {loading ? (
         <ol className="stage-list">
           <li>量化参考图并读取项目 Context</li>
           <li>生成候选并进行 WebGL1 编译</li>
           <li>服务端渲染、评分与 current_best 选择</li>
           <li>按预算自动 Review 和定向修订</li>
         </ol>
-      ) : loading ? (
-        <p className="hint run-wait-hint">正在执行 Legacy 单次生成；如需离开可点击“停止等待”。</p>
       ) : result ? (
         <dl className="run-facts">
           <div>
             <dt>模式</dt>
-            <dd>{result.generation_mode === "procedural_v1" ? "程序化闭环 V1" : "Legacy"}</dd>
+            <dd>程序化闭环 V1</dd>
           </div>
           <div>
             <dt>质量档位</dt>
@@ -65,7 +58,7 @@ export function RunProgress({ loading, mode, result, compatibility }: RunProgres
                 ? "WebGL 已通过，但评分不可用；以 fallback 完成"
                 : result.stop_reason
                   ? STOP_REASON_LABELS[result.stop_reason] ?? result.stop_reason
-                  : "单次生成完成"}
+                  : "闭环生成完成"}
             </dd>
           </div>
           {result.best_candidate_id ? (

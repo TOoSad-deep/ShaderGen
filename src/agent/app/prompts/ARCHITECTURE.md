@@ -4,8 +4,6 @@
 
 ## 当前文件
 
-- `image_to_glsl.yaml`：当前兼容生成节点使用的 WebGL1 无贴图 GLSL Prompt；`u_image` 只保留声明，禁止采样。
-- `shader_review.yaml`：原图、当前渲染图和 GLSL 的评审 Prompt。
 - `visual_analysis_v1.yaml`：只做视觉层、坐标、ROI 和程序化策略分析，不输出 GLSL。
 - `shader_author_initial_v1.yaml`：生成第一份完整 WebGL1 静态无贴图 Fragment Shader。
 - `shader_author_compile_repair_v1.yaml`：只依据静态/真实 WebGL 日志做最小编译修复。

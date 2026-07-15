@@ -1,6 +1,5 @@
-"""Shader 生成、评审和项目 Memory 接口."""
+"""PNG-to-Shader V1 生成和项目 Memory 接口."""
 
-import asyncio
 import logging
 import time
 from typing import Any, cast
@@ -15,16 +14,12 @@ from backend.app.schemas.shader import (
     ShaderGenerationErrorResponse,
     ShaderResponse,
     ShaderReview,
-    ShaderReviewResponse,
     ShaderScore,
 )
 from backend.app.services.agent_process_store import (
     record_shader_generation_failure,
     record_shader_generation_success,
-    record_shader_review_failure,
-    record_shader_review_success,
     start_shader_generation_run,
-    start_shader_review_run,
 )
 from backend.app.services.shader import (
     MemoryUnavailableError,
@@ -33,22 +28,16 @@ from backend.app.services.shader import (
     ProjectLockRegistry,
     PublicArtifactNotFoundError,
     clear_png_to_shader_project_memory,
-    clear_shader_project_memory,
     default_png_to_shader_v1_service,
-    default_shader_generation_service,
     generate_procedural_shader_from_image,
-    generate_shader_from_image,
     get_png_to_shader_v1_models,
-    get_shader_generation_models,
     read_shader_run_artifact,
-    review_shader_render,
 )
 
 router = APIRouter(prefix="/api/shader", tags=["shader"])
 logger = logging.getLogger("backend.shader")
 
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
-LEGACY_GENERATION_TIMEOUT_SECONDS = 180.0
 
 
 class _GenerationRunPersistenceError(RuntimeError):
@@ -281,22 +270,19 @@ async def read_image_upload(file: UploadFile) -> bytes:
     return image
 
 
-def _runtime(request: Request) -> tuple[Any, Any, ProjectLockRegistry]:
-    service = getattr(request.app.state, "shader_service", None)
-    procedural_service = getattr(
+def _runtime(request: Request) -> tuple[Any, ProjectLockRegistry]:
+    service = getattr(
         request.app.state,
         "png_to_shader_v1_service",
         None,
     )
     locks = getattr(request.app.state, "project_locks", None)
     if service is None:
-        service = default_shader_generation_service
-    if procedural_service is None:
-        procedural_service = default_png_to_shader_v1_service
+        service = default_png_to_shader_v1_service
     if locks is None:
         locks = ProjectLockRegistry()
         request.app.state.project_locks = locks
-    return service, procedural_service, locks
+    return service, locks
 
 
 def _procedural_review(value: dict[str, Any] | None) -> ShaderReview | None:
@@ -337,7 +323,7 @@ async def generate_shader(
     request: Request,
     file: UploadFile = File(...),
     project_id: UUID | None = Form(None),
-    generation_mode: GenerationMode = Form("legacy"),
+    generation_mode: GenerationMode = Form("procedural_v1"),
     quality_preset: QualityPresetName = Form("balanced"),
     instruction: str = Form("", max_length=2_000),
 ) -> ShaderResponse:
@@ -370,21 +356,17 @@ async def generate_shader(
             stop_reason="client_validation",
         ) from exc
     pool = getattr(request.app.state, "db_pool", None)
-    service, procedural_service, locks = _runtime(request)
-    if generation_mode == "procedural_v1":
-        glsl_model_name, vision_model_name = get_png_to_shader_v1_models()
-    else:
-        glsl_model_name, vision_model_name = get_shader_generation_models()
+    service, locks = _runtime(request)
+    glsl_model_name, vision_model_name = get_png_to_shader_v1_models()
     run_started = False
-    procedural_result = None
-    legacy_result = None
+    result = None
     logger.info(
         "shader.generate.started run_id=%s project_id=%s generation_mode=%s "
         "quality_preset=%s image_bytes=%s database_enabled=%s",
         run_id,
         resolved_project_id,
         generation_mode,
-        quality_preset if generation_mode == "procedural_v1" else "n/a",
+        quality_preset,
         len(image),
         pool is not None,
     )
@@ -402,34 +384,20 @@ async def generate_shader(
                     glsl_model_name=glsl_model_name,
                     vision_model_name=vision_model_name,
                     generation_mode=generation_mode,
-                    quality_preset=(
-                        quality_preset if generation_mode == "procedural_v1" else None
-                    ),
+                    quality_preset=quality_preset,
                     instruction=instruction.strip(),
                 )
                 run_started = True
 
-            if generation_mode == "procedural_v1":
-                procedural_result = await generate_procedural_shader_from_image(
-                    image,
-                    file.content_type or "application/octet-stream",
-                    project_id=str(resolved_project_id),
-                    run_id=str(run_id),
-                    quality_preset=quality_preset,
-                    instruction=instruction.strip(),
-                    service=procedural_service,
-                )
-            else:
-                legacy_result = await asyncio.wait_for(
-                    generate_shader_from_image(
-                        image,
-                        file.content_type or "application/octet-stream",
-                        project_id=str(resolved_project_id),
-                        run_id=str(run_id),
-                        service=service,
-                    ),
-                    timeout=LEGACY_GENERATION_TIMEOUT_SECONDS,
-                )
+            result = await generate_procedural_shader_from_image(
+                image,
+                file.content_type or "application/octet-stream",
+                project_id=str(resolved_project_id),
+                run_id=str(run_id),
+                quality_preset=quality_preset,
+                instruction=instruction.strip(),
+                service=service,
+            )
     except ProjectBusyError as exc:
         duration_ms = (time.perf_counter() - started_at) * 1000
         logger.warning(
@@ -561,21 +529,8 @@ async def generate_shader(
         is_timeout = (
             isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.casefold()
         )
-        internal_pipeline_error = generation_mode == "procedural_v1" and not is_timeout
-        failure_stage = (
-            "model"
-            if is_timeout
-            else "pipeline"
-            if internal_pipeline_error
-            else "generation"
-        )
-        stop_reason = (
-            "model_timeout"
-            if is_timeout
-            else "internal_pipeline_error"
-            if internal_pipeline_error
-            else "generation_failed"
-        )
+        failure_stage = "model" if is_timeout else "pipeline"
+        stop_reason = "model_timeout" if is_timeout else "internal_pipeline_error"
         diagnostics = {
             "failure_stage": failure_stage,
             "failure_event": stop_reason,
@@ -604,193 +559,148 @@ async def generate_shader(
             stop_reason,
             failure_stage,
             type(exc).__name__,
-            str(is_timeout or not internal_pipeline_error).lower(),
+            str(is_timeout).lower(),
             duration_ms,
         )
-        status_code = 504 if is_timeout else 500 if internal_pipeline_error else 502
+        status_code = 504 if is_timeout else 500
         message = (
             "Shader 模型阶段响应超时。"
             if is_timeout
             else "Shader 自动闭环发生内部错误。"
-            if internal_pipeline_error
-            else "生成 GLSL 失败。"
         )
-        code = (
-            "model_timeout"
-            if is_timeout
-            else "internal_pipeline_error"
-            if internal_pipeline_error
-            else "generation_failed"
-        )
+        code = "model_timeout" if is_timeout else "internal_pipeline_error"
         raise _generation_http_error(
             status_code=status_code,
             message=message,
             code=code,
             run_id=run_id,
             stage=failure_stage,
-            retryable=not internal_pipeline_error,
+            retryable=is_timeout,
             stop_reason=stop_reason,
         ) from exc
 
-    if generation_mode == "procedural_v1":
-        if procedural_result is None:
-            raise RuntimeError("procedural_v1 未返回结果。")
-        result = procedural_result
-        artifact_base = f"/api/shader/runs/{run_id}/artifacts"
-        metrics_available = result.score is not None
-        metrics_url = f"{artifact_base}/metrics" if metrics_available else None
-        try:
-            response = ShaderResponse(
-                project_id=resolved_project_id,
-                run_id=run_id,
-                glsl=result.glsl,
-                memory_status=result.memory_status,
-                generation_mode="procedural_v1",
-                quality_preset=cast(QualityPresetName, result.quality_preset),
-                iterations=result.iterations,
-                stop_reason=result.stop_reason,
-                best_candidate_id=result.best_candidate_id,
-                unscored_fallback=result.unscored_fallback,
-                render_width=result.render_width,
-                render_height=result.render_height,
-                final_render_url=f"{artifact_base}/final-render",
-                metrics_url=metrics_url,
-                manifest_url=f"{artifact_base}/manifest",
-                score=(
-                    ShaderScore.model_validate(result.score)
-                    if result.score is not None
-                    else None
-                ),
-                review=_procedural_review(result.review),
-            )
-        except Exception as exc:
-            duration_ms = (time.perf_counter() - started_at) * 1000
-            diagnostics = {
-                "failure_stage": "backend_response",
-                "failure_event": "response_contract_failed",
-                "failure_error_type": type(exc).__name__,
-                "stop_reason": result.stop_reason,
-                "model_call_count": len(result.model_calls),
-                "backend_duration_ms": round(duration_ms, 2),
-            }
-            if pool is not None and run_started:
-                await _record_generation_failure_without_masking(
-                    pool,
-                    run_id=run_id,
-                    project_id=resolved_project_id,
-                    generation_mode="procedural_v1",
-                    stop_reason=result.stop_reason,
-                    failure_stage="backend_response",
-                    error=exc,
-                    model_calls=result.model_calls,
-                    events=result.events,
-                    logs=result.logs,
-                    diagnostics=diagnostics,
-                )
-            logger.error(
-                "shader.generate.response_contract_failed run_id=%s project_id=%s "
-                "generation_mode=procedural_v1 quality_preset=%s "
-                "stop_reason=%s failure_stage=backend_response "
-                "best_candidate_id=%s error_type=%s retryable=false duration_ms=%.2f",
-                run_id,
-                resolved_project_id,
-                result.quality_preset,
-                result.stop_reason,
-                result.best_candidate_id,
-                type(exc).__name__,
-                duration_ms,
-            )
-            raise _generation_http_error(
-                status_code=500,
-                message="生成已完成，但结果格式校验失败。",
-                code="response_contract_failed",
-                run_id=run_id,
-                stage="backend_response",
-                retryable=False,
-                stop_reason=result.stop_reason,
-            ) from exc
-        if pool is not None:
-            await _record_generation_success_without_masking(
+    if result is None:
+        raise RuntimeError("procedural_v1 未返回结果。")
+    artifact_base = f"/api/shader/runs/{run_id}/artifacts"
+    metrics_available = result.score is not None
+    metrics_url = f"{artifact_base}/metrics" if metrics_available else None
+    try:
+        response = ShaderResponse(
+            project_id=resolved_project_id,
+            run_id=run_id,
+            glsl=result.glsl,
+            memory_status=result.memory_status,
+            generation_mode="procedural_v1",
+            quality_preset=cast(QualityPresetName, result.quality_preset),
+            iterations=result.iterations,
+            stop_reason=result.stop_reason,
+            best_candidate_id=result.best_candidate_id,
+            unscored_fallback=result.unscored_fallback,
+            render_width=result.render_width,
+            render_height=result.render_height,
+            final_render_url=f"{artifact_base}/final-render",
+            metrics_url=metrics_url,
+            manifest_url=f"{artifact_base}/manifest",
+            score=(
+                ShaderScore.model_validate(result.score)
+                if result.score is not None
+                else None
+            ),
+            review=_procedural_review(result.review),
+        )
+    except Exception as exc:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        diagnostics = {
+            "failure_stage": "backend_response",
+            "failure_event": "response_contract_failed",
+            "failure_error_type": type(exc).__name__,
+            "stop_reason": result.stop_reason,
+            "model_call_count": len(result.model_calls),
+            "backend_duration_ms": round(duration_ms, 2),
+        }
+        if pool is not None and run_started:
+            await _record_generation_failure_without_masking(
                 pool,
                 run_id=run_id,
                 project_id=resolved_project_id,
                 generation_mode="procedural_v1",
-                model_name=result.glsl_model_name,
-                glsl_chars=len(result.glsl),
+                stop_reason=result.stop_reason,
+                failure_stage="backend_response",
+                error=exc,
                 model_calls=result.model_calls,
                 events=result.events,
                 logs=result.logs,
-                result_summary={
-                    "generation_mode": generation_mode,
-                    "quality_preset": result.quality_preset,
-                    "iterations": result.iterations,
-                    "stop_reason": result.stop_reason,
-                    "best_candidate_id": result.best_candidate_id,
-                    "unscored_fallback": result.unscored_fallback,
-                    "render_width": result.render_width,
-                    "render_height": result.render_height,
-                    "score": result.score,
-                    "metrics_available": metrics_available,
-                    "final_render_url": f"{artifact_base}/final-render",
-                    "metrics_url": metrics_url,
-                    "manifest_url": f"{artifact_base}/manifest",
-                },
+                diagnostics=diagnostics,
             )
-        total_loss = (
-            f"{float(result.score.get('total_loss', 0.0)):.6f}"
-            if result.score is not None
-            else "unavailable"
-        )
-        logger.info(
-            "shader.generate.succeeded run_id=%s project_id=%s "
-            "generation_mode=procedural_v1 quality_preset=%s stop_reason=%s "
-            "failure_stage=none best_candidate_id=%s unscored_fallback=%s "
-            "iterations=%s "
-            "metrics_available=%s total_loss=%s duration_ms=%.2f",
+        logger.error(
+            "shader.generate.response_contract_failed run_id=%s project_id=%s "
+            "generation_mode=procedural_v1 quality_preset=%s "
+            "stop_reason=%s failure_stage=backend_response "
+            "best_candidate_id=%s error_type=%s retryable=false duration_ms=%.2f",
             run_id,
             resolved_project_id,
             result.quality_preset,
             result.stop_reason,
             result.best_candidate_id,
-            str(result.unscored_fallback).lower(),
-            result.iterations,
-            str(metrics_available).lower(),
-            total_loss,
-            (time.perf_counter() - started_at) * 1000,
+            type(exc).__name__,
+            duration_ms,
         )
-        return response
-
-    if legacy_result is None:
-        raise RuntimeError("legacy 未返回结果。")
-    result = legacy_result
-    response = ShaderResponse(
-        project_id=resolved_project_id,
-        run_id=run_id,
-        glsl=result.glsl,
-        memory_status=result.memory_status,
-        generation_mode="legacy",
-    )
+        raise _generation_http_error(
+            status_code=500,
+            message="生成已完成，但结果格式校验失败。",
+            code="response_contract_failed",
+            run_id=run_id,
+            stage="backend_response",
+            retryable=False,
+            stop_reason=result.stop_reason,
+        ) from exc
     if pool is not None:
         await _record_generation_success_without_masking(
             pool,
             run_id=run_id,
             project_id=resolved_project_id,
-            generation_mode="legacy",
+            generation_mode="procedural_v1",
             model_name=result.glsl_model_name,
             glsl_chars=len(result.glsl),
             model_calls=result.model_calls,
             events=result.events,
             logs=result.logs,
-            result_summary={"generation_mode": "legacy"},
+            result_summary={
+                "generation_mode": generation_mode,
+                "quality_preset": result.quality_preset,
+                "iterations": result.iterations,
+                "stop_reason": result.stop_reason,
+                "best_candidate_id": result.best_candidate_id,
+                "unscored_fallback": result.unscored_fallback,
+                "render_width": result.render_width,
+                "render_height": result.render_height,
+                "score": result.score,
+                "metrics_available": metrics_available,
+                "final_render_url": f"{artifact_base}/final-render",
+                "metrics_url": metrics_url,
+                "manifest_url": f"{artifact_base}/manifest",
+            },
         )
+    total_loss = (
+        f"{float(result.score.get('total_loss', 0.0)):.6f}"
+        if result.score is not None
+        else "unavailable"
+    )
     logger.info(
-        "shader.generate.succeeded run_id=%s project_id=%s generation_mode=legacy "
-        "stop_reason=completed failure_stage=none model=%s glsl_chars=%s "
-        "duration_ms=%.2f",
+        "shader.generate.succeeded run_id=%s project_id=%s "
+        "generation_mode=procedural_v1 quality_preset=%s stop_reason=%s "
+        "failure_stage=none best_candidate_id=%s unscored_fallback=%s "
+        "iterations=%s "
+        "metrics_available=%s total_loss=%s duration_ms=%.2f",
         run_id,
         resolved_project_id,
-        result.glsl_model_name,
-        len(result.glsl),
+        result.quality_preset,
+        result.stop_reason,
+        result.best_candidate_id,
+        str(result.unscored_fallback).lower(),
+        result.iterations,
+        str(metrics_available).lower(),
+        total_loss,
         (time.perf_counter() - started_at) * 1000,
     )
     return response
@@ -803,12 +713,12 @@ async def get_shader_run_artifact(
     artifact_name: str,
 ) -> Response:
     """下载 final-render、metrics 或 manifest 三种白名单产物."""
-    _service, procedural_service, _locks = _runtime(request)
+    service, _locks = _runtime(request)
     try:
         artifact = read_shader_run_artifact(
             str(run_id),
             artifact_name,
-            service=procedural_service,
+            service=service,
         )
     except (PublicArtifactNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail="未找到该运行产物。") from exc
@@ -823,99 +733,16 @@ async def get_shader_run_artifact(
     )
 
 
-@router.post("/review", response_model=ShaderReviewResponse)
-async def review_shader(
-    request: Request,
-    original_file: UploadFile = File(...),
-    rendered_file: UploadFile = File(...),
-    glsl: str = Form(...),
-    project_id: UUID = Form(...),
-) -> ShaderReviewResponse:
-    """上传原图、渲染图和 GLSL，在同一项目中评审并晋升 Memory."""
-    original_image = await read_image_upload(original_file)
-    rendered_image = await read_image_upload(rendered_file)
-    if not glsl.strip():
-        raise HTTPException(status_code=400, detail="GLSL 代码不能为空。")
-
-    pool = getattr(request.app.state, "db_pool", None)
-    service, _procedural_service, locks = _runtime(request)
-    run_id = uuid4()
-    run_started = False
-    try:
-        async with locks.hold(str(project_id)):
-            if pool is not None:
-                await start_shader_review_run(
-                    pool,
-                    run_id=run_id,
-                    project_id=project_id,
-                    original_content_type=original_file.content_type
-                    or "application/octet-stream",
-                    original_size_bytes=len(original_image),
-                    rendered_content_type=rendered_file.content_type
-                    or "application/octet-stream",
-                    rendered_size_bytes=len(rendered_image),
-                    glsl_chars=len(glsl),
-                )
-                run_started = True
-
-            result = await review_shader_render(
-                original_image,
-                original_file.content_type or "application/octet-stream",
-                rendered_image,
-                rendered_file.content_type or "application/octet-stream",
-                glsl,
-                project_id=str(project_id),
-                run_id=str(run_id),
-                service=service,
-            )
-    except ProjectBusyError as exc:
-        raise HTTPException(
-            status_code=409, detail="当前项目已有任务正在执行。"
-        ) from exc
-    except MemoryUnavailableError as exc:
-        if pool is not None and run_started:
-            await record_shader_review_failure(pool, run_id=run_id, error=exc)
-        logger.exception("shader.review.memory_unavailable")
-        raise HTTPException(status_code=503, detail="任务记忆暂时不可用。") from exc
-    except Exception as exc:
-        if pool is not None and run_started:
-            await record_shader_review_failure(pool, run_id=run_id, error=exc)
-        logger.exception("shader.review.failed")
-        raise HTTPException(status_code=502, detail="评审渲染图失败。") from exc
-
-    if pool is not None:
-        await record_shader_review_success(
-            pool,
-            run_id=run_id,
-            model_name=result.review_model_name,
-            evaluation=result.evaluation,
-            suggestion_count=len(result.suggestions),
-            model_calls=result.model_calls,
-            events=result.events,
-            logs=result.logs,
-        )
-
-    return ShaderReviewResponse(
-        project_id=project_id,
-        review=ShaderReview(
-            evaluation=result.evaluation,
-            suggestions=list(result.suggestions),
-        ),
-        memory_status=result.memory_status,
-    )
-
-
 @router.delete("/projects/{project_id}/memory", status_code=204)
 async def clear_project_memory(request: Request, project_id: UUID) -> Response:
     """清除当前项目 checkpoint 和长期 Memory，不删除过程账本."""
-    service, procedural_service, locks = _runtime(request)
+    service, locks = _runtime(request)
     try:
         async with locks.hold(str(project_id)):
             await clear_png_to_shader_project_memory(
                 str(project_id),
-                service=procedural_service,
+                service=service,
             )
-            await clear_shader_project_memory(str(project_id), service=service)
     except ProjectBusyError as exc:
         raise HTTPException(
             status_code=409, detail="当前项目已有任务正在执行。"

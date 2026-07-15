@@ -16,21 +16,21 @@
 - API base URL 通过 `VITE_API_BASE_URL` 配置，默认只用于本地开发。
 - API 函数返回明确的 TypeScript 类型。
 - 后端错误要转成用户能理解的错误消息；不要把原始异常对象直接展示给用户。
-- 当前 `src/api/shader.ts` 封装 GLSL 生成和渲染评审。Generate 显式发送 generation mode、质量档位、补充约束和 project_id；legacy 评审请求继续上传原图、canvas 渲染图和 GLSL。
+- 当前 `src/api/shader.ts` 封装 V1 GLSL 生成、Artifact URL 解析和项目记忆清理。Generate 固定显式发送 `generation_mode=procedural_v1`，并发送质量档位、补充约束和 `project_id`；前端不再调用独立 Review 接口。
 - `src/api/nodeLab.ts` 只封装默认关闭的 `/api/lab/v1/*` 调试边界；`/lab` 工作台读取后端 descriptor 和调用示例，不在前端复制节点输入规则、Fixture 或 benchmark 判定。
 - `procedural_v1` 读取 run/current_best/score/stop/render 尺寸和白名单 Artifact URL；相对 URL 必须经 `resolveShaderApiUrl()` 解析，不在组件中手拼 API base。
 - 生成失败兼容旧版 `detail: string` 和类型化 `detail: {message, code, run_id, stage, retryable, stop_reason}`；页面必须展示可用于后端检索的 Run ID 和失败阶段，不把服务端超时误报为客户端输入错误。
 - Generate 使用 `AbortController` 支持“停止等待”和浏览器端兜底超时。它只中止客户端 HTTP 等待，不等价于服务端取消；自动等待上限可通过 `VITE_GENERATION_REQUEST_TIMEOUT_MS`（毫秒，最小 10000）覆盖。
-- Generate/Review 都传递 `project_id` 并读取 `memory_status`；清除项目记忆只通过 `clearProjectMemory()`。
-- `instruction` 只属于 `procedural_v1`；Legacy 模式必须禁用该输入并发送空值，禁止让用户填写后再被后端静默忽略。
+- Generate 传递 `project_id` 并读取 `memory_status` 和自动闭环 Review；清除项目记忆只通过 `clearProjectMemory()`。
+- `quality_preset` 和 `instruction` 始终属于当前 V1 路径；除请求执行期间外，两个输入都必须可编辑。
 
 ## 组件规则
 
 - 页面级状态留在页面或 `App`，可复用组件只处理自身交互和渲染。
-- 当前质量门禁为 no-go 时默认使用 `legacy`；`procedural_v1` 仅作为明确标注的实验模式供手动选择，不得静默成为默认路径。
+- 产品页面只提供 `procedural_v1`，不再展示历史 Graph 的模式选择；当前质量门禁仍为 no-go，页面必须保留清晰的实验性提示。
 - WebGL/Canvas 相关逻辑优先封装在专用组件中，不和上传表单、API 调用混写。
-- `ShaderPreview` 可以把第一帧 canvas 渲染结果作为 `Blob` 回传给页面容器。legacy 允许绑定原图纹理和动画；V1 必须按服务端规范化尺寸使用 WebGL1、`u_time=0`、不创建/绑定原图纹理重新编译，并从白名单 URL 读取服务端 PNG 计算 RGB RMSE（当前兼容阈值 0.02）。
-- `RunProgress` 只展示阻塞式请求的执行中阶段说明和完成后的模式、档位、迭代、停止原因、候选与双端复核；它不是实时轮询器。`unscored_fallback=true` 时必须显示“WebGL fallback”，不得标成 `current_best`，且不渲染虚假的评分面板。`ScoreSummary` 只展示 Backend 返回的确定性指标，不在前端重算 Oracle。
+- `ShaderPreview` 只执行 V1 静态预览：按服务端规范化尺寸使用 WebGL1、固定 `u_time=0`、不创建或绑定原图纹理，并从白名单 URL 读取服务端 PNG 计算 RGB RMSE（当前兼容阈值 0.02）。
+- `RunProgress` 只展示阻塞式 V1 请求的执行中阶段说明和完成后的档位、迭代、停止原因、候选与双端复核；它不是实时轮询器。`unscored_fallback=true` 时必须显示“WebGL fallback”，不得标成 `current_best`，且不渲染虚假的评分面板。`ScoreSummary` 只展示 Backend 返回的确定性指标，不在前端重算 Oracle。
 - 页面把当前 project ID 和最近最多 10 个项目保存在 `localStorage`，支持刷新恢复、新建、最近项目切换和清除；最近项目只是本地索引，不是后端项目管理。
 - `ephemeral` 和 `degraded` 必须显示用户可理解提示。
 - 新增复杂组件时，先确认能否拆成一个页面容器加少量纯展示组件。

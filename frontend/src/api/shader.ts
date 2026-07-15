@@ -1,5 +1,4 @@
 export type MemoryStatus = "durable" | "ephemeral" | "degraded";
-export type GenerationMode = "legacy" | "procedural_v1";
 export type QualityPreset = "fast" | "balanced" | "high";
 
 export interface ShaderScore {
@@ -21,7 +20,7 @@ export interface ShaderResponse {
   run_id: string;
   glsl: string;
   memory_status: MemoryStatus;
-  generation_mode: GenerationMode;
+  generation_mode: "procedural_v1";
   quality_preset?: QualityPreset | null;
   iterations: number;
   stop_reason?: string | null;
@@ -39,12 +38,6 @@ export interface ShaderResponse {
 export interface ShaderReview {
   evaluation: string;
   suggestions: string[];
-}
-
-export interface ShaderReviewResponse {
-  project_id: string;
-  review: ShaderReview;
-  memory_status: MemoryStatus;
 }
 
 export interface ShaderApiFailure {
@@ -102,7 +95,7 @@ async function readError(response: Response, fallback: string): Promise<ShaderAp
         message;
     }
   } catch {
-    // 旧接口可能直接返回纯文本；保留原消息以兼容。
+    // 服务端也可能直接返回纯文本；保留原消息便于定位。
   }
 
   return new ShaderApiError(message, {
@@ -117,7 +110,6 @@ async function readError(response: Response, fallback: string): Promise<ShaderAp
 
 export interface GenerateShaderOptions {
   projectId?: string;
-  generationMode: GenerationMode;
   qualityPreset: QualityPreset;
   instruction: string;
   signal?: AbortSignal;
@@ -130,7 +122,7 @@ export async function generateShader(
   const formData = new FormData();
   formData.append("file", file);
   if (options.projectId) formData.append("project_id", options.projectId);
-  formData.append("generation_mode", options.generationMode);
+  formData.append("generation_mode", "procedural_v1");
   formData.append("quality_preset", options.qualityPreset);
   formData.append("instruction", options.instruction);
 
@@ -142,30 +134,6 @@ export async function generateShader(
 
   if (!response.ok) {
     throw await readError(response, "生成 GLSL 失败。");
-  }
-
-  return response.json();
-}
-
-export async function reviewShader(
-  originalFile: File,
-  renderedImage: Blob,
-  glsl: string,
-  projectId: string,
-): Promise<ShaderReviewResponse> {
-  const formData = new FormData();
-  formData.append("original_file", originalFile);
-  formData.append("rendered_file", renderedImage, "rendered.png");
-  formData.append("glsl", glsl);
-  formData.append("project_id", projectId);
-
-  const response = await fetch(`${API_BASE_URL}/api/shader/review`, {
-    method: "POST",
-    body: formData,
-  });
-
-  if (!response.ok) {
-    throw await readError(response, "评审渲染图失败。");
   }
 
   return response.json();

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import sys
 from pathlib import Path
 
@@ -27,6 +28,20 @@ def _feature_row(feature_id: str) -> str:
     return ""
 
 
+def _registered_graph_count() -> int:
+    """从 LangGraph 注册表读取当前对外图数量，避免文档检查固化旧数字."""
+    try:
+        value = json.loads(_read("langgraph.json"))
+    except (json.JSONDecodeError, OSError) as exc:
+        ERRORS.append(f"无法读取 langgraph.json：{type(exc).__name__}。")
+        return 0
+    graphs = value.get("graphs") if isinstance(value, dict) else None
+    if not isinstance(graphs, dict) or not graphs:
+        ERRORS.append("langgraph.json 的 graphs 必须是非空 object。")
+        return 0
+    return len(graphs)
+
+
 def _check_feature_state_machine() -> None:
     rows = [
         line
@@ -40,33 +55,23 @@ def _check_feature_state_machine() -> None:
 
     h01 = _feature_row("H01")
     _require("单元测试通过" in h01, "H01 evidence 需要记录单元测试通过。")
-    _require("2 个 graph" in h01, "H01 evidence 需要反映当前 LangGraph 图数量。")
+    graph_count = _registered_graph_count()
+    if graph_count:
+        expected_graph_evidence = f"{graph_count} 个 graph"
+        _require(
+            expected_graph_evidence in h01,
+            "H01 evidence 需要反映 langgraph.json 当前注册的 "
+            f"{expected_graph_evidence}。",
+        )
     _require(
         "25 个单元测试" not in h01, "H01 evidence 不应硬编码易过期的 25 个单元测试。"
     )
     _require("20 个单元测试" not in h01, "H01 evidence 仍包含过时的 20 个单元测试。")
     _require("8 个单元测试" not in h01, "H01 evidence 仍包含过时的 8 个单元测试。")
-    _require("1 个 graph" not in h01, "H01 evidence 仍包含过时的 1 个 graph。")
 
-    f06 = _feature_row("F06")
-    f07 = _feature_row("F07")
-    _require("Agent/后端在线 Review" in f06, "F06 需要限定为 Agent/后端 Review 能力。")
-    _require("| passing |" in f06, "F06 当前应保持 passing。")
-    _require("单元测试通过" in f06, "F06 evidence 需要记录单元测试通过。")
-    _require(
-        "单元测试 25 个通过" not in f06,
-        "F06 evidence 不应硬编码易过期的 25 个单元测试。",
-    )
-    _require(
-        "单元测试 20 个通过" not in f06, "F06 evidence 仍包含过时的 20 个单元测试。"
-    )
-    _require("浏览器端 Review 闭环" in f07, "F07 需要承载浏览器端 Review 闭环。")
-    _require(
-        "canvas 截图 -> review API -> UI 展示" in f07,
-        "F07 需要写明 canvas 截图 -> review API -> UI 展示。",
-    )
-    _require("Playwright" in f07, "F07 evidence 需要说明 Playwright 或等价浏览器检查。")
-    _require("| not_started |" in f07, "F07 当前应是 not_started。")
+    f09 = _feature_row("F09")
+    _require("PNG" in f09 and "current_best" in f09, "F09 需要描述 V1 主链路。")
+    _require("| active |" in f09, "F09 在质量门禁通过前必须保持 active。")
 
 
 def _check_agent_architecture_docs() -> None:
@@ -200,12 +205,14 @@ def _imported_modules(path: Path) -> list[str]:
 
 
 def _check_agent_service_boundary() -> None:
-    modules = _imported_modules(ROOT / "src/agent/app/services/shader_generation.py")
     forbidden = ("agent.app.nodes", "agent.app.llms")
-    violations = [module for module in modules if module.startswith(forbidden)]
+    path = ROOT / "src/agent/app/services/png_to_shader_v1.py"
+    violations = [
+        module for module in _imported_modules(path) if module.startswith(forbidden)
+    ]
     _require(
         not violations,
-        "agent.app.services.shader_generation 不应 import nodes/llms 内部模块："
+        "agent.app.services.png_to_shader_v1 不应 import nodes/llms 内部模块："
         + ", ".join(violations),
     )
 

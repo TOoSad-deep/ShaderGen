@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 from uuid import UUID, uuid4
 
 import pytest
@@ -257,27 +256,31 @@ def test_response_contract_failure_is_recorded_as_failed_before_success(
     assert "shader.generate.response_contract_failed" in caplog.text
 
 
-def test_generate_legacy_remains_default(monkeypatch) -> None:
-    class LegacyResult:
-        glsl = "void main() {}"
-        glsl_model_name = "legacy-model"
-        vision_model_name = "legacy-model"
-        memory_status = "ephemeral"
-        model_calls = ()
-        events = ()
-        logs = ()
+def test_generate_defaults_to_procedural_v1(monkeypatch) -> None:
+    async def fake_generate(*args, **kwargs):
+        assert kwargs["quality_preset"] == "balanced"
+        return PngToShaderV1Result(
+            project_id=kwargs["project_id"],
+            run_id=kwargs["run_id"],
+            glsl="precision mediump float; void main(){gl_FragColor=vec4(1.0);}",
+            memory_status="ephemeral",
+            quality_preset="balanced",
+            iterations=0,
+            stop_reason="quality_threshold_met",
+            best_candidate_id="candidate-0001",
+            render_width=32,
+            render_height=24,
+            score=score(),
+            unscored_fallback=False,
+            review=None,
+            glsl_model_name="fake-author",
+            vision_model_name="fake-vision",
+        )
 
-    async def fake_legacy(*args, **kwargs):
-        return LegacyResult()
-
-    async def fail_procedural(*args, **kwargs):
-        raise AssertionError("默认请求不应进入 procedural_v1")
-
-    monkeypatch.setattr(shader_route, "generate_shader_from_image", fake_legacy)
     monkeypatch.setattr(
         shader_route,
         "generate_procedural_shader_from_image",
-        fail_procedural,
+        fake_generate,
     )
 
     response = TestClient(app).post(
@@ -286,8 +289,25 @@ def test_generate_legacy_remains_default(monkeypatch) -> None:
     )
 
     assert response.status_code == 200
-    assert response.json()["generation_mode"] == "legacy"
-    assert response.json()["final_render_url"] is None
+    assert response.json()["generation_mode"] == "procedural_v1"
+    assert response.json()["final_render_url"].endswith("/artifacts/final-render")
+
+
+def test_generate_rejects_removed_legacy_mode() -> None:
+    response = TestClient(app).post(
+        "/api/shader/generate",
+        files={"file": ("target.png", b"image", "image/png")},
+        data={"generation_mode": "legacy"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "client_validation"
+
+
+def test_removed_review_endpoint_returns_not_found() -> None:
+    response = TestClient(app).post("/api/shader/review")
+
+    assert response.status_code == 404
 
 
 def test_generate_procedural_failure_is_safe_and_understandable(
@@ -528,13 +548,17 @@ def test_generation_run_start_failure_maps_to_typed_persistence_error(
         raise AssertionError("run 总账失败后不应调用生成服务")
 
     monkeypatch.setattr(shader_route, "start_shader_generation_run", fake_start)
-    monkeypatch.setattr(shader_route, "generate_shader_from_image", fail_generate)
+    monkeypatch.setattr(
+        shader_route,
+        "generate_procedural_shader_from_image",
+        fail_generate,
+    )
     app.state.db_pool = object()
     try:
         response = TestClient(app).post(
             "/api/shader/generate",
             files={"file": ("target.png", b"image", "image/png")},
-            data={"generation_mode": "legacy"},
+            data={"generation_mode": "procedural_v1"},
         )
     finally:
         del app.state.db_pool
@@ -581,28 +605,6 @@ def test_unexpected_procedural_error_maps_to_internal_pipeline_error(
     assert "PRIVATE_INTERNAL_DETAIL" not in response.text
     assert "PRIVATE_INTERNAL_DETAIL" not in caplog.text
 
-
-def test_legacy_generation_has_server_side_model_timeout(
-    monkeypatch,
-) -> None:
-    async def slow_generation(*args, **kwargs):
-        await asyncio.Event().wait()
-
-    monkeypatch.setattr(shader_route, "generate_shader_from_image", slow_generation)
-    monkeypatch.setattr(shader_route, "LEGACY_GENERATION_TIMEOUT_SECONDS", 0.01)
-
-    response = TestClient(app).post(
-        "/api/shader/generate",
-        files={"file": ("target.png", b"image", "image/png")},
-        data={"generation_mode": "legacy"},
-    )
-
-    assert response.status_code == 504
-    detail = response.json()["detail"]
-    assert detail["code"] == "model_timeout"
-    assert detail["stage"] == "model"
-    assert detail["retryable"] is True
-    assert detail["stop_reason"] == "model_timeout"
 
 
 def test_failure_persistence_error_does_not_mask_generation_timeout(
@@ -717,51 +719,6 @@ def test_procedural_success_persistence_error_does_not_mask_shader(
     assert "persistence_stage=outcome_commit" in caplog.text
     assert "PRIVATE_DATABASE_DETAIL" not in caplog.text
 
-
-def test_legacy_success_persistence_error_does_not_mask_shader(
-    monkeypatch,
-    caplog,
-) -> None:
-    class LegacyResult:
-        glsl = "void main() {}"
-        glsl_model_name = "legacy-model"
-        vision_model_name = "legacy-model"
-        memory_status = "ephemeral"
-        model_calls = ()
-        events = ()
-        logs = ()
-
-    async def fake_start(*args, **kwargs):
-        return None
-
-    async def fake_record_success(*args, **kwargs):
-        raise RuntimeError("PRIVATE_DATABASE_DETAIL")
-
-    async def fake_generate(*args, **kwargs):
-        return LegacyResult()
-
-    monkeypatch.setattr(shader_route, "start_shader_generation_run", fake_start)
-    monkeypatch.setattr(
-        shader_route,
-        "record_shader_generation_success",
-        fake_record_success,
-    )
-    monkeypatch.setattr(shader_route, "generate_shader_from_image", fake_generate)
-    app.state.db_pool = object()
-    try:
-        response = TestClient(app).post(
-            "/api/shader/generate",
-            files={"file": ("target.png", b"image", "image/png")},
-            data={"generation_mode": "legacy"},
-        )
-    finally:
-        del app.state.db_pool
-
-    assert response.status_code == 200
-    assert response.json()["glsl"] == "void main() {}"
-    assert "shader.generate.success_persistence_failed" in caplog.text
-    assert "generation_mode=legacy" in caplog.text
-    assert "PRIVATE_DATABASE_DETAIL" not in caplog.text
 
 
 def test_artifact_endpoint_uses_fixed_whitelist(monkeypatch) -> None:

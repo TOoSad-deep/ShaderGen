@@ -248,3 +248,10 @@
 - 决策：正式 run `m5-20260715T023445Z` 的自动检查 12/12 通过，但独立盲评 final 偏好率只有 30%，低于冻结的 50% 门槛，因此最终 gate 必须保持 `failed`，F09 继续 active/no-go。不得因为自动 objective 通过而移动人工阈值、重解释平局、选择性排除 case，或把当前 run 写成已通过；该 run 只作为 M6.2 的诊断基线，修复后必须使用新 suite-run-id、完整硬预算和新一轮独立盲评。
 - 原因：自动 gate 证明 8/10 case 在 `manifest_key_rois_v1` 下改善，并验证 compile/static、traceability、current_best 与局部阈值，却不能证明人类偏好的结构、实例数量和高光/阴影语义得到保留。人工解码为 final/initial/tie `3/4/3`；`rimmed_disk`、`arc_highlight_orb`、`dual_disks`、`pink_gel` 均偏好 initial，说明低频 affine 近似可能降低像素 objective，同时损伤视觉拓扑和语义层次。
 - 影响：M6.2 优先在 Node Lab 增加结构与语义诊断，检查 topology、实例数量、轮廓/镂空、高光/阴影以及 Selector 的结构保护证据；不得加入 benchmark case id、golden、manifest 或 gate 特判。完成离线回归后，仍需重新执行真实模型 M5 和独立人工门禁；当前失败评审 JSON、报告与逐 case 产物继续只增不改保存。
+
+## D034 - 产品与 LangGraph 入口收敛为 PNG-to-Shader V1
+
+- 日期：2026-07-15
+- 决策：`langgraph.json` 只注册 `png_to_shader_v1`；删除旧基础对话图和 `shader_generation_graph`，以及仅服务这两个旧图的 Node、State、Prompt、Parser 和 Agent Service。Backend/Frontend 同步下线 legacy 生成与独立 `POST /api/shader/review`，`POST /api/shader/generate` 只接受或默认使用 `procedural_v1`。
+- 原因：用户确认其余两个 Graph 是此前遗留的废弃实现。只删除注册而继续保留 legacy API、默认 UI 和旧 Memory 生命周期会形成悬空入口，也会让“当前架构只有 V1”与运行事实不一致；因此必须沿反向依赖一起清理。
+- 影响：旧客户端发送 `generation_mode=legacy` 或调用 `/api/shader/review` 不再兼容；V1 最终响应中的 Critic Review、评分、Artifact 白名单和项目 Memory 清理继续保留。已有数据库账本不删除，Memory 的旧 `review` 记录保留只读解析兼容；V1 checkpoint 前缀 `png-to-shader-v1:{project_id}` 保持不变。为维持项目删除语义，V1 清理同时删除旧 Graph 遗留的裸 `{project_id}` checkpoint，但不恢复任何旧运行入口。D009、D023 和 D027 中关于 legacy/独立 Review 仍在线的部分由本决策取代，历史记录不删除。此次结构收敛不改变冻结质量门槛：F09 仍为 `active`、最终发布 gate 仍为 no-go。

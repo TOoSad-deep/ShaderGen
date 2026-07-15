@@ -7,7 +7,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from agent.app.prompts.prompt_loader import load_prompt_definition
 from shaderforge.public import (
     DEFAULT_ACCEPTANCE_POLICY,
     PROBLEM_DOMAINS,
@@ -97,17 +96,6 @@ def test_contract_and_policy_reject_invalid_values() -> None:
         budget_for_preset("unbounded")
     with pytest.raises(ValueError, match="stagnation_rounds"):
         AcceptancePolicy(stagnation_rounds=0)
-
-
-def test_image_to_glsl_prompt_is_consistent_with_no_texture_contract() -> None:
-    definition = load_prompt_definition("image_to_glsl")
-
-    assert definition.version == "image_to_glsl_no_texture_v1"
-    assert "禁止使用 texture2D" in definition.prompt
-    assert "必须使用 texture2D" not in definition.prompt
-    assert "vec4 base = texture2D" not in definition.prompt
-    for declaration in WEBGL1_STATIC_NO_TEXTURE_V1.required_declarations:
-        assert declaration in definition.prompt
 
 
 def test_benchmark_manifest_has_ten_valid_png_cases() -> None:

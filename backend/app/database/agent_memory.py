@@ -19,10 +19,6 @@ from agent.app.services.png_to_shader_v1 import (
     PngToShaderV1Service,
     create_png_to_shader_v1_service,
 )
-from agent.app.services.shader_generation import (
-    ShaderGenerationService,
-    create_shader_generation_service,
-)
 
 logger = logging.getLogger("backend.agent_memory")
 
@@ -31,7 +27,6 @@ logger = logging.getLogger("backend.agent_memory")
 class AgentMemoryResources:
     """保存 Backend 生命周期管理的 Memory 资源."""
 
-    service: ShaderGenerationService
     png_to_shader_v1_service: PngToShaderV1Service
     pool: AsyncConnectionPool | None = None
 
@@ -86,21 +81,14 @@ async def open_agent_memory(app: FastAPI) -> None:
     if not database_url:
         saver = InMemorySaver()
         store = InMemoryStore()
-        service = create_shader_generation_service(
-            checkpointer=saver,
-            store=store,
-            memory_status="ephemeral",
-        )
         png_to_shader_v1_service = create_png_to_shader_v1_service(
             checkpointer=saver,
             store=store,
             memory_status="ephemeral",
         )
         app.state.agent_memory = AgentMemoryResources(
-            service=service,
             png_to_shader_v1_service=png_to_shader_v1_service,
         )
-        app.state.shader_service = service
         app.state.png_to_shader_v1_service = png_to_shader_v1_service
         logger.warning("agent.memory.ephemeral database_url_missing=true")
         return
@@ -111,11 +99,6 @@ async def open_agent_memory(app: FastAPI) -> None:
         saver = AsyncPostgresSaver(pool)
         store = AsyncPostgresStore(pool)
         await _verify_schema(saver, store)
-        service = create_shader_generation_service(
-            checkpointer=saver,
-            store=store,
-            memory_status="durable",
-        )
         png_to_shader_v1_service = create_png_to_shader_v1_service(
             checkpointer=saver,
             store=store,
@@ -127,11 +110,9 @@ async def open_agent_memory(app: FastAPI) -> None:
         raise
 
     app.state.agent_memory = AgentMemoryResources(
-        service=service,
         png_to_shader_v1_service=png_to_shader_v1_service,
         pool=pool,
     )
-    app.state.shader_service = service
     app.state.png_to_shader_v1_service = png_to_shader_v1_service
     logger.info("agent.memory.started status=durable")
 
@@ -142,5 +123,4 @@ async def close_agent_memory(app: FastAPI) -> None:
     if resources is not None and resources.pool is not None:
         await resources.pool.close()
     app.state.agent_memory = None
-    app.state.shader_service = None
     app.state.png_to_shader_v1_service = None
