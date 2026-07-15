@@ -11,6 +11,7 @@ F09 已完成 M0 契约层、M1 最小事实层和 M3 所需的确定性候选�
 - `validation/`：WebGL1 GLSL ES 1.00 无贴图静态校验和数值风险诊断；
 - `rendering/`：项目自有 Playwright/Chromium WebGL1 编译、链接、渲染、PNG 导出和运行时元数据；
 - `evaluation/`：sRGB RMSE/MAE、边缘、几何、代表像素、ROI 与保护区域 Basic Oracle，以及 CandidateRecord/current_best 纯选择器；
+- `generation/`：从 normalized reference 与 TargetMeasurements 生成无模型、无贴图的 affine/solid ellipse Shader seed 及稳定 provenance；
 - `store/`：按 project/run 隔离、路径安全、原子写入的本地 Artifact Store。
 - `benchmark/`：M5 固定数据集加载、AI-off baseline、版本化质量门禁和匿名 A/B 盲评包。
 
@@ -25,6 +26,6 @@ F09 已完成 M0 契约层、M1 最小事实层和 M3 所需的确定性候选�
 - 可以依赖 Python 标准库和领域算法依赖；
 - 不依赖 FastAPI、React、LangChain 或具体 LLM provider；
 - `contracts/` 只保存稳定类型、枚举和默认策略，不执行模型调用、浏览器渲染或文件持久化；
-- `analysis/`、`validation/` 和 `evaluation/` 保持确定性；`rendering/` 可以依赖 Playwright，但不能调用模型；
+- `analysis/`、`generation/`、`validation/` 和 `evaluation/` 保持确定性；`rendering/` 可以依赖 Playwright，但不能调用模型；
 - `store/` 只管理领域 Artifact，不接触 Backend 数据库连接或 Agent Memory；
 - 新增一级子包时同步创建该目录的 `ARCHITECTURE.md` 和聚焦测试。

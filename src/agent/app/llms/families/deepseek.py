@@ -14,6 +14,7 @@ def get_deepseek_model(
     provider: str | None = None,
     temperature: float = 0,
     response_format: ResponseFormat | str = "text",
+    max_output_tokens: int | None = None,
 ) -> ChatOpenAI:
     """创建 DeepSeek 系列聊天客户端."""
     settings = provider_settings(provider, default_provider="deepseek")
@@ -23,4 +24,5 @@ def get_deepseek_model(
         api_key=settings.secret_api_key,
         base_url=settings.base_url,
         model_kwargs=response_format_model_kwargs(response_format),
+        max_completion_tokens=max_output_tokens,
     )

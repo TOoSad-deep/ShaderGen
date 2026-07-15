@@ -17,6 +17,7 @@
 - API 函数返回明确的 TypeScript 类型。
 - 后端错误要转成用户能理解的错误消息；不要把原始异常对象直接展示给用户。
 - 当前 `src/api/shader.ts` 封装 GLSL 生成和渲染评审。Generate 显式发送 generation mode、质量档位、补充约束和 project_id；legacy 评审请求继续上传原图、canvas 渲染图和 GLSL。
+- `src/api/nodeLab.ts` 只封装默认关闭的 `/api/lab/v1/*` 调试边界；`/lab` 工作台读取后端 descriptor 和调用示例，不在前端复制节点输入规则、Fixture 或 benchmark 判定。
 - `procedural_v1` 读取 run/current_best/score/stop/render 尺寸和白名单 Artifact URL；相对 URL 必须经 `resolveShaderApiUrl()` 解析，不在组件中手拼 API base。
 - 生成失败兼容旧版 `detail: string` 和类型化 `detail: {message, code, run_id, stage, retryable, stop_reason}`；页面必须展示可用于后端检索的 Run ID 和失败阶段，不把服务端超时误报为客户端输入错误。
 - Generate 使用 `AbortController` 支持“停止等待”和浏览器端兜底超时。它只中止客户端 HTTP 等待，不等价于服务端取消；自动等待上限可通过 `VITE_GENERATION_REQUEST_TIMEOUT_MS`（毫秒，最小 10000）覆盖。
@@ -35,6 +36,13 @@
 - 新增复杂组件时，先确认能否拆成一个页面容器加少量纯展示组件。
 - 不把搜索、Oracle、DSL、Prompt 等领域逻辑放进前端；这些属于 `src/shaderforge/` 或 `src/agent/`。
 
+## Node Lab 工作台
+
+- `/lab` 是本地调试页面，不改变产品 `/api/shader/*` 契约。后端必须通过 `make dev-node-lab` 显式启用；普通 `make dev-backend` 下页面会显示稳定的 API 未开放错误。
+- 左侧目录来自 20 个 Node descriptor（包括确定性 `prepare_measurement_seed`）；中间输入编辑器使用机器可读示例、执行模式、Fixture、`base_step_id` 和显式模型门禁；右侧只展示安全 Output、State Diff、diagnostics/usage/provenance。
+- 页面支持新建或恢复 LabRun、上传同 Run 私有 Artifact、从任意父步骤分支、下载不透明 Artifact，并在底部重建不可变步骤 DAG。
+- Real 模型步骤仍需服务端环境开关、页面单步确认和 Backend/Application 三层校验。页面不会自动开启真实模型，也不提供 `project_commit` 选项。
+
 ## 样式规则
 
 - 保持工具型界面风格：信息密度适中、控件清晰、状态可扫描。
@@ -49,8 +57,9 @@
 npm --prefix frontend run build
 npm --prefix frontend run e2e:procedural-v1
 npm --prefix frontend run e2e:memory
+npm --prefix frontend run e2e:node-lab
 ```
 
 - 涉及后端接口字段时，同时检查 `frontend/src/api/` 类型和 `backend/app/schemas/` 是否一致。
-- 两条 E2E 默认使用隔离端口 `15173/18088` 和 `15174/18089`，不会复用或终止开发中的 `5173/8088` 服务；需要并行运行时可通过脚本内对应 `SHADERGEN_*_E2E_*_PORT` 环境变量覆盖。
+- 三条 E2E 默认分别使用隔离端口 `15173/18088`、`15174/18089` 和 `15175/18090`，不会复用或终止开发中的 `5173/8088` 服务；需要并行运行时可通过脚本内对应 `SHADERGEN_*_E2E_*_PORT` 环境变量覆盖。Node Lab 页面 E2E 只连接假 API，不调用模型、Renderer、Memory 或产品 run。
 - 前端目录、组件约定、API 封装或样式规则变化时，同步更新本文档。

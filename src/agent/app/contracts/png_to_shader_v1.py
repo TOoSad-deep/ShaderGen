@@ -405,6 +405,8 @@ class CandidateRecordInput(ContractModel):
     prompt_version: NonEmptyString
     model_ref: NonEmptyString
     iteration: Annotated[StrictInt, Field(ge=0)]
+    origin: Literal["model", "deterministic"] = "model"
+    generator_version: NonEmptyString | None = None
 
 
 class RenderEvidenceBinding(ContractModel):

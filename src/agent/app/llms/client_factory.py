@@ -39,35 +39,73 @@ def create_chat_model_binding(options: LLMCallOptions) -> ChatModelBinding:
     resolved_provider = provider or DEFAULT_PROVIDER_BY_FAMILY[family]
     client: BaseChatModel
     if family == "qwen":
-        client = qwen.get_qwen_model(
-            model_name,
-            provider=provider,
-            temperature=options.temperature,
-            thinking=options.thinking,
-            capture_reasoning=options.capture_reasoning,
-            response_format=options.response_format,
-        )
+        if options.max_output_tokens is None:
+            client = qwen.get_qwen_model(
+                model_name,
+                provider=provider,
+                temperature=options.temperature,
+                thinking=options.thinking,
+                capture_reasoning=options.capture_reasoning,
+                response_format=options.response_format,
+            )
+        else:
+            client = qwen.get_qwen_model(
+                model_name,
+                provider=provider,
+                temperature=options.temperature,
+                thinking=options.thinking,
+                capture_reasoning=options.capture_reasoning,
+                response_format=options.response_format,
+                max_output_tokens=options.max_output_tokens,
+            )
     elif family == "glm":
-        client = glm.get_glm_model(
-            model_name,
-            provider,
-            options.temperature,
-            options.response_format,
-        )
+        if options.max_output_tokens is None:
+            client = glm.get_glm_model(
+                model_name,
+                provider,
+                options.temperature,
+                options.response_format,
+            )
+        else:
+            client = glm.get_glm_model(
+                model_name,
+                provider,
+                options.temperature,
+                options.response_format,
+                options.max_output_tokens,
+            )
     elif family == "deepseek":
-        client = deepseek.get_deepseek_model(
-            model_name,
-            provider,
-            options.temperature,
-            options.response_format,
-        )
+        if options.max_output_tokens is None:
+            client = deepseek.get_deepseek_model(
+                model_name,
+                provider,
+                options.temperature,
+                options.response_format,
+            )
+        else:
+            client = deepseek.get_deepseek_model(
+                model_name,
+                provider,
+                options.temperature,
+                options.response_format,
+                options.max_output_tokens,
+            )
     elif family == "openai":
-        client = openai.get_openai_model(
-            model_name,
-            provider,
-            options.temperature,
-            options.response_format,
-        )
+        if options.max_output_tokens is None:
+            client = openai.get_openai_model(
+                model_name,
+                provider,
+                options.temperature,
+                options.response_format,
+            )
+        else:
+            client = openai.get_openai_model(
+                model_name,
+                provider,
+                options.temperature,
+                options.response_format,
+                options.max_output_tokens,
+            )
     else:  # pragma: no cover - _model_family 已封闭分支
         raise ValueError(f"无法识别模型系列：{model_name}。")
     return ChatModelBinding(

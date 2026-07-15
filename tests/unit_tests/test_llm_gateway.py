@@ -40,6 +40,7 @@ async def test_gateway_normalizes_response() -> None:
         model_ref="dashscope:qwen3.7-plus",
         thinking="on",
         capture_reasoning=True,
+        max_output_tokens=321,
     )
 
     result = await gateway.ainvoke([HumanMessage(content="你好")], options)

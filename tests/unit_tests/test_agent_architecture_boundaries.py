@@ -47,6 +47,83 @@ def test_states_do_not_depend_on_agent_implementation_layers() -> None:
     ) == []
 
 
+def test_node_lab_core_is_transport_free_and_does_not_reflect_nodes() -> None:
+    violations = _violations(
+        "lab",
+        (
+            "backend",
+            "fastapi",
+            "agent.app.graphs",
+            "agent.app.llms",
+            "agent.app.nodes",
+        ),
+    )
+    assert violations == []
+
+
+def test_node_lab_node_execution_is_owned_by_production_provider() -> None:
+    adapters = ROOT / "src/agent/app/lab/adapters.py"
+    deterministic = (
+        ROOT
+        / "src/agent/app/nodes/integrations/node_lab/deterministic.py"
+    )
+    service = ROOT / "src/agent/app/services/node_lab.py"
+    adapter_source = adapters.read_text(encoding="utf-8")
+    deterministic_source = deterministic.read_text(encoding="utf-8")
+    service_imports = _import_targets(service)
+
+    assert not any(
+        target.startswith(("agent.app.nodes", "agent.app.graphs"))
+        for target in _import_targets(adapters)
+    )
+    assert "_render_and_evaluate" not in adapter_source
+    assert "_select_current_best_node" not in adapter_source
+    assert "class DeterministicNodeExecutor" in deterministic_source
+    assert "StageCDeterministicExecutor" not in deterministic_source
+    assert any(
+        target.startswith("agent.app.nodes")
+        for target in _import_targets(deterministic)
+    )
+    assert "agent.app.nodes.integrations.node_lab" in service_imports
+    assert not any(
+        target.startswith(
+            (
+                "agent.app.nodes.integrations.node_lab.deterministic",
+                "agent.app.nodes.integrations.node_lab.model",
+                "agent.app.graphs",
+            )
+        )
+        for target in service_imports
+    )
+
+
+def test_m5_and_node_lab_benchmarks_keep_independent_evidence() -> None:
+    m5_runner = ROOT / "scripts/run_png_to_shader_v1_benchmark.py"
+    node_lab_runner = ROOT / "scripts/run_node_lab_benchmark.py"
+    node_lab_benchmark = ROOT / "src/agent/app/lab/benchmark.py"
+
+    m5_imports = _import_targets(m5_runner)
+    assert not any(
+        target.startswith(("agent.app.lab", "agent.app.services.node_lab"))
+        for target in m5_imports
+    )
+    assert "agent.app.services.png_to_shader_v1" in m5_imports
+
+    node_lab_imports = [
+        *_import_targets(node_lab_runner),
+        *_import_targets(node_lab_benchmark),
+    ]
+    assert not any(
+        target.startswith("shaderforge.benchmark") for target in node_lab_imports
+    )
+    node_lab_source = node_lab_benchmark.read_text(encoding="utf-8")
+    m5_runner_source = m5_runner.read_text(encoding="utf-8")
+    node_lab_runner_source = node_lab_runner.read_text(encoding="utf-8")
+    assert "evaluate_quality_gate" not in node_lab_source
+    assert "output/benchmarks/png-to-shader-v1" in m5_runner_source
+    assert "output/benchmarks/node-lab" in node_lab_runner_source
+
+
 def test_agent_package_layout_uses_llms_gateway() -> None:
     assert not (ROOT / "src/agent/app/models").exists()
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")

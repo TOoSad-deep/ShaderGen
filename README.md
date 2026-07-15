@@ -38,14 +38,18 @@ make setup
 make setup-memory-postgres
 make dev-agent
 make dev-backend
+make dev-node-lab
 make dev-frontend
 make test
 make docs-check
 make test-memory-postgres
 make check
 make benchmark-ai-off
+make benchmark-node-lab-ai-off
+make benchmark-node-lab-model
 make benchmark-png-to-shader QUALITY_PRESET=balanced MODEL_CALL_BUDGET=80
 npm --prefix frontend run e2e:procedural-v1
+npm --prefix frontend run e2e:node-lab
 ```
 
 服务默认地址：
@@ -55,6 +59,7 @@ npm --prefix frontend run e2e:procedural-v1
 - FastAPI 后端：`http://127.0.0.1:8088`
 - FastAPI 文档：`http://127.0.0.1:8088/docs`
 - Vite 前端：`http://127.0.0.1:5173`
+- Node Lab 工作台：`http://127.0.0.1:5173/lab`（Backend 需用 `make dev-node-lab` 显式开启）
 
 ## 配置
 
@@ -77,6 +82,10 @@ DATABASE_URL=
 TEST_DATABASE_URL=
 LANGGRAPH_STRICT_MSGPACK=true
 LOG_LEVEL=
+SHADERGEN_NODE_LAB_ENABLED=false
+SHADERGEN_NODE_LAB_ROOT=
+SHADERGEN_NODE_LAB_BATCH_ROOT=
+SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=false
 ```
 
 `DATABASE_URL` 配置后，Backend 使用独立 psycopg pool 运行 LangGraph Checkpointer/Store，并使用现有 asyncpg pool 写 Agent 过程账本。首次部署或 persistence 包升级后先执行 `make setup-memory-postgres`。`make test-memory-postgres` 优先使用 `TEST_DATABASE_URL`；未配置时会基于 `DATABASE_URL` 创建随机临时数据库，测试结束后自动删除。
@@ -86,6 +95,10 @@ LOG_LEVEL=
 `SHADER_GEN_MODEL_NAME` 支持 `provider:model` 形式，例如 `dashscope:qwen3.7-plus`。`dashscope`、`openai`、`deepseek`、`glm` 表示凭据和 base URL 来源；真实模型名再决定使用 Qwen、GLM、DeepSeek 或 OpenAI 系列配置。
 
 F09 M5 的确定性 AI-off smoke 可直接运行；真实 10 例 benchmark 会产生按量模型调用，必须使用显式命令和硬预算。报告、逐例失败证据和盲评页面写入 `output/benchmarks/png-to-shader-v1/`。当前正式 run `m5-20260713-balanced-v3` 已完成自动和 10 项独立人工盲评，两个门禁均为 `failed`，灰度 no-go；F09 保持 active。
+
+Node Lab 模块 benchmark 使用独立命令：`make benchmark-node-lab-ai-off` 运行 capability、真实 node target、scenario/pipeline、Renderer cold/warm 和 direct-vs-HTTP transport；`make benchmark-node-lab-model` 使用固定 fixture 离线检查五个模型角色。模型报告按角色聚合 Parser/Schema/binding/timeout、latency、token、费用和 requested/actual model；中断可恢复但仍留在分母，样本不足 20 时 p95 为 `null`。真实模型诊断必须运行 `SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=true uv run python scripts/run_node_lab_model_benchmark.py --execution-mode real --allow-model-calls`，并受 manifest 的调用、provider 输出 token、总 token、时间和费用硬预算限制。三类 CLI 只向 stdout 输出 suite/status/report path 单行 JSON，case 失败返回非零。所有 Node Lab 报告都不覆盖 M5 证据。
+
+人工学习可使用 `/lab` 页面、Swagger 或 `scripts/run_node_lab_cli.py`；20 个 descriptor（包括确定性 `prepare_measurement_seed`）提供机器可读输入示例，步骤列表可重建 `base_step_id` DAG，Artifact 列表只返回同一 LabRun 的私有 descriptor。启动 Backend 必须使用 `make dev-node-lab` 或在进程导入前设置 `SHADERGEN_NODE_LAB_ENABLED=true`；默认关闭。私有 LabRun/Artifact 默认写入 `output/node-lab/http`，HTTP batch 报告默认写入 `output/benchmarks/node-lab-http`，分别可用 `SHADERGEN_NODE_LAB_ROOT` 与 `SHADERGEN_NODE_LAB_BATCH_ROOT` 覆盖。完整教程见 `docs/NODE_LAB_GUIDE.md`。
 
 ## 开发规则
 

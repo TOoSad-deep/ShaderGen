@@ -48,6 +48,7 @@ class LLMCallOptions:
     thinking: ThinkingMode | str | None = "default"
     capture_reasoning: bool | None = None
     response_format: ResponseFormat = "text"
+    max_output_tokens: int | None = None
 
     def __post_init__(self) -> None:
         """校验并规范化调用参数."""
@@ -63,6 +64,12 @@ class LLMCallOptions:
             self.capture_reasoning, bool
         ):
             raise ValueError("capture_reasoning 只能配置为 true/false。")
+        if self.max_output_tokens is not None and (
+            not isinstance(self.max_output_tokens, int)
+            or isinstance(self.max_output_tokens, bool)
+            or self.max_output_tokens <= 0
+        ):
+            raise ValueError("max_output_tokens 必须是正整数或 null。")
 
 
 @dataclass(frozen=True)

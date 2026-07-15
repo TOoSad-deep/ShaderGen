@@ -34,7 +34,11 @@ ShaderGen/ShaderForge 将用户意图、参考图、约束和验收标准转成�
 7. `Search Engine 调优`：CMA-ES、MAP-Elites、结构变异。
 8. `VLM / HITL`：模型评审、人工评审、Store 记录。
 
-当前仓库状态：`src/agent/app/graphs/main_graph.py` 保留基础对话图；`src/agent/app/graphs/shader_generation_graph.py` 继续服务 legacy 生成与前端 canvas Review。独立 `png_to_shader_v1_graph.py` 先运行 `prepare_context` 和参考图确定性测量，再调用 Analyst/Author/Critic，通过静态 Validator、项目自有 Playwright/Chromium WebGL1 Renderer、Basic Oracle 和 LocalArtifactStore 形成有界 initial / compile-repair / visual-refine 循环。纯 Selector 只在硬约束通过、总损失达到最小改善且保护区不超退化时更新 `current_best`；Critic/refine 与 finalize 均从 best Artifact 重载 GLSL/PNG/metrics，模型或新候选失败不会覆盖已有 best。任务内轻量状态由 LangGraph Checkpointer 保存，图片、完整 GLSL、渲染图、ContextPack、Candidate 大对象和过程摘要使用 `UntrackedValue`；项目长期 Memory 只保存精炼摘要，并且只晋升确定性验证过的 best 策略。M4 通过 `agent.app.services.png_to_shader_v1` 把该图接入 Backend：V1 使用独立 checkpoint thread 前缀但共享项目 Store，Backend 生命周期统一注入 persistence；过程事件由公共结果交给 Backend 写入账本。HTTP 只开放 final-render/metrics/manifest 白名单，前端按服务端规范化尺寸重编译 GLSL 并比较像素 RMSE。M5 以固定 10 例 manifest、AI-off smoke、成本受控 AI-on runner、运行前冻结 gate 和匿名 A/B 页面独立于产品请求执行；benchmark 只消费 Agent/ShaderForge 公共边界，不把评测逻辑放进 Backend。Intent IR、DSL、Search Engine 和完整 VLM/HITL 仍是后续工作。
+当前仓库状态：`src/agent/app/graphs/main_graph.py` 保留基础对话图；`src/agent/app/graphs/shader_generation_graph.py` 继续服务 legacy 生成与前端 canvas Review。独立 `png_to_shader_v1_graph.py` 先运行 `prepare_context` 和参考图确定性测量，再调用 Analyst/Author/Critic，通过静态 Validator、项目自有 Playwright/Chromium WebGL1 Renderer、Basic Oracle 和 LocalArtifactStore 形成有界 initial / compile-repair / visual-refine 循环。首个成功 model best 后还会生成一次与 case/manifest/gate 无关的 measurement affine 独立根候选；它不消耗模型或视觉迭代预算，但必须经过同一事实层与 Selector。生产 Oracle 保留确定性测量 ROI，并追加严格 VisualAnalysis 的语义 ROI。纯 Selector 只在硬约束通过、总损失达到最小改善且保护区不超退化时更新 `current_best`；Critic/refine 与 finalize 均从 best Artifact 重载 GLSL/PNG/metrics，模型或新候选失败不会覆盖已有 best。任务内轻量状态由 LangGraph Checkpointer 保存，图片、完整 GLSL、渲染图、ContextPack、Candidate 大对象和过程摘要使用 `UntrackedValue`；项目长期 Memory 只保存精炼摘要，并且只晋升确定性验证过的 best 策略。M4 通过 `agent.app.services.png_to_shader_v1` 把该图接入 Backend：V1 使用独立 checkpoint thread 前缀但共享项目 Store，Backend 生命周期统一注入 persistence；过程事件由公共结果交给 Backend 写入账本。HTTP 只开放 final-render/metrics/manifest 白名单，前端按服务端规范化尺寸重编译 GLSL 并比较像素 RMSE。
+
+Node Lab 以 transport-free Application API 和通用 `NodeProvider` 协议复用生产 Node。Harness 内核不导入任何具体 Node/Graph，pipeline id、descriptor、执行模式、routing capability 与 Adapter 均由生产侧 `agent.app.nodes.integrations.node_lab` Provider 提供。当前 PNG-to-Shader Provider 暴露 20 个图节点、机器可读示例和离线成功/拒绝路径；15 个非模型节点通过 Artifact facade 直接调用生产 Node factory/routing，五个模型节点调用生产角色 Node factory 与 bounded wrapper。新 Node 只在生产 Provider 登记 descriptor/binding，不修改 Node Lab 内核或 Service；Lab 只负责输入投影、私有 Artifact 和副作用门禁，不维护 initialize/materialize/render/select/finalize/promotion 的平行语义。完整 ContextPack、GLSL、图片、模型原始内容只存 Lab Artifact，策略 Memory 只 preview。八个确定性 capability、不可变步骤、真实 node target、scenario/pipeline、Renderer cold/warm、transport AI-off 和独立模型角色 benchmark 共用同一 Harness；失败/中断证据不可覆盖。可选 `/api/lab/v1/*` 仅在显式环境开关下注册，不进入产品 API；HTTP batch 只接受仓库内三个固定 AI-off suite id。`scripts/run_node_lab_cli.py`、Swagger 和 `/lab` 工作台分别提供自动化、HTTP 与人工入口，只消费公共 Application API/descriptor。
+
+M5 以固定 10 例 manifest、AI-off smoke、成本受控 AI-on runner、运行前冻结 gate 和匿名 A/B 页面独立于产品请求执行；新 run 对 model initial 与 final 使用同一 manifest ROI objective，并严格区分 model/deterministic provenance。Node Lab benchmark 与 M5 证据互不覆盖。Intent IR、DSL、Search Engine 和完整 VLM/HITL 仍是后续工作。
 
 ### 3. 工具知识层
 
@@ -89,6 +93,7 @@ ShaderGen/
 │       ├── dsl/              # Shader DSL 节点、图结构、变异操作
 │       ├── rendering/        # WebGL1 编译、渲染适配、渲染一致性检查
 │       ├── evaluation/       # Oracle、全局评分、局部损失、图像指标
+│       ├── generation/       # 确定性无贴图候选 seed 生成
 │       ├── search/           # CMA-ES、MAP-Elites、参数归一化、搜索预算
 │       ├── review/           # VLM pairwise、人工评审、评审结论
 │       └── store/            # SQLite/文件缓存、版本、谱系、评分记录
@@ -179,7 +184,7 @@ frontend 用户输入
 - `frontend/` 改动：至少运行 `npm --prefix frontend run build`。
 - `backend/` 路由/service 改动：运行 `uv run pytest tests/unit_tests`，必要时补 TestClient 测试。
 - `src/agent/` 改动：使用模拟模型测试节点行为；不要在单元测试中调用真实模型。
-- `src/shaderforge/intent`、`dsl`、`rendering`、`evaluation`、`search`、`review`、`store` 改动：补聚焦单元测试；跨模块流程放 `tests/integration_tests/`。
+- `src/shaderforge/intent`、`dsl`、`generation`、`rendering`、`evaluation`、`search`、`review`、`store` 改动：补聚焦单元测试；跨模块流程放 `tests/integration_tests/`。
 - 跨前端、后端、agent、领域核心的用户流程，必须在 `docs/FEATURES.md` 中写清验证命令和证据。
 
 ## 代码边界

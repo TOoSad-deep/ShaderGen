@@ -15,6 +15,7 @@ from agent.app.graphs.png_to_shader_v1_routing import (
     decide_after_render,
     decide_after_selection,
     model_node_outcome,
+    route_after_candidate_selection,
     route_next_action,
 )
 from agent.app.llms.gateway import LangChainLLMGateway
@@ -32,6 +33,7 @@ from agent.app.nodes.png_to_shader_v1_run_nodes import (
     make_persist_visual_analysis_node,
     make_persist_visual_review_node,
     make_prepare_compile_repair_node,
+    make_prepare_measurement_seed_node,
     make_render_and_evaluate_node,
     make_select_current_best_node,
 )
@@ -78,10 +80,14 @@ def _default_renderer_factory(
 #                  +-----------------------+-----------------------+------------------+
 #                  | select                | compile_repair        | finalize         |
 #                  v                       v                       v                  |
-# select_current_best -> decide_after_selection   prepare_compile_repair              |
-#                  |                    |         -> author_compile_repair -----------+
-#                  | visual_critic       | finalize       | continue
-#                  v                    v                v
+# select_current_best -> candidate_portfolio      prepare_compile_repair              |
+#                  |         |                     -> author_compile_repair -----------+
+#                  | seed    | decide                         | continue
+#                  v         v                                v
+# prepare_measurement_seed   decide_after_selection           |
+#                  |                    |                     |
+#                  +-> materialize      | visual_critic / finalize
+#                                       v
 # load_current_best -> visual_critic -> persist_visual_review -> author_visual_refine
 #                         | finalize                              | finalize / continue
 #                         +---------------------------------------+---------> finalize / materialize_candidate
@@ -99,12 +105,18 @@ def build_png_to_shader_v1_graph(
     renderer_factory: RendererFactory = _default_renderer_factory,
     evaluator: RenderEvaluator = evaluate_render,
     clock: Clock = time.monotonic,
+    enable_measurement_seed: bool = True,
     checkpointer: Any = None,
     store: Any = None,
 ) -> Any:
     """装配三角色、真实事实层、单调选择器与全部硬预算."""
     artifacts = artifact_store or LocalArtifactStore(DEFAULT_ARTIFACT_ROOT)
     renderer_registry = RunRendererRegistry(renderer_factory)
+    selection_router = (
+        route_after_candidate_selection
+        if enable_measurement_seed
+        else lambda _state: "decide"
+    )
 
     visual_analysis = make_bounded_model_node(
         make_visual_analysis_node(gateway),
@@ -164,6 +176,7 @@ def build_png_to_shader_v1_graph(
     graph.add_node("prepare_compile_repair", make_prepare_compile_repair_node())
     graph.add_node("author_compile_repair", compile_repair_author)
     graph.add_node("select_current_best", make_select_current_best_node(artifacts))
+    graph.add_node("prepare_measurement_seed", make_prepare_measurement_seed_node())
     graph.add_node("decide_after_selection", decide_after_selection)
     graph.add_node("load_current_best", make_load_current_best_node(artifacts))
     graph.add_node("visual_critic", visual_critic)
@@ -217,7 +230,15 @@ def build_png_to_shader_v1_graph(
         model_node_outcome,
         {"continue": "materialize_candidate", "finalize": "finalize"},
     )
-    graph.add_edge("select_current_best", "decide_after_selection")
+    graph.add_conditional_edges(
+        "select_current_best",
+        selection_router,
+        {
+            "measurement_seed": "prepare_measurement_seed",
+            "decide": "decide_after_selection",
+        },
+    )
+    graph.add_edge("prepare_measurement_seed", "materialize_candidate")
     graph.add_conditional_edges(
         "decide_after_selection",
         route_next_action,

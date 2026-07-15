@@ -18,9 +18,7 @@ from agent.app.llms.provider_config import (
     response_format_model_kwargs,
 )
 
-SHADER_GEN_QWEN_ENABLE_THINKING = optional_bool_env(
-    "SHADER_GEN_QWEN_ENABLE_THINKING"
-)
+SHADER_GEN_QWEN_ENABLE_THINKING = optional_bool_env("SHADER_GEN_QWEN_ENABLE_THINKING")
 SHADER_GEN_QWEN_OUTPUT_THINKING = bool_env("SHADER_GEN_QWEN_OUTPUT_THINKING")
 
 
@@ -89,6 +87,7 @@ def get_qwen_model(
     thinking: ThinkingMode | str | None = "default",
     capture_reasoning: bool | None = None,
     response_format: ResponseFormat | str = "text",
+    max_output_tokens: int | None = None,
 ) -> QwenChatOpenAI:
     """创建 Qwen 系列聊天客户端."""
     settings = provider_settings(provider, default_provider="dashscope")
@@ -102,6 +101,7 @@ def get_qwen_model(
         api_key=settings.secret_api_key,
         base_url=settings.base_url,
         model_kwargs=response_format_model_kwargs(response_format),
+        max_completion_tokens=max_output_tokens,
         extra_body=(
             None if enable_thinking is None else {"enable_thinking": enable_thinking}
         ),

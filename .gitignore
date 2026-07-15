@@ -172,6 +172,7 @@ frontend/vite.config.d.ts
 # Runtime-generated ShaderGen artifacts. Curated screenshots and golden
 # fixtures under output/playwright may still be committed explicitly.
 output/benchmarks/
+output/node-lab/
 output/png-to-shader/
 output/playwright/*.log
 output/playwright/*.snapshot.txt

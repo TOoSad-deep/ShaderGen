@@ -6,6 +6,7 @@ from agent.app.graphs.png_to_shader_v1_routing import (
     decide_after_render,
     decide_after_selection,
     model_node_outcome,
+    route_after_candidate_selection,
 )
 from shaderforge.contracts import AcceptancePolicy, BudgetPolicy, StopReason
 
@@ -27,6 +28,7 @@ def state() -> dict:
         "no_improvement_count": 0,
         "current_best_total_loss": 0.30,
         "stop_reason": "",
+        "measurement_seed_attempted": False,
     }
 
 
@@ -41,6 +43,33 @@ def test_compile_failure_routes_to_repair_until_budget_is_exhausted() -> None:
         "next_action": "finalize",
         "stop_reason": StopReason.COMPILE_REPAIR_EXHAUSTED.value,
     }
+
+
+def test_measurement_seed_failure_is_rejected_without_model_repair() -> None:
+    value = state()
+    value.update(
+        {
+            "render_status": "compile_failed",
+            "measurement_seed_attempted": True,
+            "candidate_record": {"origin": "deterministic"},
+            "current_best_record": {"candidate_id": "candidate-0001"},
+        }
+    )
+
+    assert decide_after_render(value) == {"next_action": "select"}
+
+
+def test_measurement_seed_runs_once_after_model_selection() -> None:
+    value = state()
+
+    assert route_after_candidate_selection(value) == "measurement_seed"
+
+    value["measurement_seed_attempted"] = True
+    assert route_after_candidate_selection(value) == "decide"
+
+    value["measurement_seed_attempted"] = False
+    value["cancelled"] = True
+    assert route_after_candidate_selection(value) == "decide"
 
 
 def test_successful_render_is_selected_even_when_wall_time_just_expired() -> None:
@@ -97,6 +126,6 @@ def test_candidate_count_has_a_static_hard_upper_bound() -> None:
         max_wall_time_seconds=60,
     )
 
-    # 初稿至多产生 1 个候选；每次 visual refine 和 compile repair
-    # 只会各产生 1 个新候选，且两个计数器都在模型调用前消耗。
-    assert 1 + budget.max_visual_refinements + budget.max_compile_repairs == 7
+    # model 初稿与 measurement seed 各至多 1 个候选；每次 visual refine
+    # 和 compile repair 只会各产生 1 个新候选，且两个计数器都在模型调用前消耗。
+    assert 2 + budget.max_visual_refinements + budget.max_compile_repairs == 8

@@ -158,6 +158,7 @@ async def run_scripted_graph(
     render_outcomes: Iterable[bool],
     losses: Iterable[float],
     policy: BudgetPolicy,
+    enable_measurement_seed: bool = False,
 ):
     gateway = ScriptedGateway(gateway_script)
     renderer = FakeRenderer(render_outcomes)
@@ -167,10 +168,125 @@ async def run_scripted_graph(
         artifact_store=LocalArtifactStore(tmp_path / "artifacts"),
         renderer_factory=lambda _replay: renderer,
         evaluator=ScriptedEvaluator(losses),
+        enable_measurement_seed=enable_measurement_seed,
         store=memory_store,
     )
     result = await graph.ainvoke(graph_input(run_id, policy))
     return result, gateway, renderer, memory_store
+
+
+@pytest.mark.anyio
+async def test_measurement_seed_is_independent_once_only_candidate(
+    tmp_path: Path,
+) -> None:
+    result, gateway, renderer, _memory_store = await run_scripted_graph(
+        tmp_path,
+        run_id="measurement-seed",
+        gateway_script=[response(analysis_payload()), response(author_payload())],
+        render_outcomes=[True, True],
+        losses=[0.20, 0.10],
+        policy=budget(visual=0, compile_repairs=0, model_calls=4),
+        enable_measurement_seed=True,
+    )
+
+    records = result["candidate_records"]
+    assert len(records) == 2
+    assert records[0].origin == "model"
+    assert records[1].origin == "deterministic"
+    assert records[1].generator_version == "measurement_affine_seed_v1"
+    assert records[1].parent_candidate_id is None
+    assert result["measurement_seed_attempted"] is True
+    assert result["current_best_id"] == "candidate-0002"
+    assert result["no_improvement_count"] == 0
+    assert result["visual_refinement_count"] == 0
+    assert result["model_call_count"] == 2
+    assert result["final_result"]["candidate_id"] == "candidate-0002"
+    assert gateway.calls == 2
+    assert len(renderer.calls) == 2
+
+
+@pytest.mark.anyio
+async def test_rejected_measurement_seed_keeps_model_best_without_stagnation(
+    tmp_path: Path,
+) -> None:
+    result, gateway, renderer, _memory_store = await run_scripted_graph(
+        tmp_path,
+        run_id="measurement-seed-rejected",
+        gateway_script=[response(analysis_payload()), response(author_payload())],
+        render_outcomes=[True, True],
+        losses=[0.10, 0.20],
+        policy=budget(visual=0, compile_repairs=0, model_calls=4),
+        enable_measurement_seed=True,
+    )
+
+    assert result["current_best_id"] == "candidate-0001"
+    assert result["current_best_record"].origin == "model"
+    assert result["measurement_seed_attempted"] is True
+    assert result["no_improvement_count"] == 0
+    assert result["final_result"]["candidate_id"] == "candidate-0001"
+    assert gateway.calls == 2
+    assert len(renderer.calls) == 2
+
+
+@pytest.mark.anyio
+async def test_model_refinement_can_continue_from_accepted_measurement_seed(
+    tmp_path: Path,
+) -> None:
+    refine = deepcopy(author_payload("visual_refine"))
+    refine["base_candidate_id"] = "candidate-0002"
+    result, gateway, renderer, _memory_store = await run_scripted_graph(
+        tmp_path,
+        run_id="measurement-seed-refined",
+        gateway_script=[
+            response(analysis_payload()),
+            response(author_payload()),
+            response(review_payload("candidate-0002")),
+            response(refine),
+        ],
+        render_outcomes=[True, True, True],
+        losses=[0.20, 0.10, 0.08],
+        policy=budget(visual=1, compile_repairs=0, model_calls=6),
+        enable_measurement_seed=True,
+    )
+
+    records = result["candidate_records"]
+    assert [record.origin for record in records] == [
+        "model",
+        "deterministic",
+        "model",
+    ]
+    assert records[2].parent_candidate_id == "candidate-0002"
+    assert result["current_best_id"] == "candidate-0003"
+    assert result["visual_refinement_count"] == 1
+    assert result["model_call_count"] == 4
+    assert gateway.calls == 4
+    assert len(renderer.calls) == 3
+
+
+@pytest.mark.anyio
+async def test_failed_measurement_seed_keeps_best_without_model_compile_repair(
+    tmp_path: Path,
+) -> None:
+    result, gateway, renderer, _memory_store = await run_scripted_graph(
+        tmp_path,
+        run_id="measurement-seed-compile-failed",
+        gateway_script=[response(analysis_payload()), response(author_payload())],
+        render_outcomes=[True, False],
+        losses=[0.10],
+        policy=budget(visual=0, compile_repairs=1, model_calls=5),
+        enable_measurement_seed=True,
+    )
+
+    records = result["candidate_records"]
+    assert result["current_best_id"] == "candidate-0001"
+    assert records[1].origin == "deterministic"
+    assert records[1].hard_constraints_passed is False
+    assert records[1].compile_ref is not None
+    assert result["compile_repair_count"] == 0
+    assert result["no_improvement_count"] == 0
+    assert result["final_result"]["candidate_id"] == "candidate-0001"
+    assert gateway.calls == 2
+    assert len(renderer.calls) == 2
 
 
 @pytest.mark.anyio
@@ -380,9 +496,15 @@ async def test_graph_crosses_real_webgl_renderer_oracle_store_and_memory(
 
     final = result["final_result"]
     assert final["success"] is True
-    assert final["candidate_id"] == "candidate-0001"
+    assert final["candidate_id"] == "candidate-0002"
+    assert result["current_best_record"].origin == "deterministic"
+    assert (
+        result["current_best_record"].generator_version == "measurement_affine_seed_v1"
+    )
     assert final["render_sha256"]
     assert 0.0 <= final["score_breakdown"]["total_loss"] < 0.5
+    assert "highlight" in final["score_breakdown"]["roi_losses"]
+    assert "subject" in final["score_breakdown"]["roi_losses"]
     assert (
         artifact_store.start_run("m3-tests", "real-webgl")
         .path_for(final["render_ref"])

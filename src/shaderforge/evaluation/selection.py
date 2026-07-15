@@ -19,6 +19,16 @@ SelectionReason = Literal[
     "protected_evidence_missing",
     "protected_region_regression",
 ]
+CandidateOrigin = Literal["model", "deterministic"]
+
+
+def _candidate_origin(value: Any) -> CandidateOrigin:
+    """把持久化来源收紧为受支持的候选来源."""
+    if value == "model":
+        return "model"
+    if value == "deterministic":
+        return "deterministic"
+    raise ValueError("candidate origin 必须是 model 或 deterministic。")
 
 
 def _score_from_dict(value: dict[str, Any] | None) -> ScoreBreakdownV1 | None:
@@ -73,6 +83,8 @@ class CandidateRecord:
     model_ref: str
     score_summary: ScoreBreakdownV1 | None
     hard_constraints_passed: bool
+    origin: CandidateOrigin = "model"
+    generator_version: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """返回 Artifact 与 LangGraph State 友好的普通字典."""
@@ -96,6 +108,8 @@ class CandidateRecord:
                 self.score_summary.to_dict() if self.score_summary else None
             ),
             "hard_constraints_passed": self.hard_constraints_passed,
+            "origin": self.origin,
+            "generator_version": self.generator_version,
         }
 
     @classmethod
@@ -135,6 +149,12 @@ class CandidateRecord:
             model_ref=str(value["model_ref"]),
             score_summary=_score_from_dict(value.get("score_summary")),
             hard_constraints_passed=bool(value["hard_constraints_passed"]),
+            origin=_candidate_origin(value.get("origin", "model")),
+            generator_version=(
+                None
+                if value.get("generator_version") is None
+                else str(value["generator_version"])
+            ),
         )
 
 

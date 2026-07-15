@@ -3,11 +3,49 @@
 from __future__ import annotations
 
 import json
-import shutil
 from collections.abc import Mapping, Sequence
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
+
+BLIND_REVIEW_EVIDENCE_SCHEMA = 1
+BLIND_REVIEW_EVIDENCE_MANIFEST = "blind-review/evidence-manifest.json"
+BLIND_REVIEW_ASSIGNMENTS = "blind-review/assignments.private.json"
+BLIND_REVIEW_REVIEWER_ROOT = "blind-review/reviewer"
+_HASH_ALGORITHM = "sha256"
+
+
+def _json_bytes(value: Mapping[str, Any]) -> bytes:
+    return (json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
+
+
+def _write_frozen(path: Path, data: bytes) -> None:
+    """只补齐缺失文件；已有冻结证据不一致时拒绝覆盖."""
+    if path.is_file():
+        if path.read_bytes() != data:
+            raise ValueError(f"冻结的盲评证据已存在且内容不一致：{path.name}")
+        return
+    if path.exists():
+        raise ValueError(f"盲评证据路径不是普通文件：{path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+
+
+def _relative_path(root: Path, path: Path) -> str:
+    try:
+        return path.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError as exc:
+        raise ValueError("盲评证据路径越过 suite 输出目录。") from exc
+
+
+def _load_json_object(path: Path, *, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} 不是可读 JSON。") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} 必须是 JSON 对象。")
+    return value
 
 
 def build_blind_assignments(
@@ -49,7 +87,92 @@ def _source_path(suite_root: Path, relative_path: str) -> Path:
     return candidate
 
 
-def _review_html(items: list[dict[str, str]], suite_run_id: str) -> str:
+def _safe_case_id(value: Any) -> str:
+    case_id = str(value).strip()
+    if not case_id or case_id in {".", ".."} or "/" in case_id or "\\" in case_id:
+        raise ValueError("盲评 case_id 不能用于安全文件名。")
+    return case_id
+
+
+def _public_items(assignments: Mapping[str, Any]) -> list[dict[str, str]]:
+    raw_items = assignments.get("items")
+    if not isinstance(raw_items, list):
+        raise ValueError("assignments.items 必须为数组。")
+    public_items: list[dict[str, str]] = []
+    for raw in raw_items:
+        if not isinstance(raw, Mapping):
+            raise ValueError("assignments.items 的每一项都必须是对象。")
+        case_id = _safe_case_id(raw.get("case_id"))
+        public_items.append(
+            {
+                "case_id": case_id,
+                "reference_image": f"assets/{case_id}-reference.png",
+                "a_image": f"assets/{case_id}-a.png",
+                "b_image": f"assets/{case_id}-b.png",
+            }
+        )
+    return public_items
+
+
+def _review_template_v1(
+    suite_run_id: str,
+    public_items: Sequence[Mapping[str, str]],
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "suite_run_id": suite_run_id,
+        "reviewer": "human-reviewer",
+        "items": [
+            {"case_id": item["case_id"], "choice": "A|B|TIE"} for item in public_items
+        ],
+    }
+
+
+def _expected_evidence_paths(
+    assignments: Mapping[str, Any],
+) -> dict[str, str]:
+    """从已校验 assignment 推导 manifest 必须完整覆盖的文件集合."""
+    expected = {
+        BLIND_REVIEW_ASSIGNMENTS: "private_assignment",
+        f"{BLIND_REVIEW_REVIEWER_ROOT}/index.html": "reviewer_index",
+        f"{BLIND_REVIEW_REVIEWER_ROOT}/human-review.template.json": (
+            "reviewer_template"
+        ),
+    }
+    raw_items = assignments.get("items")
+    if not isinstance(raw_items, list):
+        raise ValueError("assignments.items 必须为数组。")
+    for raw in raw_items:
+        if not isinstance(raw, Mapping):
+            raise ValueError("assignments.items 的每一项都必须是对象。")
+        case_id = _safe_case_id(raw.get("case_id"))
+        for key in ("initial_render_path", "final_render_path"):
+            value = raw.get(key)
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"assignments 缺少 {key}：{case_id}")
+            expected[value] = "source"
+        expected[f"cases/{case_id}/reference.png"] = "source"
+        for suffix in ("a", "b", "reference"):
+            expected[f"{BLIND_REVIEW_REVIEWER_ROOT}/assets/{case_id}-{suffix}.png"] = (
+                "reviewer_asset"
+            )
+    return expected
+
+
+def _manifest_entry(root: Path, relative_path: str, kind: str) -> dict[str, Any]:
+    path = _source_path(root, relative_path)
+    if not path.is_file():
+        raise ValueError(f"盲评证据文件不存在：{relative_path}")
+    data = path.read_bytes()
+    return {
+        "path": relative_path,
+        "kind": kind,
+        "byte_size": len(data),
+        "sha256": sha256(data).hexdigest(),
+    }
+
+
+def _review_html_v1(items: list[dict[str, str]], suite_run_id: str) -> str:
     payload = json.dumps(items, ensure_ascii=False).replace("</", "<\\/")
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -138,15 +261,19 @@ def write_blind_review_package(
     suite_run_id: str,
     case_results: Sequence[Mapping[str, Any]],
 ) -> Path:
-    """复制 A/B 图片、写入私有映射和可下载结果的静态页面."""
+    """写入隔离的评审者包、私有映射及其冻结 SHA-256 manifest."""
     root = Path(suite_root).resolve()
-    review_root = root / "blind-review"
-    assets = review_root / "assets"
+    evidence_root = root / "blind-review"
+    reviewer_root = root / BLIND_REVIEW_REVIEWER_ROOT
+    assets = reviewer_root / "assets"
     assets.mkdir(parents=True, exist_ok=True)
     assignments = build_blind_assignments(suite_run_id, case_results)
-    public_items: list[dict[str, str]] = []
-    for item in assignments["items"]:
-        case_id = item["case_id"]
+    public_items = _public_items(assignments)
+    raw_items = assignments.get("items")
+    assert isinstance(raw_items, list)
+    for item in raw_items:
+        assert isinstance(item, Mapping)
+        case_id = _safe_case_id(item.get("case_id"))
         role_to_source = {
             "initial": item["initial_render_path"],
             "final": item["final_render_path"],
@@ -154,46 +281,216 @@ def write_blind_review_package(
         a_name = f"{case_id}-a.png"
         b_name = f"{case_id}-b.png"
         reference_name = f"{case_id}-reference.png"
-        shutil.copyfile(
-            _source_path(root, f"cases/{case_id}/reference.png"),
+        _write_frozen(
             assets / reference_name,
+            _source_path(root, f"cases/{case_id}/reference.png").read_bytes(),
         )
-        shutil.copyfile(
-            _source_path(root, role_to_source[item["a_role"]]),
+        a_role = item.get("a_role")
+        b_role = item.get("b_role")
+        if a_role not in role_to_source or b_role not in role_to_source:
+            raise ValueError(f"assignments A/B 角色非法：{case_id}")
+        _write_frozen(
             assets / a_name,
+            _source_path(root, str(role_to_source[a_role])).read_bytes(),
         )
-        shutil.copyfile(
-            _source_path(root, role_to_source[item["b_role"]]),
+        _write_frozen(
             assets / b_name,
+            _source_path(root, str(role_to_source[b_role])).read_bytes(),
         )
-        public_items.append(
-            {
-                "case_id": case_id,
-                "reference_image": f"assets/{reference_name}",
-                "a_image": f"assets/{a_name}",
-                "b_image": f"assets/{b_name}",
-            }
-        )
-    (review_root / "assignments.private.json").write_text(
-        json.dumps(assignments, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+    _write_frozen(
+        root / BLIND_REVIEW_ASSIGNMENTS,
+        _json_bytes(assignments),
     )
-    template = {
-        "schema_version": 1,
+    template = _review_template_v1(suite_run_id, public_items)
+    _write_frozen(
+        reviewer_root / "human-review.template.json",
+        _json_bytes(template),
+    )
+    index_path = reviewer_root / "index.html"
+    _write_frozen(
+        index_path,
+        _review_html_v1(public_items, suite_run_id).encode("utf-8"),
+    )
+
+    leaked_assignments = tuple(
+        path
+        for path in reviewer_root.rglob("assignments.private.json")
+        if path.is_file()
+    )
+    if leaked_assignments:
+        raise ValueError("评审者目录不得包含 assignments.private.json。")
+
+    expected = _expected_evidence_paths(assignments)
+    entries = [
+        _manifest_entry(root, relative_path, expected[relative_path])
+        for relative_path in sorted(expected)
+    ]
+    manifest = {
+        "schema_version": BLIND_REVIEW_EVIDENCE_SCHEMA,
         "suite_run_id": suite_run_id,
-        "reviewer": "human-reviewer",
-        "items": [
-            {"case_id": item["case_id"], "choice": "A|B|TIE"}
-            for item in public_items
-        ],
+        "hash_algorithm": _HASH_ALGORITHM,
+        "reviewer_root": BLIND_REVIEW_REVIEWER_ROOT,
+        "assignment_path": BLIND_REVIEW_ASSIGNMENTS,
+        "entries": entries,
     }
-    (review_root / "human-review.template.json").write_text(
-        json.dumps(template, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
+    _write_frozen(
+        evidence_root / "evidence-manifest.json",
+        _json_bytes(manifest),
     )
-    index_path = review_root / "index.html"
-    index_path.write_text(
-        _review_html(public_items, suite_run_id),
-        encoding="utf-8",
-    )
+    verify_blind_review_package(root, expected_suite_run_id=suite_run_id)
     return index_path
+
+
+def verify_blind_review_package(
+    suite_root: str | Path,
+    *,
+    expected_suite_run_id: str,
+) -> dict[str, Any]:
+    """在读取人工选择前，严格复验新式盲评证据 manifest."""
+    root = Path(suite_root).resolve()
+    manifest_path = root / BLIND_REVIEW_EVIDENCE_MANIFEST
+    if not manifest_path.is_file():
+        raise ValueError("evaluate 找不到冻结的盲评 evidence manifest。")
+    manifest = _load_json_object(manifest_path, label="blind review evidence manifest")
+    if manifest.get("schema_version") != BLIND_REVIEW_EVIDENCE_SCHEMA:
+        raise ValueError("blind review evidence manifest schema_version 不受支持。")
+    if manifest.get("suite_run_id") != expected_suite_run_id:
+        raise ValueError("blind review evidence manifest suite_run_id 不一致。")
+    if manifest.get("hash_algorithm") != _HASH_ALGORITHM:
+        raise ValueError("blind review evidence manifest hash_algorithm 非法。")
+    if manifest.get("reviewer_root") != BLIND_REVIEW_REVIEWER_ROOT:
+        raise ValueError("blind review evidence manifest reviewer_root 非法。")
+    if manifest.get("assignment_path") != BLIND_REVIEW_ASSIGNMENTS:
+        raise ValueError("blind review evidence manifest assignment_path 非法。")
+
+    raw_entries = manifest.get("entries")
+    if not isinstance(raw_entries, list):
+        raise ValueError("blind review evidence manifest entries 必须为数组。")
+    entries_by_path: dict[str, Mapping[str, Any]] = {}
+    for raw in raw_entries:
+        if not isinstance(raw, Mapping):
+            raise ValueError("blind review evidence manifest entry 必须是对象。")
+        relative_path = raw.get("path")
+        if not isinstance(relative_path, str) or not relative_path:
+            raise ValueError("blind review evidence manifest entry.path 非法。")
+        if relative_path in entries_by_path:
+            raise ValueError(
+                f"blind review evidence manifest 路径重复：{relative_path}"
+            )
+        path = _source_path(root, relative_path)
+        if _relative_path(root, path) != relative_path:
+            raise ValueError(
+                f"blind review evidence manifest 路径未规范化：{relative_path}"
+            )
+        digest = raw.get("sha256")
+        byte_size = raw.get("byte_size")
+        kind = raw.get("kind")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ValueError(f"blind review evidence SHA-256 非法：{relative_path}")
+        if type(byte_size) is not int or byte_size < 0:
+            raise ValueError(f"blind review evidence byte_size 非法：{relative_path}")
+        if not isinstance(kind, str) or not kind:
+            raise ValueError(f"blind review evidence kind 非法：{relative_path}")
+        if not path.is_file():
+            raise ValueError(f"冻结的盲评证据缺失：{relative_path}")
+        data = path.read_bytes()
+        if len(data) != byte_size or sha256(data).hexdigest() != digest:
+            raise ValueError(f"冻结的盲评证据已漂移：{relative_path}")
+        entries_by_path[relative_path] = raw
+
+    reviewer_root = root / BLIND_REVIEW_REVIEWER_ROOT
+    if not reviewer_root.is_dir():
+        raise ValueError("评审者目录不存在。")
+    reviewer_files = {
+        _relative_path(root, path)
+        for path in reviewer_root.rglob("*")
+        if path.is_file()
+    }
+    if any(path.endswith("/assignments.private.json") for path in reviewer_files):
+        raise ValueError("评审者目录不得包含 assignments.private.json。")
+
+    assignment_path = root / BLIND_REVIEW_ASSIGNMENTS
+    assignments = _load_json_object(assignment_path, label="blind review assignments")
+    if assignments.get("schema_version") != 1:
+        raise ValueError("blind review assignments schema_version 非法。")
+    if assignments.get("suite_run_id") != expected_suite_run_id:
+        raise ValueError("blind review assignments suite_run_id 不一致。")
+    expected = _expected_evidence_paths(assignments)
+    if set(entries_by_path) != set(expected):
+        missing = sorted(set(expected) - set(entries_by_path))
+        extra = sorted(set(entries_by_path) - set(expected))
+        raise ValueError(
+            f"blind review evidence manifest 文件集合不一致：missing={missing}, extra={extra}"
+        )
+    for relative_path, kind in expected.items():
+        if entries_by_path[relative_path].get("kind") != kind:
+            raise ValueError(f"blind review evidence kind 不一致：{relative_path}")
+    expected_reviewer_files = {
+        path for path in expected if path.startswith(f"{BLIND_REVIEW_REVIEWER_ROOT}/")
+    }
+    if reviewer_files != expected_reviewer_files:
+        missing = sorted(expected_reviewer_files - reviewer_files)
+        extra = sorted(reviewer_files - expected_reviewer_files)
+        raise ValueError(f"评审者目录文件集合已漂移：missing={missing}, extra={extra}")
+    return manifest
+
+
+def verify_legacy_blind_review_package(
+    suite_root: str | Path,
+    suite_run_id: str,
+    case_results: Sequence[Mapping[str, Any]],
+) -> None:
+    """兼容只读旧 run：重建稳定映射并逐字节复验旧式公开包."""
+    root = Path(suite_root).resolve()
+    review_root = root / "blind-review"
+    assignment_path = root / BLIND_REVIEW_ASSIGNMENTS
+    assignments = _load_json_object(assignment_path, label="legacy assignments")
+    expected_assignments = build_blind_assignments(suite_run_id, case_results)
+    if assignments != expected_assignments:
+        raise ValueError("旧式盲评 assignments 与冻结 case 证据不一致。")
+    public_items = _public_items(expected_assignments)
+    raw_items = expected_assignments.get("items")
+    assert isinstance(raw_items, list)
+    expected_public_files = {"index.html", "human-review.template.json"}
+    for item in raw_items:
+        assert isinstance(item, Mapping)
+        case_id = _safe_case_id(item.get("case_id"))
+        role_to_source = {
+            "initial": str(item.get("initial_render_path", "")),
+            "final": str(item.get("final_render_path", "")),
+        }
+        for suffix, source in (
+            ("reference", f"cases/{case_id}/reference.png"),
+            ("a", role_to_source[str(item.get("a_role"))]),
+            ("b", role_to_source[str(item.get("b_role"))]),
+        ):
+            relative_asset = f"assets/{case_id}-{suffix}.png"
+            expected_public_files.add(relative_asset)
+            asset_path = review_root / relative_asset
+            if (
+                not asset_path.is_file()
+                or asset_path.read_bytes() != _source_path(root, source).read_bytes()
+            ):
+                raise ValueError(f"旧式盲评 asset 已漂移：{relative_asset}")
+    expected_index = _review_html_v1(public_items, suite_run_id).encode("utf-8")
+    index_path = review_root / "index.html"
+    if not index_path.is_file() or index_path.read_bytes() != expected_index:
+        raise ValueError("旧式盲评 index.html 已漂移。")
+    template_path = review_root / "human-review.template.json"
+    expected_template = _json_bytes(_review_template_v1(suite_run_id, public_items))
+    if not template_path.is_file() or template_path.read_bytes() != expected_template:
+        raise ValueError("旧式盲评 human-review.template.json 已漂移。")
+    expected_asset_files = {
+        path for path in expected_public_files if path.startswith("assets/")
+    }
+    actual_asset_files = {
+        path.relative_to(review_root).as_posix()
+        for path in (review_root / "assets").rglob("*")
+        if path.is_file()
+    }
+    if actual_asset_files != expected_asset_files:
+        raise ValueError("旧式盲评 assets 文件集合已漂移。")

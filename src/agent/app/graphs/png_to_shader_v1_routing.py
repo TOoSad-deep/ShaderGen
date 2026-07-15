@@ -27,6 +27,13 @@ def model_node_outcome(state: Mapping[str, Any]) -> str:
     return "finalize" if state.get("stop_reason") else "continue"
 
 
+def _candidate_origin(state: Mapping[str, Any]) -> str:
+    candidate = state.get("candidate_record")
+    if isinstance(candidate, Mapping):
+        return str(candidate.get("origin", "model"))
+    return str(getattr(candidate, "origin", "model"))
+
+
 def decide_after_render(state: Mapping[str, Any]) -> dict[str, str]:
     """根据 compile 事实和剩余预算决定 select、repair 或 finalize."""
     if state.get("render_status") == "success":
@@ -38,6 +45,15 @@ def decide_after_render(state: Mapping[str, Any]) -> dict[str, str]:
         }
     if reason := state.get("stop_reason"):
         return {"next_action": "finalize", "stop_reason": str(reason)}
+
+    if (
+        bool(state.get("measurement_seed_attempted"))
+        and _candidate_origin(state) == "deterministic"
+        and state.get("current_best_record") is not None
+    ):
+        # 确定性 seed 不消耗模型 compile-repair 预算；失败候选仍交给
+        # Selector 写下拒绝证据，再继续使用已经验证的 model best。
+        return {"next_action": "select"}
 
     budget = _budget(state)
     if int(state.get("model_call_count", 0)) >= budget.max_model_calls:
@@ -51,6 +67,15 @@ def decide_after_render(state: Mapping[str, Any]) -> dict[str, str]:
             "stop_reason": StopReason.COMPILE_REPAIR_EXHAUSTED.value,
         }
     return {"next_action": "compile_repair"}
+
+
+def route_after_candidate_selection(state: Mapping[str, Any]) -> str:
+    """首个 model best 后至多插入一次确定性 measurement seed."""
+    if state.get("cancelled", False) or state.get("stop_reason"):
+        return "decide"
+    if not bool(state.get("measurement_seed_attempted", False)):
+        return "measurement_seed"
+    return "decide"
 
 
 def decide_after_selection(state: Mapping[str, Any]) -> dict[str, str]:

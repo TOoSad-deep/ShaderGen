@@ -276,6 +276,8 @@ def make_shader_author_node(
             "glsl": result.value.glsl,
             "author_model": result.final_response.model_ref,
             "candidate_provenance": provenance.to_dict(),
+            "candidate_origin": "model",
+            "candidate_generator_version": None,
             "model_calls": (
                 *state.get("model_calls", ()),
                 *(audit.to_dict() for audit in result.audits),

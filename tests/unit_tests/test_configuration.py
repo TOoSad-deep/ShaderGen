@@ -344,6 +344,27 @@ def test_llm_factory_passes_node_level_options_to_qwen(monkeypatch) -> None:
     )
 
 
+def test_llm_factory_passes_provider_side_max_output_tokens(monkeypatch) -> None:
+    openai_model = model_family_module("openai")
+
+    monkeypatch.setattr(
+        openai_model,
+        "get_openai_model",
+        lambda model, provider=None, temperature=0, response_format="text", max_output_tokens=None: (
+            provider,
+            model,
+            max_output_tokens,
+        ),
+    )
+
+    assert client_factory.create_chat_model(
+        LLMCallOptions(
+            model_ref="openai:gpt-4.1",
+            max_output_tokens=321,
+        )
+    ) == ("openai", "gpt-4.1", 321)
+
+
 def test_agent_owns_shader_prompt() -> None:
     definition = load_prompt_definition("image_to_glsl")
 

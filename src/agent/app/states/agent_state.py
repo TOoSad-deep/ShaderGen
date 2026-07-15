@@ -1,6 +1,6 @@
 """ShaderGen 图的状态定义."""
 
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from langgraph.channels import UntrackedValue
 from langgraph.graph import MessagesState
@@ -69,6 +69,7 @@ class PngToShaderV1State(TypedDict, total=False):
     no_improvement_count: int
     model_call_count: int
     candidate_sequence: int
+    measurement_seed_attempted: bool
     stop_reason: str
     cancelled: bool
 
@@ -88,6 +89,8 @@ class PngToShaderV1State(TypedDict, total=False):
     previous_author_result: Annotated[dict[str, Any], UntrackedValue]
     author_model: Annotated[str, UntrackedValue]
     candidate_provenance: Annotated[dict[str, Any], UntrackedValue]
+    candidate_origin: Annotated[Literal["model", "deterministic"], UntrackedValue]
+    candidate_generator_version: Annotated[str | None, UntrackedValue]
     glsl: Annotated[str, UntrackedValue]
     static_validation: Annotated[dict[str, Any], UntrackedValue]
     compile_result: Annotated[dict[str, Any], UntrackedValue]
@@ -107,6 +110,8 @@ class PngToShaderV1State(TypedDict, total=False):
     repair_budget: Annotated[dict[str, Any], UntrackedValue]
     structured_output_max_attempts: Annotated[int, UntrackedValue]
     next_action: Annotated[str, UntrackedValue]
+    selection_decision: Annotated[dict[str, Any], UntrackedValue]
+    selection_ref: Annotated[str, UntrackedValue]
     final_result: Annotated[dict[str, Any], UntrackedValue]
     final_manifest_ref: Annotated[str, UntrackedValue]
     context_pack: Annotated[dict[str, Any], UntrackedValue]

@@ -59,6 +59,17 @@
 - 新增路由必须注册到 `app/api/router.py`。
 - 新增业务 route 文件按领域命名，例如 `shader.py`、`health.py`；不要创建没有真实 endpoint 的空 route。
 
+### Node Lab 本地调试 API
+
+- Node Lab HTTP/Swagger 默认不注册；只有后端进程启动前显式设置 `SHADERGEN_NODE_LAB_ENABLED=true` 才开放 `/api/lab/v1/*`。`SHADERGEN_NODE_LAB_ROOT` 可覆盖私有 LabRun/Artifact 根目录，默认是 `output/node-lab/http`；`SHADERGEN_NODE_LAB_BATCH_ROOT` 可覆盖 HTTP batch 报告根目录，默认是 `output/benchmarks/node-lab-http`。
+- 当前 HTTP 提供 health、20 个带机器可读调用示例的 `available` 节点 descriptor（包括确定性 `prepare_measurement_seed`）、八个确定性 capability descriptor、LabRun 创建/读取、不可变步骤执行/完整读取/DAG 摘要、capability 执行、同一 LabRun 内最多 8MB 的 Artifact 上传/descriptor 列表/下载，以及固定 AI-off suite discovery、校验、同步 batch 执行和报告读取。OpenAPI 为创建 Run、deterministic、fixture、mock preview 和显式 real 请求提供命名示例。
+- HTTP batch 只接受 `node_lab_ai_off_v1`、`node_lab_scenario_ai_off_v1` 和 `node_lab_renderer_warm_ai_off_v1`；不接受 manifest 路径、真实模型模式或模型开关。它适合小规模本地验证，不是任务队列。
+- Route 和 `backend/app/services/node_lab.py` 只做 HTTP DTO、状态码与调用转发；执行真相源是 `agent.app.services.node_lab`，禁止在 Backend 复制 Validator、Renderer、Oracle、Selector、路由或 benchmark 逻辑。
+- `execution_status=completed` 仍可能有 `outcome=rejected|stopped`，属于 HTTP 200 的正常领域结果；请求、Artifact、依赖或内部不变量错误使用稳定错误 envelope。
+- 模型节点默认使用 fixture/mock；`preview_only=true` 只返回安全 Prompt/Schema/预算摘要，不调用 Gateway。HTTP real 模式只有同时设置 `SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=true`，并在步骤请求中使用 `execution_mode=real`、`allow_model_call=true` 时才可调用；health 返回实际服务端开关状态。打开 Node Lab HTTP 开关本身不会调用模型或 Renderer。
+- `effect_mode=project_commit` 一律拒绝；策略 Memory 只生成 preview，不写真实项目 Memory。完整 ContextPack、GLSL、图片、模型原始 mock 和诊断只存同一 LabRun 的私有 Artifact。
+- V1.0 不提供 `/contracts/*` 或 `/roles/*` 第二套别名：node/capability descriptor 就是公开实验契约，五个模型角色统一走通用步骤入口，避免请求 Schema、预算默认值和错误语义分叉。逐节点 CLI 与 `/lab` 页面同样只调用公共 Application API/HTTP，不在 transport 中复制节点规则。
+
 ## Service 规则
 
 - service 负责一次后端用例的编排，例如“接收图片并生成 GLSL”。

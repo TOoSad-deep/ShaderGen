@@ -20,6 +20,8 @@ from agent.app.nodes.bounded_model_node import make_bounded_model_node
 from agent.app.nodes.png_to_shader_v1_run_nodes import (
     make_finalize_png_to_shader_v1_node,
     make_materialize_candidate_node,
+    make_persist_visual_review_node,
+    make_prepare_measurement_seed_node,
     make_render_and_evaluate_node,
 )
 from agent.app.nodes.shader_author_node import (
@@ -33,9 +35,9 @@ from agent.app.nodes.structured_output import (
 )
 from agent.app.nodes.visual_analysis_node import make_visual_analysis_node
 from agent.app.nodes.visual_critic_node import make_visual_critic_node
-from shaderforge.analysis import measure_target
+from shaderforge.analysis import measure_target, normalize_target_png
 from shaderforge.contracts import BudgetPolicy, StopReason
-from shaderforge.evaluation import ScoreBreakdownV1
+from shaderforge.evaluation import CandidateRecord, ScoreBreakdownV1
 from shaderforge.rendering import CompileResult, RenderResult
 from shaderforge.store import LocalArtifactStore
 from shaderforge.validation import validate_shader
@@ -93,6 +95,119 @@ def quality_config() -> NodeModelConfig:
         ),
         print_reasoning=False,
     )
+
+
+def test_evaluation_measurements_merge_visual_analysis_semantic_regions() -> None:
+    measurements = measure_target(REFERENCE_IMAGE.read_bytes())
+    analysis = analysis_payload()
+
+    merged = run_nodes_module._evaluation_measurements(
+        {"visual_analysis": analysis},
+        measurements,
+    )
+
+    region_ids = [region.region_id for region in merged.roi_candidates]
+    assert region_ids.count("subject") == 1
+    assert "highlight" in region_ids
+    semantic = next(
+        region for region in merged.roi_candidates if region.region_id == "highlight"
+    )
+    assert semantic.purpose == "highlight"
+    assert semantic.bbox_uv == (0.2, 0.65, 0.5, 0.88)
+
+
+@pytest.mark.anyio
+async def test_visual_reviews_keep_iteration_specific_artifacts(tmp_path: Path) -> None:
+    artifacts = LocalArtifactStore(tmp_path / "review-artifacts")
+    store = artifacts.register_run("project-review", "run-review")
+    glsl_ref = store.write_text("candidate.frag", GOLDEN_GLSL)
+    author_ref = store.write_json("author.json", author_payload())
+    provenance_ref = store.write_json("provenance.json", {"source": "unit"})
+    best = CandidateRecord(
+        candidate_id="candidate-0001",
+        parent_candidate_id=None,
+        glsl_sha256=glsl_ref.sha256,
+        glsl_ref=glsl_ref.relative_path,
+        author_ref=author_ref.relative_path,
+        provenance_ref=provenance_ref.relative_path,
+        compile_ref="compile.json",
+        render_ref="render.png",
+        render_sha256="1" * 64,
+        metrics_ref="metrics.json",
+        review_ref=None,
+        iteration=0,
+        changed_problem_domain="initial_build",
+        prompt_version="shader_author_initial_v1_1",
+        model_ref="fake:model",
+        score_summary=ScoreBreakdownV1(
+            metric_version="unit_test_v1",
+            total_loss=0.2,
+            global_rmse=0.2,
+            global_mae=0.2,
+            edge_loss=0.2,
+            geometry_loss=0.2,
+            representative_pixel_loss=0.2,
+            roi_losses=(),
+            protected_region_losses=(),
+            effective_weights=(("global_rmse", 1.0),),
+            diagnostics=(),
+        ),
+        hard_constraints_passed=True,
+    )
+    node = make_persist_visual_review_node(artifacts)
+    base_state = {
+        "project_id": "project-review",
+        "run_id": "run-review",
+        "current_best_record": best,
+        "candidate_records": (best,),
+        "visual_review": review_payload("candidate-0001"),
+        "events": (),
+    }
+
+    first = await node({**base_state, "visual_refinement_count": 0})
+    second = await node({**base_state, "visual_refinement_count": 1})
+
+    first_ref = first["current_best_record"].review_ref
+    second_ref = second["current_best_record"].review_ref
+    assert first_ref == "candidates/candidate-0001/reviews/review-0001.json"
+    assert second_ref == "candidates/candidate-0001/reviews/review-0002.json"
+    assert first_ref != second_ref
+    assert store.read_bytes(first_ref)
+    assert store.read_bytes(second_ref)
+
+
+@pytest.mark.anyio
+async def test_prepare_measurement_seed_has_deterministic_provenance() -> None:
+    reference = normalize_target_png(REFERENCE_IMAGE.read_bytes())
+    node = make_prepare_measurement_seed_node()
+
+    result = await node(
+        {
+            "image": reference,
+            "target_measurements": measure_target(reference),
+            "measurement_seed_attempted": False,
+            "events": (),
+        }
+    )
+
+    assert result["measurement_seed_attempted"] is True
+    assert result["candidate_origin"] == "deterministic"
+    assert result["candidate_generator_version"] == "measurement_affine_seed_v1"
+    assert result["candidate_provenance"]["origin"] == "deterministic"
+    assert result["candidate_provenance"]["generator_version"] == (
+        "measurement_affine_seed_v1"
+    )
+    assert result["author_result"]["mode"] == "measurement_seed"
+    assert "texture2D" not in result["glsl"]
+
+    with pytest.raises(RuntimeError, match="只能准备一次"):
+        await node(
+            {
+                **result,
+                "image": reference,
+                "target_measurements": measure_target(reference),
+            }
+        )
 
 
 def analysis_state() -> dict:

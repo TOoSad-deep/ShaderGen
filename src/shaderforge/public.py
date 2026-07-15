@@ -31,6 +31,12 @@ from shaderforge.evaluation import (
     max_protected_regression,
     select_current_best,
 )
+from shaderforge.generation import (
+    MEASUREMENT_AFFINE_SEED_VERSION,
+    MeasurementAffineSeed,
+    MeasurementSeedProvenance,
+    build_measurement_affine_seed,
+)
 from shaderforge.rendering import (
     CompileResult,
     PlaywrightWebGL1Renderer,
@@ -61,6 +67,9 @@ __all__ = [
     "ImageSizeMismatchError",
     "InvalidTargetImageError",
     "LocalArtifactStore",
+    "MEASUREMENT_AFFINE_SEED_VERSION",
+    "MeasurementAffineSeed",
+    "MeasurementSeedProvenance",
     "MetricWeights",
     "PlaywrightWebGL1Renderer",
     "ProblemDomain",
@@ -78,6 +87,7 @@ __all__ = [
     "ValidationViolation",
     "budget_for_preset",
     "build_standalone_html",
+    "build_measurement_affine_seed",
     "evaluate_render",
     "max_protected_regression",
     "measure_target",

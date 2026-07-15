@@ -19,7 +19,7 @@
 2. 确认当前任务状态：`docs/FEATURES.md` 和 `PROGRESS.md`。
 3. 确认全局边界：`docs/ARCHITECTURE.md`。
 4. 确认 Agent 总览：`src/agent/ARCHITECTURE.md`。
-5. 只读本次会改目录旁边的 `ARCHITECTURE.md`，例如 `graphs/ARCHITECTURE.md` 或 `nodes/ARCHITECTURE.md`。
+5. 只读本次会改目录旁边的 `ARCHITECTURE.md`，例如 `graphs/ARCHITECTURE.md` 或 `nodes/ARCHITECTURE.md`；涉及 Graph、routing 或节点跳转语义时，必须先读 `src/agent/app/graphs/ARCHITECTURE.md`，并把可视化同步纳入同一次改动。
 
 ## 当前入口
 
@@ -37,9 +37,23 @@
 
 - 文档、功能状态或架构边界变化：`make docs-check`
 - Agent 节点、状态、解析器、LLM Gateway 或 service 变化：`uv run pytest tests/unit_tests`
-- Graph 配置或边变化：`uv run langgraph validate`
+- Graph 配置、节点、边、路由结果或终止语义变化：先同步源码 ASCII 图、Graphs Mermaid 和路由表，再运行 `make docs-check` 与 `uv run langgraph validate`
 - 跨后端和 Agent 的行为变化：`uv run pytest tests/integration_tests`
 - 收尾前完整验证：`make check`
+
+## Graph 可视化完成定义
+
+以下任一变化都会触发 Graph 可视化维护：`add_node`、`add_edge`、`add_conditional_edges`、routing 返回值或含义、循环/重试、START/END/finalize 路径、`current_best`/fallback 边界，以及 `langgraph.json` 的图注册。
+
+完成 Graph 相关开发前必须逐项满足：
+
+1. 对应 `*_graph.py` 的 Builder 上方 ASCII 图已同步，读源码即可看出主路径、分支、循环和终止点。
+2. `src/agent/app/graphs/ARCHITECTURE.md` 中同名 `graph-diagram:<stem>` Mermaid 区块已同步；新增图必须新增完整区块。
+3. 条件结果、下一节点或安全语义变化时，同步条件路由表与 `current_best`、fallback、Memory 晋升等说明。
+4. 新增对外图时同步 `langgraph.json` 和“当前图”清单。
+5. `make docs-check`、`uv run langgraph validate`、对应 routing/Graph 定向测试通过；收尾仍以 `make check` 为准。
+
+`make docs-check` 会从 `*_graph.py` 静态提取字面量节点、直接边和条件边，发现缺失的源码图、Mermaid 区块或连线。动态生成的 path map、routing 函数内部语义、隐式终止及路由表文字无法完全由静态检查判断，仍必须由开发者同步并用定向测试验证。
 
 ## 按需阅读
 

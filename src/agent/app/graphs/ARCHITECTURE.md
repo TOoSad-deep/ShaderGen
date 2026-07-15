@@ -21,6 +21,28 @@
 - Mermaid 中的节点、直接边和字面量条件边必须与 `add_node`、`add_edge`、`add_conditional_edges` 一致；`make docs-check` 会静态检查遗漏和漂移。
 - 新增或修改图后运行 `uv run langgraph validate`。
 
+## 可视化维护工作流
+
+Graph 的运行时代码是行为真相源；源码 ASCII 图是邻近实现的快速索引，本文件 Mermaid 是可渲染总览，条件路由表负责表达分支语义和安全边界。三者必须在同一次 Graph 改动中保持一致，不允许把可视化更新留作后续任务。
+
+遇到下列任一变化时立即执行本节，而不是等到收尾时补文档：
+
+- 新增、删除或重命名 Node；
+- 修改 `add_edge`、`add_conditional_edges`、START/END、finalize 或循环回边；
+- routing 函数新增/删除返回值，或已有返回值的触发条件、下一节点、失败含义发生变化；
+- 修改 `current_best`、`unscored_fallback`、Artifact 重载、Renderer 关闭或 Memory 晋升边界；
+- 新增、删除或重命名 `langgraph.json` 中的对外图。
+
+维护顺序：
+
+1. 先修改 Graph/routing 实现和对应测试。
+2. 立即更新对应 `*_graph.py` Builder 上方的 ASCII 图，至少画出主路径、条件标签、循环和所有终止汇合点。
+3. 更新本文件同名 `<!-- graph-diagram:<stem>:start/end -->` 区块；新增图时同时更新“当前图”清单和 `langgraph.json`。
+4. 条件触发语义或安全边界变化时更新路由表及图后说明；仅移动连线但不更新解释同样视为未完成。
+5. 运行 `make docs-check`、`uv run langgraph validate` 和受影响 Graph/routing 的定向测试；会话结束前在 `PROGRESS.md` 记录结果与未覆盖缺口。
+
+自动检查边界：`make docs-check` 使用 AST 覆盖字面量 `add_node`、`add_edge` 和带字面量 path map 的 `add_conditional_edges`，并要求每个 `*_graph.py` 同时存在 ASCII 图和同名 Mermaid 区块。它不能理解动态 path map、routing 函数内部条件、隐式终止或表格文字是否准确；这些部分必须靠代码审查与定向测试维护。
+
 ## `main_graph` 基础对话图
 
 <!-- graph-diagram:main_graph:start -->
@@ -84,7 +106,9 @@ flowchart TD
     author_compile_repair -. continue .-> materialize_candidate
     author_compile_repair -. finalize .-> finalize
 
-    select_current_best --> decide_after_selection[decide_after_selection]
+    select_current_best -. measurement_seed .-> prepare_measurement_seed[prepare_measurement_seed]
+    select_current_best -. decide .-> decide_after_selection[decide_after_selection]
+    prepare_measurement_seed --> materialize_candidate
     decide_after_selection -. visual_critic .-> load_current_best[load_current_best]
     decide_after_selection -. finalize .-> finalize
     load_current_best --> visual_critic[visual_critic]
@@ -115,6 +139,8 @@ flowchart TD
 | `decide_after_render` | `route_next_action` | `finalize` | `finalize` | 预算耗尽或满足终止条件 |
 | `author_compile_repair` | `model_node_outcome` | `continue` | `materialize_candidate` | 修复结果作为新候选重新验证 |
 | `author_compile_repair` | `model_node_outcome` | `finalize` | `finalize` | 修复模型失败或预算耗尽 |
+| `select_current_best` | `route_after_candidate_selection` | `measurement_seed` | `prepare_measurement_seed` | 首个有效 model best 后生成一次独立的确定性 affine 根候选，不消耗模型/视觉预算 |
+| `select_current_best` | `route_after_candidate_selection` | `decide` | `decide_after_selection` | seed 已尝试，或取消/时间停止，进入正常停止与 Critic 判断 |
 | `decide_after_selection` | `route_next_action` | `visual_critic` | `load_current_best` | 从 Artifact 重载已验证 best |
 | `decide_after_selection` | `route_next_action` | `finalize` | `finalize` | 质量达标、停滞或视觉预算耗尽 |
 | `visual_critic` | `model_node_outcome` | `continue` | `persist_visual_review` | Critic 证据有效，保存 Review |
@@ -122,7 +148,8 @@ flowchart TD
 | `author_visual_refine` | `model_node_outcome` | `continue` | `materialize_candidate` | Refine 结果作为新候选重新验证 |
 | `author_visual_refine` | `model_node_outcome` | `finalize` | `finalize` | Refine 失败时保留已有 best |
 
-- 所有环路都必须经过 compile/visual/model/wall-time 计数器，且自定义预算不超过 V1 high 档；默认 recursion limit 96 是第二道保护。
+- `prepare_measurement_seed` 只依赖规范化参考图和 `TargetMeasurements`，生成 case-id/manifest/golden 无感知的静态 WebGL1 affine 候选；它是独立 root，最多一次，仍完整经过 Validator、Renderer、Oracle 和 Selector，拒绝时不计入 stagnation。
+- 所有环路都必须经过 compile/visual/model/wall-time 计数器；measurement seed 是不消耗模型和视觉迭代计数的一次性候选，且自定义预算不超过 V1 high 档；默认 recursion limit 96 是第二道保护。
 - `stop_recommendation` 不能控制 Graph；Critic 只提供证据，下一步由 `png_to_shader_v1_routing.py` 决定。
 - 黄色节点构成 `current_best` 安全边界：Critic、finalize 和 Memory 晋升只能读取选择器确认并重新加载的 best Artifact，不能把“最后一次候选”当成最终结果。
 - 唯一例外是 Evaluator 超时或失败后的 `unscored_fallback`：候选必须已经通过静态 Validator、真实 WebGL compile/draw 并具有校验过 hash 的 render Artifact；它可作为 `completed_with_best_effort` 返回，但没有 score/metrics，不进入 Selector、Critic 或长期策略 Memory，API/UI 也不得称为 `current_best`。

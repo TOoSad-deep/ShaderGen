@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import statistics
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from shaderforge.benchmark.models import (
@@ -28,9 +29,16 @@ def _number(value: Any) -> float | None:
 CasePredicate = Callable[[Mapping[str, Any]], bool]
 
 
-def _rate(
-    case_results: Sequence[Mapping[str, Any]], predicate: CasePredicate
-) -> float:
+@dataclass(frozen=True)
+class _HumanReviewSummary:
+    review_count: int
+    final_preference_rate: float | None
+    final_win_count: int
+    initial_win_count: int
+    tie_count: int
+
+
+def _rate(case_results: Sequence[Mapping[str, Any]], predicate: CasePredicate) -> float:
     if not case_results:
         return 0.0
     return sum(1 for case in case_results if predicate(case)) / len(case_results)
@@ -49,36 +57,147 @@ def _failed_ids(
 def _review_summary(
     human_review: Mapping[str, Any] | None,
     assignments: Mapping[str, Any] | None,
-) -> tuple[int, float | None]:
-    if human_review is None or assignments is None:
-        return 0, None
+    *,
+    case_results: Sequence[Mapping[str, Any]],
+    expected_suite_run_id: str | None,
+) -> _HumanReviewSummary:
+    """严格校验盲评证据，并返回不会静默吞错的聚合结果."""
+    empty_summary = _HumanReviewSummary(0, None, 0, 0, 0)
+    if assignments is None:
+        if human_review is not None:
+            raise ValueError("人工盲评存在，但 assignments 证据缺失。")
+        return empty_summary
+    if human_review is None:
+        return empty_summary
+
+    expected_case_ids = tuple(str(case.get("case_id", "")) for case in case_results)
+    if any(not case_id for case_id in expected_case_ids):
+        raise ValueError("benchmark case_id 不能为空。")
+    if len(set(expected_case_ids)) != len(expected_case_ids):
+        raise ValueError("benchmark case_id 不得重复。")
+    expected_case_set = set(expected_case_ids)
+
+    assignment_schema = assignments.get("schema_version")
+    if type(assignment_schema) is not int or assignment_schema != 1:
+        raise ValueError("assignments.schema_version 必须为 1。")
+    assignment_suite_run_id = assignments.get("suite_run_id")
+    if (
+        not isinstance(assignment_suite_run_id, str)
+        or not assignment_suite_run_id.strip()
+    ):
+        raise ValueError("assignments.suite_run_id 不能为空。")
+    if (
+        expected_suite_run_id is not None
+        and assignment_suite_run_id != expected_suite_run_id
+    ):
+        raise ValueError("assignments.suite_run_id 与当前 suite run 不一致。")
     assignment_items = assignments.get("items")
-    review_items = human_review.get("items")
-    if not isinstance(assignment_items, list) or not isinstance(review_items, list):
-        return 0, None
+    if not isinstance(assignment_items, list):
+        raise ValueError("assignments.items 必须为数组。")
+
+    expected_paths: dict[str, tuple[str, str]] = {}
+    for case in case_results:
+        case_id = str(case.get("case_id", ""))
+        ai_on = _section(case, "ai_on")
+        initial_path = ai_on.get("initial_render_path")
+        final_path = ai_on.get("final_render_path")
+        if (
+            isinstance(initial_path, str)
+            and initial_path
+            and isinstance(final_path, str)
+            and final_path
+        ):
+            expected_paths[case_id] = (initial_path, final_path)
+
     role_by_case: dict[str, dict[str, str]] = {}
     for raw in assignment_items:
         if not isinstance(raw, Mapping):
-            continue
-        role_by_case[str(raw.get("case_id", ""))] = {
-            "A": str(raw.get("a_role", "")),
-            "B": str(raw.get("b_role", "")),
-        }
-    valid = 0
-    final_preferences = 0
-    seen: set[str] = set()
+            raise ValueError("assignments.items 的每一项都必须是对象。")
+        assignment_case_id = raw.get("case_id")
+        if not isinstance(assignment_case_id, str) or not assignment_case_id:
+            raise ValueError("assignments case_id 不能为空。")
+        case_id = assignment_case_id
+        if case_id in role_by_case:
+            raise ValueError(f"assignments case_id 重复：{case_id}")
+        a_role = raw.get("a_role")
+        b_role = raw.get("b_role")
+        if {a_role, b_role} != {"initial", "final"}:
+            raise ValueError(f"assignments A/B 角色非法：{case_id}")
+        initial_path = raw.get("initial_render_path")
+        final_path = raw.get("final_render_path")
+        if not isinstance(initial_path, str) or not initial_path:
+            raise ValueError(f"assignments initial_render_path 缺失：{case_id}")
+        if not isinstance(final_path, str) or not final_path:
+            raise ValueError(f"assignments final_render_path 缺失：{case_id}")
+        expected = expected_paths.get(case_id)
+        if expected is not None and (initial_path, final_path) != expected:
+            raise ValueError(f"assignments render path 与 case 证据不一致：{case_id}")
+        role_by_case[case_id] = {"A": str(a_role), "B": str(b_role)}
+    assignment_case_set = set(role_by_case)
+    if assignment_case_set != expected_case_set:
+        missing = sorted(expected_case_set - assignment_case_set)
+        extra = sorted(assignment_case_set - expected_case_set)
+        raise ValueError(
+            f"assignments case 集合不一致：missing={missing}, extra={extra}"
+        )
+
+    review_schema = human_review.get("schema_version")
+    if type(review_schema) is not int or review_schema != 1:
+        raise ValueError("human review schema_version 必须为 1。")
+    review_suite_run_id = human_review.get("suite_run_id")
+    if not isinstance(review_suite_run_id, str) or not review_suite_run_id.strip():
+        raise ValueError("human review suite_run_id 不能为空。")
+    if review_suite_run_id != assignment_suite_run_id:
+        raise ValueError("human review suite_run_id 与 assignments 不一致。")
+    reviewer = human_review.get("reviewer")
+    if not isinstance(reviewer, str) or not reviewer.strip():
+        raise ValueError("human review reviewer 不能为空。")
+    review_items = human_review.get("items")
+    if not isinstance(review_items, list):
+        raise ValueError("human review items 必须为数组。")
+
+    choices_by_case: dict[str, str] = {}
     for raw in review_items:
         if not isinstance(raw, Mapping):
+            raise ValueError("human review items 的每一项都必须是对象。")
+        review_case_id = raw.get("case_id")
+        if not isinstance(review_case_id, str) or not review_case_id:
+            raise ValueError("human review case_id 不能为空。")
+        case_id = review_case_id
+        if case_id in choices_by_case:
+            raise ValueError(f"human review case_id 重复：{case_id}")
+        choice = raw.get("choice")
+        if choice not in {"A", "B", "TIE"}:
+            raise ValueError(f"human review choice 非法：{case_id}")
+        choices_by_case[case_id] = str(choice)
+    review_case_set = set(choices_by_case)
+    if review_case_set != expected_case_set:
+        missing = sorted(expected_case_set - review_case_set)
+        extra = sorted(review_case_set - expected_case_set)
+        raise ValueError(
+            f"human review case 集合不一致：missing={missing}, extra={extra}"
+        )
+
+    final_win_count = 0
+    initial_win_count = 0
+    tie_count = 0
+    for case_id in expected_case_ids:
+        choice = choices_by_case[case_id]
+        if choice == "TIE":
+            tie_count += 1
             continue
-        case_id = str(raw.get("case_id", ""))
-        choice = str(raw.get("choice", "")).upper()
-        if case_id in seen or case_id not in role_by_case or choice not in {"A", "B", "TIE"}:
-            continue
-        seen.add(case_id)
-        valid += 1
         if choice in {"A", "B"} and role_by_case[case_id].get(choice) == "final":
-            final_preferences += 1
-    return valid, (final_preferences / valid if valid else None)
+            final_win_count += 1
+        else:
+            initial_win_count += 1
+    review_count = len(choices_by_case)
+    return _HumanReviewSummary(
+        review_count=review_count,
+        final_preference_rate=final_win_count / review_count,
+        final_win_count=final_win_count,
+        initial_win_count=initial_win_count,
+        tie_count=tie_count,
+    )
 
 
 def evaluate_quality_gate(
@@ -87,6 +206,8 @@ def evaluate_quality_gate(
     *,
     human_review: Mapping[str, Any] | None = None,
     assignments: Mapping[str, Any] | None = None,
+    expected_suite_run_id: str | None = None,
+    bit_identical_case_ids: Sequence[str] | None = None,
 ) -> QualityGateReport:
     """以运行前冻结的 policy 评估完整 benchmark，不动态移动阈值."""
     cases = tuple(case_results)
@@ -194,6 +315,7 @@ def evaluate_quality_gate(
             non_monotonic_ids,
         )
     )
+
     def trace_predicate(case: Mapping[str, Any]) -> bool:
         return bool(_section(case, "ai_on").get("traceability_passed", False))
 
@@ -217,22 +339,30 @@ def evaluate_quality_gate(
     checks.append(
         GateCheck(
             "pink_gel_bbox",
-            bbox_error is not None
-            and bbox_error <= policy.pink_gel_max_bbox_error_uv,
+            bbox_error is not None and bbox_error <= policy.pink_gel_max_bbox_error_uv,
             bbox_error,
             f"<= {policy.pink_gel_max_bbox_error_uv:.6f}",
-            (() if bbox_error is not None and bbox_error <= policy.pink_gel_max_bbox_error_uv else ("pink_gel",)),
+            (
+                ()
+                if bbox_error is not None
+                and bbox_error <= policy.pink_gel_max_bbox_error_uv
+                else ("pink_gel",)
+            ),
         )
     )
     global_rmse = _number(pink.get("global_rmse"))
     checks.append(
         GateCheck(
             "pink_gel_global_color",
-            global_rmse is not None
-            and global_rmse <= policy.pink_gel_max_global_rmse,
+            global_rmse is not None and global_rmse <= policy.pink_gel_max_global_rmse,
             global_rmse,
             f"<= {policy.pink_gel_max_global_rmse:.6f}",
-            (() if global_rmse is not None and global_rmse <= policy.pink_gel_max_global_rmse else ("pink_gel",)),
+            (
+                ()
+                if global_rmse is not None
+                and global_rmse <= policy.pink_gel_max_global_rmse
+                else ("pink_gel",)
+            ),
         )
     )
     roi_losses = pink.get("key_roi_losses")
@@ -240,20 +370,45 @@ def evaluate_quality_gate(
     roi_failures = tuple(
         region_id
         for region_id, limit in policy.pink_gel_max_key_roi_losses
-        if _number(roi_map.get(region_id)) is None
-        or float(roi_map[region_id]) > limit
+        if _number(roi_map.get(region_id)) is None or float(roi_map[region_id]) > limit
     )
     checks.append(
         GateCheck(
             "pink_gel_key_rois",
             not roi_failures,
-            {key: _number(roi_map.get(key)) for key, _ in policy.pink_gel_max_key_roi_losses},
+            {
+                key: _number(roi_map.get(key))
+                for key, _ in policy.pink_gel_max_key_roi_losses
+            },
             str(policy.pink_gel_key_roi_limit_map),
             tuple(f"pink_gel:{region_id}" for region_id in roi_failures),
         )
     )
 
-    review_count, final_preference_rate = _review_summary(human_review, assignments)
+    review_summary = _review_summary(
+        human_review,
+        assignments,
+        case_results=cases,
+        expected_suite_run_id=expected_suite_run_id,
+    )
+    review_count = review_summary.review_count
+    final_preference_rate = review_summary.final_preference_rate
+    case_ids = tuple(str(case.get("case_id", "")) for case in cases)
+    if bit_identical_case_ids is None:
+        identical_ids: tuple[str, ...] = ()
+        distinct_pair_count: int | None = None
+    else:
+        raw_identical_ids = tuple(bit_identical_case_ids)
+        if len(set(raw_identical_ids)) != len(raw_identical_ids):
+            raise ValueError("bit_identical_case_ids 不得重复。")
+        unknown_ids = sorted(set(raw_identical_ids) - set(case_ids))
+        if unknown_ids:
+            raise ValueError(f"bit_identical_case_ids 含未知 case：{unknown_ids}")
+        identical_set = set(raw_identical_ids)
+        identical_ids = tuple(
+            case_id for case_id in case_ids if case_id in identical_set
+        )
+        distinct_pair_count = len(cases) - len(identical_ids)
     human_complete = review_count >= policy.required_human_review_count
     checks.append(
         GateCheck(
@@ -316,6 +471,11 @@ def evaluate_quality_gate(
         ),
         "human_review_count": review_count,
         "human_final_preference_rate": final_preference_rate,
+        "final_win_count": review_summary.final_win_count,
+        "initial_win_count": review_summary.initial_win_count,
+        "tie_count": review_summary.tie_count,
+        "distinct_pair_count": distinct_pair_count,
+        "bit_identical_case_ids": list(identical_ids),
         "failed_case_ids": [
             str(case.get("case_id", "unknown"))
             for case in cases

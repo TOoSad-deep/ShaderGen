@@ -24,6 +24,15 @@ def test_llm_call_options_reject_invalid_values() -> None:
             model_ref="openai:gpt-4.1",
             response_format="xml",  # type: ignore[arg-type]
         )
+    with pytest.raises(ValueError, match="max_output_tokens"):
+        LLMCallOptions(model_ref="openai:gpt-4.1", max_output_tokens=0)
+    with pytest.raises(ValueError, match="max_output_tokens"):
+        LLMCallOptions(model_ref="openai:gpt-4.1", max_output_tokens=True)
+    with pytest.raises(ValueError, match="max_output_tokens"):
+        LLMCallOptions(
+            model_ref="openai:gpt-4.1",
+            max_output_tokens=1.5,  # type: ignore[arg-type]
+        )
 
 
 def test_llm_response_keeps_normalized_metadata() -> None:

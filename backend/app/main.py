@@ -86,6 +86,29 @@ async def log_request_validation_error(
             status_code=422,
             content={"detail": detail.model_dump(mode="json")},
         )
+    if request.url.path.startswith("/api/lab/v1/"):
+        logger.warning(
+            "node_lab.request.validation_failed method=%s path=%s "
+            "error_count=%s errors=%s",
+            request.method,
+            request.url.path,
+            len(exc.errors()),
+            serialized_errors,
+        )
+        return JSONResponse(
+            status_code=422,
+            content={
+                "detail": {
+                    "message": "Node Lab HTTP 请求校验失败。",
+                    "code": "input_contract_invalid",
+                    "stage": "request_validation",
+                    "retryable": False,
+                    "lab_run_id": None,
+                    "step_id": None,
+                    "node_id": None,
+                }
+            },
+        )
     logger.warning(
         "request.validation_failed method=%s path=%s error_count=%s errors=%s",
         request.method,
