@@ -184,3 +184,22 @@ def test_m2_role_nodes_do_not_run_m1_fact_layer_or_store() -> None:
         )
 
     assert violations == []
+
+
+def test_shader_generate_route_delegates_backend_use_case_orchestration() -> None:
+    route = ROOT / "backend/app/api/routes/shader.py"
+    route_imports = _import_targets(route)
+    route_source = route.read_text(encoding="utf-8")
+    moved_generation_details = {
+        "start_shader_generation_run",
+        "record_shader_generation_success",
+        "record_shader_generation_failure",
+        "generate_shader_from_image",
+        "generate_procedural_shader_from_image",
+    }
+
+    assert "backend.app.services.shader_generation" in route_imports
+    assert moved_generation_details.isdisjoint(
+        target.rsplit(".", maxsplit=1)[-1] for target in route_imports
+    )
+    assert "execute_shader_generation(command, dependencies)" in route_source

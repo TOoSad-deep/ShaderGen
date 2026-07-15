@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from agent.app.config.model_config import SHADER_GEN_MODEL_NAME
 from agent.app.graphs.png_to_shader_v1_graph import (
     DEFAULT_ARTIFACT_ROOT,
     build_default_png_to_shader_v1_graph,
+    create_default_png_to_shader_v1_renderer_registry,
     png_to_shader_v1_artifact_store,
     png_to_shader_v1_checkpointer,
     png_to_shader_v1_graph,
+    png_to_shader_v1_renderer_registry,
     png_to_shader_v1_store,
 )
 from agent.app.memory.models import MemoryStatus
@@ -19,6 +23,9 @@ from agent.app.memory.store import clear_project_memories
 from agent.app.services.errors import MemoryUnavailableError
 from shaderforge.contracts import QualityPreset
 from shaderforge.store import LocalArtifactStore
+
+logger = logging.getLogger("agent.png_to_shader")
+SERVICE_RENDERER_CLOSE_TIMEOUT_SECONDS = 3.0
 
 PUBLIC_ARTIFACTS = {
     "final-render": ("final/render.png", "image/png", "final-render.png"),
@@ -271,6 +278,14 @@ class ClearPngToShaderMemoryResult:
     deleted_memories: int
 
 
+class RunResourceCleaner(Protocol):
+    """Agent Service 可兜底释放的最小 run 级资源接口."""
+
+    async def close(self, key: tuple[str, str]) -> None:
+        """幂等释放指定 project/run 的资源."""
+        ...
+
+
 class PngToShaderV1Service:
     """持有 V1 Graph、persistence 和 Artifact 边界的服务."""
 
@@ -281,6 +296,8 @@ class PngToShaderV1Service:
         store: Any,
         artifact_store: LocalArtifactStore,
         memory_status: MemoryStatus,
+        renderer_registry: RunResourceCleaner | None = None,
+        renderer_close_timeout_seconds: float = SERVICE_RENDERER_CLOSE_TIMEOUT_SECONDS,
     ) -> None:
         """保存一次后端生命周期内复用的依赖."""
         self.graph = graph
@@ -288,6 +305,8 @@ class PngToShaderV1Service:
         self.store = store
         self.artifact_store = artifact_store
         self.memory_status = memory_status
+        self.renderer_registry = renderer_registry
+        self.renderer_close_timeout_seconds = renderer_close_timeout_seconds
 
     @staticmethod
     def thread_id(project_id: str) -> str:
@@ -295,7 +314,11 @@ class PngToShaderV1Service:
         return f"png-to-shader-v1:{project_id}"
 
     async def invoke(self, project_id: str, state: dict[str, Any]) -> dict[str, Any]:
-        """调用 V1 Graph 并把 persistence 故障映射为公共异常."""
+        """调用 V1 Graph，映射 persistence 故障并兜底释放 run 级资源."""
+        state_project_id = str(state.get("project_id", "")).strip()
+        if state_project_id != project_id:
+            raise ValueError("Service project_id 与 Graph State 不一致。")
+        run_id = str(state.get("run_id", "")).strip()
         try:
             return cast(
                 dict[str, Any],
@@ -309,6 +332,21 @@ class PngToShaderV1Service:
             if module.startswith(("psycopg", "langgraph.checkpoint")):
                 raise MemoryUnavailableError("任务记忆暂时不可用。") from exc
             raise
+        finally:
+            if self.renderer_registry is not None and run_id:
+                try:
+                    await asyncio.wait_for(
+                        self.renderer_registry.close((state_project_id, run_id)),
+                        timeout=self.renderer_close_timeout_seconds,
+                    )
+                except Exception as cleanup_error:
+                    logger.warning(
+                        "png_to_shader.service_renderer_close_failed "
+                        "project_id=%s run_id=%s error_type=%s",
+                        project_id,
+                        run_id,
+                        type(cleanup_error).__name__,
+                    )
 
     async def clear_memory(self, project_id: str) -> ClearPngToShaderMemoryResult:
         """清除 V1 checkpoint 和该项目的共享长期 Memory."""
@@ -342,10 +380,12 @@ def create_png_to_shader_v1_service(
 ) -> PngToShaderV1Service:
     """使用外部 persistence 创建后端可注入的 V1 服务."""
     artifacts = artifact_store or LocalArtifactStore(DEFAULT_ARTIFACT_ROOT)
+    renderer_registry = create_default_png_to_shader_v1_renderer_registry()
     graph = build_default_png_to_shader_v1_graph(
         artifact_store=artifacts,
         checkpointer=checkpointer,
         store=store,
+        renderer_registry=renderer_registry,
     )
     return PngToShaderV1Service(
         graph,
@@ -353,6 +393,7 @@ def create_png_to_shader_v1_service(
         store,
         artifacts,
         memory_status,
+        renderer_registry,
     )
 
 
@@ -362,6 +403,7 @@ default_png_to_shader_v1_service = PngToShaderV1Service(
     png_to_shader_v1_store,
     png_to_shader_v1_artifact_store,
     "ephemeral",
+    png_to_shader_v1_renderer_registry,
 )
 
 

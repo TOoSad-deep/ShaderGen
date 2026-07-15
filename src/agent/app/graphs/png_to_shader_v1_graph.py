@@ -80,7 +80,7 @@ def _default_renderer_factory(
 #                  +-----------------------+-----------------------+------------------+
 #                  | select                | compile_repair        | finalize         |
 #                  v                       v                       v                  |
-# select_current_best -> candidate_portfolio      prepare_compile_repair              |
+# select_current_best                             prepare_compile_repair              |
 #                  |         |                     -> author_compile_repair -----------+
 #                  | seed    | decide                         | continue
 #                  v         v                                v
@@ -97,12 +97,14 @@ def _default_renderer_factory(
 # 所有模型节点都经 `model_node_outcome` 的 bounded 包装：continue 才进入下一阶段，
 # 预算、结构化输出或模型失败均直接进入 finalize。候选重试始终回到
 # materialize_candidate；只有 select_current_best 后的 current_best 可供 Critic、
-# finalize 与 Memory 晋升读取。
+# finalize 与 Memory 晋升读取。正常终止由 finalize 关闭 Renderer；Graph 外异常由
+# Agent Service 的 finally 使用同一 registry 幂等兜底关闭（该边界不是 Graph Node）。
 def build_png_to_shader_v1_graph(
     gateway: LLMGateway,
     *,
     artifact_store: LocalArtifactStore | None = None,
     renderer_factory: RendererFactory = _default_renderer_factory,
+    renderer_registry: RunRendererRegistry | None = None,
     evaluator: RenderEvaluator = evaluate_render,
     clock: Clock = time.monotonic,
     enable_measurement_seed: bool = True,
@@ -111,7 +113,7 @@ def build_png_to_shader_v1_graph(
 ) -> Any:
     """装配三角色、真实事实层、单调选择器与全部硬预算."""
     artifacts = artifact_store or LocalArtifactStore(DEFAULT_ARTIFACT_ROOT)
-    renderer_registry = RunRendererRegistry(renderer_factory)
+    run_renderer_registry = renderer_registry or RunRendererRegistry(renderer_factory)
     selection_router = (
         route_after_candidate_selection
         if enable_measurement_seed
@@ -167,7 +169,7 @@ def build_png_to_shader_v1_graph(
         "render_and_evaluate",
         make_render_and_evaluate_node(
             artifacts,
-            renderer_registry,
+            run_renderer_registry,
             evaluator,
             clock=clock,
         ),
@@ -189,7 +191,7 @@ def build_png_to_shader_v1_graph(
         "finalize",
         make_finalize_png_to_shader_v1_node(
             artifacts,
-            renderer_registry,
+            run_renderer_registry,
             clock=clock,
         ),
     )
@@ -268,16 +270,23 @@ def build_png_to_shader_v1_graph(
 _default_gateway = LangChainLLMGateway()
 
 
+def create_default_png_to_shader_v1_renderer_registry() -> RunRendererRegistry:
+    """创建供 Graph 与外层 Service 共享的默认 run 级 Renderer registry."""
+    return RunRendererRegistry(_default_renderer_factory)
+
+
 def build_default_png_to_shader_v1_graph(
     *,
     artifact_store: LocalArtifactStore,
     checkpointer: Any,
     store: Any,
+    renderer_registry: RunRendererRegistry | None = None,
 ) -> Any:
     """使用默认 Gateway 与外部 persistence 装配 V1 Graph."""
     return build_png_to_shader_v1_graph(
         _default_gateway,
         artifact_store=artifact_store,
+        renderer_registry=renderer_registry,
         checkpointer=checkpointer,
         store=store,
     )
@@ -286,9 +295,13 @@ def build_default_png_to_shader_v1_graph(
 png_to_shader_v1_checkpointer = InMemorySaver()
 png_to_shader_v1_store = InMemoryStore()
 png_to_shader_v1_artifact_store = LocalArtifactStore(DEFAULT_ARTIFACT_ROOT)
+png_to_shader_v1_renderer_registry = (
+    create_default_png_to_shader_v1_renderer_registry()
+)
 png_to_shader_v1_graph = build_png_to_shader_v1_graph(
     _default_gateway,
     artifact_store=png_to_shader_v1_artifact_store,
+    renderer_registry=png_to_shader_v1_renderer_registry,
     checkpointer=png_to_shader_v1_checkpointer,
     store=png_to_shader_v1_store,
 )

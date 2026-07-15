@@ -248,3 +248,10 @@
 - 决策：正式 run `m5-20260715T023445Z` 的自动检查 12/12 通过，但独立盲评 final 偏好率只有 30%，低于冻结的 50% 门槛，因此最终 gate 必须保持 `failed`，F09 继续 active/no-go。不得因为自动 objective 通过而移动人工阈值、重解释平局、选择性排除 case，或把当前 run 写成已通过；该 run 只作为 M6.2 的诊断基线，修复后必须使用新 suite-run-id、完整硬预算和新一轮独立盲评。
 - 原因：自动 gate 证明 8/10 case 在 `manifest_key_rois_v1` 下改善，并验证 compile/static、traceability、current_best 与局部阈值，却不能证明人类偏好的结构、实例数量和高光/阴影语义得到保留。人工解码为 final/initial/tie `3/4/3`；`rimmed_disk`、`arc_highlight_orb`、`dual_disks`、`pink_gel` 均偏好 initial，说明低频 affine 近似可能降低像素 objective，同时损伤视觉拓扑和语义层次。
 - 影响：M6.2 优先在 Node Lab 增加结构与语义诊断，检查 topology、实例数量、轮廓/镂空、高光/阴影以及 Selector 的结构保护证据；不得加入 benchmark case id、golden、manifest 或 gate 特判。完成离线回归后，仍需重新执行真实模型 M5 和独立人工门禁；当前失败评审 JSON、报告与逐 case 产物继续只增不改保存。
+
+## D034 - 生成编排下沉 Backend Service，run 级 Renderer 使用双层清理
+
+- 日期：2026-07-15
+- 决策：`POST /api/shader/generate` 的项目锁、模式/模型选择、Legacy timeout、Agent 调用、生成总账、失败分类和 `ShaderResponse` 契约统一下沉到 `backend.app.services.shader_generation`；Route 只保留 HTTP 上传校验、应用依赖装配与稳定用例错误到 FastAPI envelope 的映射。PNG-to-Shader V1 的 Graph Builder 与 `PngToShaderV1Service` 共享同一个 run 级 Renderer registry：正常路径仍由 `finalize` 关闭，Service `invoke()` 的 `finally` 对越过 Graph 的未知异常执行限时、幂等兜底。
+- 原因：原 Route 同时承担传输适配、并发控制、模型分流、持久化事务时序、错误分类和响应组装，难以单独阅读、复用和验证；Renderer 只依赖 `finalize` 时，任一未知 Node 异常或证据不变量破坏都可能绕过关闭路径并泄漏 Chromium 资源。两项调整都不需要改变 Graph 节点或公开 API。
+- 影响：生成 Route 不再直接 import 生成过程总账函数或 Agent 生成代理，架构边界测试锁定该依赖方向；现有状态码、错误 envelope、日志字段、数据库时序和响应字段保持不变。Service 外层清理失败只记录 project/run 与安全异常类型，不打印底层原文，也不覆盖 Graph 结果或原异常。该修改没有新增、删除、重命名 Graph Node，也没有改变边、路由结果、循环、`current_best` 或终止路径；Graph ASCII/Mermaid 只补充 Graph 外资源边界说明。

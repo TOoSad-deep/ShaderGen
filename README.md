@@ -52,6 +52,8 @@ npm --prefix frontend run e2e:procedural-v1
 npm --prefix frontend run e2e:node-lab
 ```
 
+`make check` 是默认主干验证，只覆盖单元测试、docs-check、LangGraph validate 和前端构建；跨组件改动仍需按范围追加集成测试、浏览器 E2E、PostgreSQL 或 benchmark，真实模型 benchmark 继续要求显式按量调用。
+
 服务默认地址：
 
 - LangGraph API：`http://127.0.0.1:2024`
@@ -90,11 +92,11 @@ SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=false
 
 `DATABASE_URL` 配置后，Backend 使用独立 psycopg pool 运行 LangGraph Checkpointer/Store，并使用现有 asyncpg pool 写 Agent 过程账本。首次部署或 persistence 包升级后先执行 `make setup-memory-postgres`。`make test-memory-postgres` 优先使用 `TEST_DATABASE_URL`；未配置时会基于 `DATABASE_URL` 创建随机临时数据库，测试结束后自动删除。
 
-由于 F09 M5 自动与人工质量门禁均为 no-go，页面当前默认使用 `legacy`；`procedural_v1` 仅作为明确标注的实验模式手动选择。V1 服务端完成 WebGL1 render/evaluate/review/refine；正常结果返回 `current_best`、评分和 final Artifact，Evaluator 不可用时返回明确的 WebGL-valid `unscored_fallback`，不伪造评分。Legacy 保留“浏览器渲染后调用 `/review`”路径，并有 180 秒服务端模型 timeout。公开 Artifact API 只允许 final-render、metrics 和 manifest。
+由于 F09 M5 自动质量门禁虽已通过、独立人工偏好门禁仍失败，最终发布 gate 继续为 no-go；页面当前默认使用 `legacy`，`procedural_v1` 仅作为明确标注的实验模式手动选择。V1 服务端完成 WebGL1 render/evaluate/review/refine；正常结果返回 `current_best`、评分和 final Artifact，Evaluator 不可用时返回明确的 WebGL-valid `unscored_fallback`，不伪造评分。Legacy 保留“浏览器渲染后调用 `/review`”路径，并有 180 秒服务端模型 timeout。公开 Artifact API 只允许 final-render、metrics 和 manifest。
 
 `SHADER_GEN_MODEL_NAME` 支持 `provider:model` 形式，例如 `dashscope:qwen3.7-plus`。`dashscope`、`openai`、`deepseek`、`glm` 表示凭据和 base URL 来源；真实模型名再决定使用 Qwen、GLM、DeepSeek 或 OpenAI 系列配置。
 
-F09 M5 的确定性 AI-off smoke 可直接运行；真实 10 例 benchmark 会产生按量模型调用，必须使用显式命令和硬预算。报告、逐例失败证据和盲评页面写入 `output/benchmarks/png-to-shader-v1/`。当前正式 run `m5-20260713-balanced-v3` 已完成自动和 10 项独立人工盲评，两个门禁均为 `failed`，灰度 no-go；F09 保持 active。
+F09 M5 的确定性 AI-off smoke 可直接运行；真实 10 例 benchmark 会产生按量模型调用，必须使用显式命令和硬预算。报告、逐例失败证据和盲评页面写入 `output/benchmarks/png-to-shader-v1/`。当前正式 run `m5-20260715T023445Z` 的自动检查 12/12 通过，独立盲评 10/10 完成；final/initial/tie 为 3/4/3，final 偏好率 30% 低于冻结的 50% 门槛，因此最终 gate 为 `failed`、灰度 no-go，F09 保持 active。
 
 Node Lab 模块 benchmark 使用独立命令：`make benchmark-node-lab-ai-off` 运行 capability、真实 node target、scenario/pipeline、Renderer cold/warm 和 direct-vs-HTTP transport；`make benchmark-node-lab-model` 使用固定 fixture 离线检查五个模型角色。模型报告按角色聚合 Parser/Schema/binding/timeout、latency、token、费用和 requested/actual model；中断可恢复但仍留在分母，样本不足 20 时 p95 为 `null`。真实模型诊断必须运行 `SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=true uv run python scripts/run_node_lab_model_benchmark.py --execution-mode real --allow-model-calls`，并受 manifest 的调用、provider 输出 token、总 token、时间和费用硬预算限制。三类 CLI 只向 stdout 输出 suite/status/report path 单行 JSON，case 失败返回非零。所有 Node Lab 报告都不覆盖 M5 证据。
 

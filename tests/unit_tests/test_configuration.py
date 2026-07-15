@@ -29,6 +29,7 @@ from backend.app.api.routes import shader as shader_route
 from backend.app.database import agent_memory
 from backend.app.main import app
 from backend.app.services import shader as shader_service
+from backend.app.services import shader_generation as shader_generation_service
 
 
 def model_family_module(name: str):
@@ -677,12 +678,12 @@ def test_generate_shader_records_agent_process(monkeypatch, caplog) -> None:
     pool = FakePool()
     app.state.db_pool = pool
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service,
         "generate_shader_from_image",
         fake_generate_shader_from_image,
     )
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service,
         "get_shader_generation_models",
         lambda: ("fake-glsl", "fake-vision"),
     )
@@ -737,12 +738,12 @@ def test_generate_shader_logs_agent_process_write_failure(monkeypatch, caplog) -
 
     app.state.db_pool = FailingPool()
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service,
         "generate_shader_from_image",
         fake_generate_shader_from_image,
     )
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service,
         "get_shader_generation_models",
         lambda: ("fake-glsl", "fake-vision"),
     )

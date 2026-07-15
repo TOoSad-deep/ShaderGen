@@ -39,7 +39,7 @@
 - Agent 节点、状态、解析器、LLM Gateway 或 service 变化：`uv run pytest tests/unit_tests`
 - Graph 配置、节点、边、路由结果或终止语义变化：先同步源码 ASCII 图、Graphs Mermaid 和路由表，再运行 `make docs-check` 与 `uv run langgraph validate`
 - 跨后端和 Agent 的行为变化：`uv run pytest tests/integration_tests`
-- 收尾前完整验证：`make check`
+- 收尾前默认主干验证：`make check`；跨组件改动仍需追加对应集成、E2E、PostgreSQL 或 benchmark 检查。
 
 ## Graph 可视化完成定义
 

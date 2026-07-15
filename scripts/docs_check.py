@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import sys
 from pathlib import Path
 
@@ -27,6 +28,20 @@ def _feature_row(feature_id: str) -> str:
     return ""
 
 
+def _registered_graph_count() -> int:
+    """从 LangGraph 注册表读取当前对外图数量，避免文档检查固化旧数字."""
+    try:
+        value = json.loads(_read("langgraph.json"))
+    except (json.JSONDecodeError, OSError) as exc:
+        ERRORS.append(f"无法读取 langgraph.json：{type(exc).__name__}。")
+        return 0
+    graphs = value.get("graphs") if isinstance(value, dict) else None
+    if not isinstance(graphs, dict) or not graphs:
+        ERRORS.append("langgraph.json 的 graphs 必须是非空 object。")
+        return 0
+    return len(graphs)
+
+
 def _check_feature_state_machine() -> None:
     rows = [
         line
@@ -40,13 +55,19 @@ def _check_feature_state_machine() -> None:
 
     h01 = _feature_row("H01")
     _require("单元测试通过" in h01, "H01 evidence 需要记录单元测试通过。")
-    _require("2 个 graph" in h01, "H01 evidence 需要反映当前 LangGraph 图数量。")
+    graph_count = _registered_graph_count()
+    if graph_count:
+        expected_graph_evidence = f"{graph_count} 个 graph"
+        _require(
+            expected_graph_evidence in h01,
+            "H01 evidence 需要反映 langgraph.json 当前注册的 "
+            f"{expected_graph_evidence}。",
+        )
     _require(
         "25 个单元测试" not in h01, "H01 evidence 不应硬编码易过期的 25 个单元测试。"
     )
     _require("20 个单元测试" not in h01, "H01 evidence 仍包含过时的 20 个单元测试。")
     _require("8 个单元测试" not in h01, "H01 evidence 仍包含过时的 8 个单元测试。")
-    _require("1 个 graph" not in h01, "H01 evidence 仍包含过时的 1 个 graph。")
 
     f06 = _feature_row("F06")
     f07 = _feature_row("F07")

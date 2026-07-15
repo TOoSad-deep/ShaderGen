@@ -14,6 +14,7 @@ from agent.app.services.png_to_shader_v1 import (
 )
 from backend.app.api.routes import shader as shader_route
 from backend.app.main import app
+from backend.app.services import shader_generation as shader_generation_service
 
 
 def score() -> dict:
@@ -73,12 +74,12 @@ def test_generate_procedural_v1_contract(monkeypatch) -> None:
         )
 
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service,
         "generate_procedural_shader_from_image",
         fake_generate,
     )
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service,
         "get_png_to_shader_v1_models",
         lambda: ("fake-author", "fake-vision"),
     )
@@ -149,10 +150,14 @@ def test_generate_unscored_fallback_returns_shader_and_records_truthful_summary(
             ),
         )
 
-    monkeypatch.setattr(shader_route, "start_shader_generation_run", fake_start)
-    monkeypatch.setattr(shader_route, "record_shader_generation_success", fake_success)
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service, "start_shader_generation_run", fake_start
+    )
+    monkeypatch.setattr(
+        shader_generation_service, "record_shader_generation_success", fake_success
+    )
+    monkeypatch.setattr(
+        shader_generation_service,
         "generate_procedural_shader_from_image",
         fake_generate,
     )
@@ -219,16 +224,22 @@ def test_response_contract_failure_is_recorded_as_failed_before_success(
             vision_model_name="fake-vision",
         )
 
-    monkeypatch.setattr(shader_route, "start_shader_generation_run", fake_start)
-    monkeypatch.setattr(shader_route, "record_shader_generation_failure", fake_failure)
-    monkeypatch.setattr(shader_route, "record_shader_generation_success", fake_success)
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service, "start_shader_generation_run", fake_start
+    )
+    monkeypatch.setattr(
+        shader_generation_service, "record_shader_generation_failure", fake_failure
+    )
+    monkeypatch.setattr(
+        shader_generation_service, "record_shader_generation_success", fake_success
+    )
+    monkeypatch.setattr(
+        shader_generation_service,
         "generate_procedural_shader_from_image",
         fake_generate,
     )
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service,
         "get_png_to_shader_v1_models",
         lambda: ("fake-author", "fake-vision"),
     )
@@ -273,9 +284,11 @@ def test_generate_legacy_remains_default(monkeypatch) -> None:
     async def fail_procedural(*args, **kwargs):
         raise AssertionError("默认请求不应进入 procedural_v1")
 
-    monkeypatch.setattr(shader_route, "generate_shader_from_image", fake_legacy)
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service, "generate_shader_from_image", fake_legacy
+    )
+    monkeypatch.setattr(
+        shader_generation_service,
         "generate_procedural_shader_from_image",
         fail_procedural,
     )
@@ -324,7 +337,7 @@ def test_generate_procedural_failure_is_safe_and_understandable(
         )
 
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service,
         "generate_procedural_shader_from_image",
         fake_generate,
     )
@@ -461,7 +474,7 @@ def test_generate_procedural_failure_maps_typed_server_errors(
         )
 
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service,
         "generate_procedural_shader_from_image",
         fake_generate,
     )
@@ -527,8 +540,12 @@ def test_generation_run_start_failure_maps_to_typed_persistence_error(
     async def fail_generate(*args, **kwargs):
         raise AssertionError("run 总账失败后不应调用生成服务")
 
-    monkeypatch.setattr(shader_route, "start_shader_generation_run", fake_start)
-    monkeypatch.setattr(shader_route, "generate_shader_from_image", fail_generate)
+    monkeypatch.setattr(
+        shader_generation_service, "start_shader_generation_run", fake_start
+    )
+    monkeypatch.setattr(
+        shader_generation_service, "generate_shader_from_image", fail_generate
+    )
     app.state.db_pool = object()
     try:
         response = TestClient(app).post(
@@ -559,7 +576,7 @@ def test_unexpected_procedural_error_maps_to_internal_pipeline_error(
         raise AssertionError("PRIVATE_INTERNAL_DETAIL")
 
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service,
         "generate_procedural_shader_from_image",
         broken_pipeline,
     )
@@ -588,8 +605,12 @@ def test_legacy_generation_has_server_side_model_timeout(
     async def slow_generation(*args, **kwargs):
         await asyncio.Event().wait()
 
-    monkeypatch.setattr(shader_route, "generate_shader_from_image", slow_generation)
-    monkeypatch.setattr(shader_route, "LEGACY_GENERATION_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(
+        shader_generation_service, "generate_shader_from_image", slow_generation
+    )
+    monkeypatch.setattr(
+        shader_generation_service, "LEGACY_GENERATION_TIMEOUT_SECONDS", 0.01
+    )
 
     response = TestClient(app).post(
         "/api/shader/generate",
@@ -633,14 +654,16 @@ def test_failure_persistence_error_does_not_mask_generation_timeout(
             }
         )
 
-    monkeypatch.setattr(shader_route, "start_shader_generation_run", fake_start)
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service, "start_shader_generation_run", fake_start
+    )
+    monkeypatch.setattr(
+        shader_generation_service,
         "record_shader_generation_failure",
         fake_record_failure,
     )
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service,
         "generate_procedural_shader_from_image",
         fake_generate,
     )
@@ -690,14 +713,16 @@ def test_procedural_success_persistence_error_does_not_mask_shader(
             vision_model_name="fake-vision",
         )
 
-    monkeypatch.setattr(shader_route, "start_shader_generation_run", fake_start)
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service, "start_shader_generation_run", fake_start
+    )
+    monkeypatch.setattr(
+        shader_generation_service,
         "record_shader_generation_success",
         fake_record_success,
     )
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service,
         "generate_procedural_shader_from_image",
         fake_generate,
     )
@@ -740,13 +765,17 @@ def test_legacy_success_persistence_error_does_not_mask_shader(
     async def fake_generate(*args, **kwargs):
         return LegacyResult()
 
-    monkeypatch.setattr(shader_route, "start_shader_generation_run", fake_start)
     monkeypatch.setattr(
-        shader_route,
+        shader_generation_service, "start_shader_generation_run", fake_start
+    )
+    monkeypatch.setattr(
+        shader_generation_service,
         "record_shader_generation_success",
         fake_record_success,
     )
-    monkeypatch.setattr(shader_route, "generate_shader_from_image", fake_generate)
+    monkeypatch.setattr(
+        shader_generation_service, "generate_shader_from_image", fake_generate
+    )
     app.state.db_pool = object()
     try:
         response = TestClient(app).post(

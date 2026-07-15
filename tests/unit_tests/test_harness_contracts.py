@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -42,13 +43,46 @@ def test_feature_list_separates_agent_review_from_browser_e2e_gap() -> None:
 
 def test_h01_evidence_matches_current_harness_shape() -> None:
     h01 = _feature_row("H01")
+    graph_count = len(json.loads(_read("langgraph.json"))["graphs"])
 
     assert "单元测试通过" in h01
-    assert "2 个 graph" in h01
+    assert f"{graph_count} 个 graph" in h01
     assert "25 个单元测试" not in h01
     assert "20 个单元测试" not in h01
     assert "8 个单元测试" not in h01
-    assert "1 个 graph" not in h01
+
+
+def test_docs_check_derives_graph_count_from_langgraph_registry(monkeypatch) -> None:
+    spec = importlib.util.spec_from_file_location(
+        "docs_check_graph_count",
+        ROOT / "scripts/docs_check.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    docs_check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(docs_check)
+    original_read = docs_check._read
+
+    def fake_read(path: str) -> str:
+        if path == "langgraph.json":
+            return json.dumps(
+                {
+                    "graphs": {
+                        "one": "one.py:graph",
+                        "two": "two.py:graph",
+                        "three": "three.py:graph",
+                        "four": "four.py:graph",
+                    }
+                }
+            )
+        return original_read(path)
+
+    monkeypatch.setattr(docs_check, "_read", fake_read)
+    docs_check.ERRORS.clear()
+
+    docs_check._check_feature_state_machine()
+
+    assert any("4 个 graph" in error for error in docs_check.ERRORS)
 
 
 def test_agent_service_does_not_import_node_or_llm_internals() -> None:

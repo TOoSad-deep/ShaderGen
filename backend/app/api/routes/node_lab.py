@@ -201,7 +201,7 @@ def get_batch(suite_run_id: str, request: Request) -> dict[str, Any]:
 
 @router.get("/nodes", response_model=list[NodeLabNodeDescriptorResponse])
 def list_nodes(request: Request) -> list[dict[str, Any]]:
-    """列出生产图 19 节点的当前实现状态和 Schema."""
+    """列出生产图 20 节点的当前实现状态和 Schema."""
     return _service(request).describe_nodes()
 
 

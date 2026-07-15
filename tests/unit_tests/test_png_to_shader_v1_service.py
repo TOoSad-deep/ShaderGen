@@ -26,6 +26,22 @@ class FakeGraph:
         return self.output
 
 
+class FailingGraph:
+    async def ainvoke(self, state, config):
+        raise RuntimeError("graph invariant failed")
+
+
+class FakeRendererRegistry:
+    def __init__(self, *, fail_on_close: bool = False) -> None:
+        self.fail_on_close = fail_on_close
+        self.closed_keys: list[tuple[str, str]] = []
+
+    async def close(self, key: tuple[str, str]) -> None:
+        self.closed_keys.append(key)
+        if self.fail_on_close:
+            raise RuntimeError("private cleanup detail")
+
+
 def make_service(
     tmp_path: Path, output: dict
 ) -> tuple[PngToShaderV1Service, FakeGraph]:
@@ -38,6 +54,81 @@ def make_service(
         "ephemeral",
     )
     return service, graph
+
+
+@pytest.mark.anyio
+async def test_service_closes_run_renderer_after_unexpected_graph_error(
+    tmp_path: Path,
+) -> None:
+    registry = FakeRendererRegistry()
+    service = PngToShaderV1Service(
+        FailingGraph(),
+        InMemorySaver(),
+        InMemoryStore(),
+        LocalArtifactStore(tmp_path / "artifacts"),
+        "ephemeral",
+        registry,
+    )
+
+    with pytest.raises(RuntimeError, match="graph invariant failed"):
+        await service.invoke(
+            "project-1",
+            {"project_id": "project-1", "run_id": "run-1"},
+        )
+
+    assert registry.closed_keys == [("project-1", "run-1")]
+
+
+@pytest.mark.anyio
+async def test_service_rejects_project_id_mismatch_before_graph_invocation(
+    tmp_path: Path,
+) -> None:
+    registry = FakeRendererRegistry()
+    graph = FakeGraph({})
+    service = PngToShaderV1Service(
+        graph,
+        InMemorySaver(),
+        InMemoryStore(),
+        LocalArtifactStore(tmp_path / "artifacts"),
+        "ephemeral",
+        registry,
+    )
+
+    with pytest.raises(ValueError, match="project_id"):
+        await service.invoke(
+            "project-1",
+            {"project_id": "project-2", "run_id": "run-1"},
+        )
+
+    assert graph.calls == []
+    assert registry.closed_keys == []
+
+
+@pytest.mark.anyio
+async def test_service_cleanup_failure_does_not_mask_graph_result(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    registry = FakeRendererRegistry(fail_on_close=True)
+    graph = FakeGraph({"final_result": {"success": True}})
+    service = PngToShaderV1Service(
+        graph,
+        InMemorySaver(),
+        InMemoryStore(),
+        LocalArtifactStore(tmp_path / "artifacts"),
+        "ephemeral",
+        registry,
+    )
+
+    result = await service.invoke(
+        "project-1",
+        {"project_id": "project-1", "run_id": "run-1"},
+    )
+
+    assert result == {"final_result": {"success": True}}
+    assert registry.closed_keys == [("project-1", "run-1")]
+    assert "error_type=RuntimeError" in caplog.text
+    assert "private cleanup detail" not in caplog.text
 
 
 @pytest.mark.anyio

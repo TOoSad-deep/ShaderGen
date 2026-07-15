@@ -19,6 +19,7 @@
 - `clear_project_memory()`：删除项目 checkpoint thread 和 Store Memory。
 - `generate_png_to_shader_v1()`：按质量档位执行 M3 Graph，拒绝没有通过硬门禁的终止结果。
 - `create_png_to_shader_v1_service()`：把 Backend saver/store 与 LocalArtifactStore 注入独立 V1 Graph。
+- `PngToShaderV1Service.invoke()`：与 Graph 共享 run 级 Renderer registry；`finalize` 负责正常关闭，Service `finally` 对 Graph 外异常执行限时、幂等兜底，清理失败只记录安全异常类型且不覆盖业务结果。
 - `PngToShaderV1Service.read_public_artifact()`：只解析 `final-render`、`metrics`、`manifest`，不接收文件路径。
 - `create_node_lab_application()`：为 Backend、CLI 或测试创建独立 Harness 生命周期；默认注入 PNG-to-Shader Provider，也可注入其他实现同一协议的 Provider。
 - `create_default_model_node_lab_application()`：只在 Agent 公共组合根按服务端开关装配具体 Gateway，Backend 不依赖 `agent.app.llms`。
@@ -36,6 +37,7 @@
 - V1 成功 dataclass 显式区分已评分 `current_best` 与 `unscored_fallback`；后者仍有 GLSL/render/candidate id，但 `score=None`，且只附加 candidate id 匹配最终结果的 Review。
 - Service 可以 re-export 稳定 Parser 函数，但不要 import `nodes/` 中的内部 helper。
 - Agent 不直接持有数据库连接池；过程数据通过 service 结果返回给后端统一落库。
+- Graph Builder 创建并注入 run 级资源时，负责执行 Graph 的公共 Service 必须共享同一资源 registry，并为越过 Graph 终止路径的未知异常提供幂等清理；不得只依赖某个 finalize Node。
 - legacy Service 为每次调用设置 `project_id == thread_id`；V1 使用 `png-to-shader-v1:{project_id}` 隔离 checkpoint，同时继续用原 project_id 读取共享 Store Memory。两者都返回 `durable`、`ephemeral` 或 `degraded` memory status。
 - 后端只依赖 service 的公共函数和结果类型。
 - Node Lab Route 和 CLI 只能调用 `agent.app.services.node_lab`；不得复制 Registry、Fixture 解析、State diff、fingerprint 或 Artifact 规则。

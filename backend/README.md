@@ -8,6 +8,7 @@
 - `app/api/router.py`：聚合后端 HTTP 路由。
 - `app/api/routes/`：HTTP 路由。只做请求解析、边界校验、调用 service、返回响应。
 - `app/services/`：后端编排逻辑。可以调用 `src/agent/` 或后续 `src/shaderforge/`，但不要把大型领域算法写在这里。
+- `app/services/shader_generation.py`：`POST /api/shader/generate` 的用例服务；统一负责项目锁、模式/模型选择、Legacy timeout、Agent 调用、生成总账、失败分类和公开响应契约。
 - `app/schemas/`：请求和响应数据结构。API 契约稳定后放这里，避免散落在 route 文件。
 - `app/database/session.py`：数据库连接生命周期、schema 初始化和健康检查查询。
 - `app/database/agent_memory.py`：LangGraph psycopg saver/store 生命周期、健康检查和独立 setup。
@@ -31,7 +32,7 @@
 - 过程数据写库成功时记录 `agent.process.database.write.succeeded`；写库失败时记录 `agent.process.database.write.failed`，并带 `persistence_stage` 定位创建 run 或终态事务阶段。
 - Graph 已得到可返回的 Shader 后，终态账本提交故障记录 `shader.generate.success_persistence_failed`，但不再用数据库异常覆盖成功响应；失败账本提交故障同样不得覆盖原始类型化业务错误。
 - 生成 run 初始总账创建失败时，生成服务不得继续执行；响应映射为 503 `persistence_unavailable`、`stage=persistence`、`retryable=true`，安全日志使用 `persistence_stage=create_generation_run` 定位且不打印数据库异常原文。
-- 过程数据写入编排放在 `app/services/agent_process_store.py`；route 不直接写数据库过程表。
+- 过程数据的原子读写放在 `app/services/agent_process_store.py`；生成用例对这些操作的调用时序放在 `app/services/shader_generation.py`，route 不直接写生成过程表。
 - `agent_logs` 允许 `debug` 级别，但只用于运行内关键调试摘要，不接普通 debug logging。
 - 普通请求日志、普通 debug 日志、完整堆栈和基础设施日志继续走 Python logging。
 - `LOG_LEVEL` 同时控制 `backend`、`agent` 和 `shaderforge` logger；默认 `INFO` 时，后端终端可直接看到 `shader.generate.*` 与 `shader.pipeline.*` 的阶段日志。
@@ -45,6 +46,7 @@
 ## 路由规则
 
 - route 负责 HTTP 边界：状态码、上传大小、content type、请求字段校验。
+- `POST /api/shader/generate` route 只把校验后的输入和应用生命周期依赖组装为 command/dependencies，调用 `execute_shader_generation()`，再把稳定用例错误映射为现有 FastAPI error envelope；不得重新承载锁、Agent 分流、账本或响应契约编排。
 - route 不写 Prompt、不直接调用模型、不实现搜索/评分/渲染算法。
 - route 捕获外部调用异常时，应返回明确的 HTTP 错误；日志记录内部细节，响应给用户的信息保持可理解。
 - `POST /api/shader/review` 接收 `original_file`、`rendered_file` 和 `glsl`，由 Agent 根据原图、当前渲染图和 GLSL 返回评估与修改建议。
@@ -74,7 +76,7 @@
 
 - service 负责一次后端用例的编排，例如“接收图片并生成 GLSL”。
 - 涉及模型编排时，只调用 `agent.app.services.*` 明确暴露的公共用例服务，不直接 import Agent 内部模型、Prompt 加载器或 LangChain 消息类型。
-- Agent 返回的 `model_calls`、`events` 和 `logs` 由 service/route 编排后统一交给 `agent_process_store.py` 写库；Agent 不直接拿数据库连接池。
+- Agent 返回的 `model_calls`、`events` 和 `logs` 由 Backend service 编排后统一交给 `agent_process_store.py` 写库；Agent 不直接拿数据库连接池。
 - 涉及确定性领域逻辑时调用后续 `src/shaderforge/`。
 - service 中可做轻量数据转换；复杂 IR、DSL、评分、搜索逻辑不要留在 `backend/`。
 - 不为未来功能提前创建 `user_service.py`、`file_service.py`、`auth/` 等空模块；有真实 endpoint、数据或鉴权需求时再加。
