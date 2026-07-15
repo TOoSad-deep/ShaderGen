@@ -10,7 +10,7 @@ from typing import get_args, get_type_hints
 
 from langgraph.channels import UntrackedValue
 
-from agent.app.states.agent_state import ShaderPipelineState
+from agent.app.states.agent_state import PngToShaderV1State
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -26,19 +26,12 @@ def _feature_row(feature_id: str) -> str:
     raise AssertionError(f"docs/FEATURES.md 缺少 {feature_id} 行。")
 
 
-def test_feature_list_separates_agent_review_from_browser_e2e_gap() -> None:
-    f06 = _feature_row("F06")
-    f07 = _feature_row("F07")
+def test_feature_list_keeps_v1_as_the_only_active_pipeline() -> None:
+    f09 = _feature_row("F09")
 
-    assert "Agent/后端在线 Review" in f06
-    assert "| passing |" in f06
-    assert "单元测试通过" in f06
-    assert "单元测试 25 个通过" not in f06
-    assert "单元测试 20 个通过" not in f06
-    assert "浏览器端 Review 闭环" in f07
-    assert "canvas 截图 -> review API -> UI 展示" in f07
-    assert "Playwright" in f07
-    assert "| not_started |" in f07
+    assert "PNG" in f09
+    assert "current_best" in f09
+    assert "| active |" in f09
 
 
 def test_h01_evidence_matches_current_harness_shape() -> None:
@@ -50,6 +43,22 @@ def test_h01_evidence_matches_current_harness_shape() -> None:
     assert "25 个单元测试" not in h01
     assert "20 个单元测试" not in h01
     assert "8 个单元测试" not in h01
+
+
+def test_langgraph_registry_only_exposes_png_to_shader_v1() -> None:
+    graphs = json.loads(_read("langgraph.json"))["graphs"]
+
+    assert graphs == {
+        "png_to_shader_v1": (
+            "./src/agent/app/graphs/"
+            "png_to_shader_v1_graph.py:png_to_shader_v1_graph"
+        )
+    }
+    for deprecated_path in (
+        "src/agent/app/graphs/main_graph.py",
+        "src/agent/app/graphs/shader_generation_graph.py",
+    ):
+        assert not (ROOT / deprecated_path).exists()
 
 
 def test_docs_check_derives_graph_count_from_langgraph_registry(monkeypatch) -> None:
@@ -86,7 +95,8 @@ def test_docs_check_derives_graph_count_from_langgraph_registry(monkeypatch) -> 
 
 
 def test_agent_service_does_not_import_node_or_llm_internals() -> None:
-    tree = ast.parse(_read("src/agent/app/services/shader_generation.py"))
+    path = ROOT / "src/agent/app/services/png_to_shader_v1.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     forbidden_prefixes = ("agent.app.nodes", "agent.app.llms")
     violations = []
 
@@ -149,8 +159,8 @@ def test_docs_check_detects_graph_diagram_edge_drift(monkeypatch) -> None:
     docs_check = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(docs_check)
     architecture = _read("src/agent/app/graphs/ARCHITECTURE.md").replace(
-        "prepare_context -. review .-> review_render",
-        "prepare_context -. review .-> missing_review_node",
+        "visual_analysis -. continue .-> persist_visual_analysis",
+        "visual_analysis -. continue .-> missing_visual_analysis_node",
     )
 
     def fake_read(path: str) -> str:
@@ -164,13 +174,13 @@ def test_docs_check_detects_graph_diagram_edge_drift(monkeypatch) -> None:
     docs_check._check_graph_visualizations()
 
     assert any(
-        "prepare_context -. review .-> review_render" in error
+        "visual_analysis -. continue .-> persist_visual_analysis" in error
         for error in docs_check.ERRORS
     )
 
 
-def test_shader_pipeline_run_summaries_are_untracked() -> None:
-    hints = get_type_hints(ShaderPipelineState, include_extras=True)
+def test_png_to_shader_v1_run_summaries_are_untracked() -> None:
+    hints = get_type_hints(PngToShaderV1State, include_extras=True)
 
     for field_name in (
         "image",

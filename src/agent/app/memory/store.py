@@ -6,12 +6,9 @@ from langgraph.store.base import BaseStore
 
 from agent.app.memory.models import (
     MEMORY_SCHEMA_VERSION,
-    REVIEW_IMPORTANCE,
     STRATEGY_IMPORTANCE,
     MemoryItem,
-    build_review_summary,
     build_validated_strategy_summary,
-    review_memory_id,
     strategy_memory_id,
     utc_now,
 )
@@ -36,41 +33,6 @@ async def list_project_memories(
     """读取并校验一个项目的候选记忆."""
     items = await store.asearch(memory_namespace(project_id), limit=limit, offset=0)
     return tuple(MemoryItem.from_value(dict(item.value)) for item in items)
-
-
-async def upsert_review_memory(
-    store: BaseStore,
-    *,
-    project_id: str,
-    source_run_id: str,
-    glsl_sha256: str,
-    iteration: int | None,
-    evaluation: str,
-    suggestions: tuple[str, ...],
-) -> MemoryItem:
-    """用稳定 key 幂等写入一条 Review Memory."""
-    namespace = memory_namespace(project_id)
-    memory_id = review_memory_id(glsl_sha256)
-    existing = await store.aget(namespace, memory_id)
-    now = utc_now()
-    created_at = now
-    if existing is not None:
-        created_at = MemoryItem.from_value(dict(existing.value)).created_at
-
-    item = MemoryItem(
-        schema_version=MEMORY_SCHEMA_VERSION,
-        memory_id=memory_id,
-        kind="review",
-        summary=build_review_summary(evaluation, suggestions),
-        importance=REVIEW_IMPORTANCE,
-        source_run_id=source_run_id,
-        glsl_sha256=glsl_sha256.lower(),
-        iteration=iteration,
-        created_at=created_at,
-        updated_at=now,
-    )
-    await store.aput(namespace, memory_id, item.to_value(), index=False)
-    return item
 
 
 async def upsert_validated_strategy_memory(

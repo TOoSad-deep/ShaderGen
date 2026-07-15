@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import time
 from dataclasses import dataclass
@@ -27,13 +26,10 @@ from backend.app.services.shader import (
     ProjectBusyError,
     ProjectLockRegistry,
     generate_procedural_shader_from_image,
-    generate_shader_from_image,
     get_png_to_shader_v1_models,
-    get_shader_generation_models,
 )
 
 logger = logging.getLogger("backend.shader")
-LEGACY_GENERATION_TIMEOUT_SECONDS = 180.0
 
 
 @dataclass(frozen=True)
@@ -56,7 +52,6 @@ class ShaderGenerationDependencies:
     """由 Backend 应用生命周期注入的生成用例依赖."""
 
     pool: Any
-    legacy_service: Any
     procedural_service: Any
     locks: ProjectLockRegistry
 
@@ -327,20 +322,16 @@ async def execute_shader_generation(
     generation_mode = command.generation_mode
     quality_preset = command.quality_preset
     pool = dependencies.pool
-    if generation_mode == "procedural_v1":
-        glsl_model_name, vision_model_name = get_png_to_shader_v1_models()
-    else:
-        glsl_model_name, vision_model_name = get_shader_generation_models()
+    glsl_model_name, vision_model_name = get_png_to_shader_v1_models()
     run_started = False
-    procedural_result = None
-    legacy_result = None
+    result = None
     logger.info(
         "shader.generate.started run_id=%s project_id=%s generation_mode=%s "
         "quality_preset=%s image_bytes=%s database_enabled=%s",
         run_id,
         project_id,
         generation_mode,
-        quality_preset if generation_mode == "procedural_v1" else "n/a",
+        quality_preset,
         len(command.image),
         pool is not None,
     )
@@ -358,34 +349,20 @@ async def execute_shader_generation(
                     glsl_model_name=glsl_model_name,
                     vision_model_name=vision_model_name,
                     generation_mode=generation_mode,
-                    quality_preset=(
-                        quality_preset if generation_mode == "procedural_v1" else None
-                    ),
+                    quality_preset=quality_preset,
                     instruction=command.instruction,
                 )
                 run_started = True
 
-            if generation_mode == "procedural_v1":
-                procedural_result = await generate_procedural_shader_from_image(
-                    command.image,
-                    command.content_type,
-                    project_id=str(project_id),
-                    run_id=str(run_id),
-                    quality_preset=quality_preset,
-                    instruction=command.instruction,
-                    service=dependencies.procedural_service,
-                )
-            else:
-                legacy_result = await asyncio.wait_for(
-                    generate_shader_from_image(
-                        command.image,
-                        command.content_type,
-                        project_id=str(project_id),
-                        run_id=str(run_id),
-                        service=dependencies.legacy_service,
-                    ),
-                    timeout=LEGACY_GENERATION_TIMEOUT_SECONDS,
-                )
+            result = await generate_procedural_shader_from_image(
+                command.image,
+                command.content_type,
+                project_id=str(project_id),
+                run_id=str(run_id),
+                quality_preset=quality_preset,
+                instruction=command.instruction,
+                service=dependencies.procedural_service,
+            )
     except ProjectBusyError as exc:
         duration_ms = (time.perf_counter() - command.started_at) * 1000
         logger.warning(
@@ -517,21 +494,8 @@ async def execute_shader_generation(
         is_timeout = (
             isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.casefold()
         )
-        internal_pipeline_error = generation_mode == "procedural_v1" and not is_timeout
-        failure_stage = (
-            "model"
-            if is_timeout
-            else "pipeline"
-            if internal_pipeline_error
-            else "generation"
-        )
-        stop_reason = (
-            "model_timeout"
-            if is_timeout
-            else "internal_pipeline_error"
-            if internal_pipeline_error
-            else "generation_failed"
-        )
+        failure_stage = "model" if is_timeout else "pipeline"
+        stop_reason = "model_timeout" if is_timeout else "internal_pipeline_error"
         diagnostics = {
             "failure_stage": failure_stage,
             "failure_event": stop_reason,
@@ -560,38 +524,27 @@ async def execute_shader_generation(
             stop_reason,
             failure_stage,
             type(exc).__name__,
-            str(is_timeout or not internal_pipeline_error).lower(),
+            str(is_timeout).lower(),
             duration_ms,
         )
-        status_code = 504 if is_timeout else 500 if internal_pipeline_error else 502
+        status_code = 504 if is_timeout else 500
         message = (
             "Shader 模型阶段响应超时。"
             if is_timeout
             else "Shader 自动闭环发生内部错误。"
-            if internal_pipeline_error
-            else "生成 GLSL 失败。"
         )
-        code = (
-            "model_timeout"
-            if is_timeout
-            else "internal_pipeline_error"
-            if internal_pipeline_error
-            else "generation_failed"
-        )
+        code = "model_timeout" if is_timeout else "internal_pipeline_error"
         raise _generation_error(
             status_code=status_code,
             message=message,
             code=code,
             run_id=run_id,
             stage=failure_stage,
-            retryable=not internal_pipeline_error,
+            retryable=is_timeout,
             stop_reason=stop_reason,
         ) from exc
 
-    if generation_mode == "procedural_v1":
-        if procedural_result is None:
-            raise RuntimeError("procedural_v1 未返回结果。")
-        result = procedural_result
+    if result is not None:
         artifact_base = f"/api/shader/runs/{run_id}/artifacts"
         metrics_available = result.score is not None
         metrics_url = f"{artifact_base}/metrics" if metrics_available else None
@@ -715,37 +668,4 @@ async def execute_shader_generation(
         )
         return response
 
-    if legacy_result is None:
-        raise RuntimeError("legacy 未返回结果。")
-    result = legacy_result
-    response = ShaderResponse(
-        project_id=project_id,
-        run_id=run_id,
-        glsl=result.glsl,
-        memory_status=result.memory_status,
-        generation_mode="legacy",
-    )
-    if pool is not None:
-        await _record_success_without_masking(
-            pool,
-            run_id=run_id,
-            project_id=project_id,
-            generation_mode="legacy",
-            model_name=result.glsl_model_name,
-            glsl_chars=len(result.glsl),
-            model_calls=result.model_calls,
-            events=result.events,
-            logs=result.logs,
-            result_summary={"generation_mode": "legacy"},
-        )
-    logger.info(
-        "shader.generate.succeeded run_id=%s project_id=%s generation_mode=legacy "
-        "stop_reason=completed failure_stage=none model=%s glsl_chars=%s "
-        "duration_ms=%.2f",
-        run_id,
-        project_id,
-        result.glsl_model_name,
-        len(result.glsl),
-        (time.perf_counter() - command.started_at) * 1000,
-    )
-    return response
+    raise RuntimeError("procedural_v1 未返回结果。")

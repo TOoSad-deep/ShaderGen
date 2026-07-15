@@ -4,17 +4,15 @@
 
 ## 当前图
 
-- `main_graph.py`：基础对话图，入口对象为 `graph`。
-- `shader_generation_graph.py`：Shader 生成和渲染评审图，入口对象为 `shader_generation_graph`。
-- `png_to_shader_v1_graph.py`：F09 M3 的独立 PNG-to-Shader 有界闭环，入口对象为 `png_to_shader_v1_graph`。
+- `png_to_shader_v1_graph.py`：唯一对外 Graph，入口对象为 `png_to_shader_v1_graph`；执行 PNG-to-Shader V1 有界闭环。
 - `png_to_shader_v1_routing.py`：M3 可独立单测的纯预算、停止和下一步路由规则。
 
 ## Graph 规则
 
 - Graph 只负责编排流程，不直接组装模型消息。
 - Graph 是 LLM 组合根，通过 Builder 把具体 `LangChainLLMGateway` 注入 Node 工厂。
-- 测试通过各图 Builder 注入 Fake Gateway；M3 还注入 Renderer factory、Evaluator、Artifact Store 和 clock，不 monkeypatch 具体客户端工厂。
-- Node 不决定全局流程；简单条件跳转可写在 graph 文件的私有函数中，例如 `_route_operation()`。
+- 测试通过 V1 Builder 注入 Fake Gateway、Renderer factory、Evaluator、Artifact Store 和 clock，不 monkeypatch 具体客户端工厂。
+- Node 不决定全局流程。
 - 条件边变复杂、需要复用或需要独立测试时，再抽到 graph 附近的边逻辑模块。
 - 每个对外运行的新图都必须注册到仓库根目录的 `langgraph.json`。
 - 每个 `*_graph.py` 必须在 Builder 上方维护一份紧贴实现的 ASCII 图；本文件同时维护可渲染的 Mermaid 图。
@@ -42,40 +40,6 @@ Graph 的运行时代码是行为真相源；源码 ASCII 图是邻近实现的�
 5. 运行 `make docs-check`、`uv run langgraph validate` 和受影响 Graph/routing 的定向测试；会话结束前在 `PROGRESS.md` 记录结果与未覆盖缺口。
 
 自动检查边界：`make docs-check` 使用 AST 覆盖字面量 `add_node`、`add_edge` 和带字面量 path map 的 `add_conditional_edges`，并要求每个 `*_graph.py` 同时存在 ASCII 图和同名 Mermaid 区块。它不能理解动态 path map、routing 函数内部条件、隐式终止或表格文字是否准确；这些部分必须靠代码审查与定向测试维护。
-
-## `main_graph` 基础对话图
-
-<!-- graph-diagram:main_graph:start -->
-```mermaid
-flowchart LR
-    START([START])
-    call_model[call_model]
-    END([END])
-    START --> call_model
-    call_model --> END
-```
-<!-- graph-diagram:main_graph:end -->
-
-`call_model` 是单节点基础对话入口；它完成后由 LangGraph 隐式终止。
-
-## `shader_generation_graph` 生成与评审图
-
-<!-- graph-diagram:shader_generation_graph:start -->
-```mermaid
-flowchart TD
-    START([START])
-    prepare_context[prepare_context]
-    END([END])
-    START --> prepare_context
-    prepare_context -. generate .-> generate_glsl[generate_glsl]
-    prepare_context -. review .-> review_render[review_render]
-    generate_glsl --> END
-    review_render --> promote_memory[promote_memory]
-    promote_memory --> END
-```
-<!-- graph-diagram:shader_generation_graph:end -->
-
-Graph Builder 接收 checkpointer 和 Store。`project_id` 由 Agent service 映射为 `configurable.thread_id`；Backend 注入 PostgreSQL 或内存 persistence。
 
 ## `png_to_shader_v1_graph` 有界闭环
 

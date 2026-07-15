@@ -262,3 +262,10 @@
 - 决策：`POST /api/shader/generate` 的项目锁、模式/模型选择、Legacy timeout、Agent 调用、生成总账、失败分类和 `ShaderResponse` 契约统一下沉到 `backend.app.services.shader_generation`；Route 只保留 HTTP 上传校验、应用依赖装配与稳定用例错误到 FastAPI envelope 的映射。PNG-to-Shader V1 的 Graph Builder 与 `PngToShaderV1Service` 共享同一个 run 级 Renderer registry：正常路径仍由 `finalize` 关闭，Service `invoke()` 的 `finally` 对越过 Graph 的未知异常执行限时、幂等兜底。
 - 原因：原 Route 同时承担传输适配、并发控制、模型分流、持久化事务时序、错误分类和响应组装，难以单独阅读、复用和验证；Renderer 只依赖 `finalize` 时，任一未知 Node 异常或证据不变量破坏都可能绕过关闭路径并泄漏 Chromium 资源。两项调整都不需要改变 Graph 节点或公开 API。
 - 影响：生成 Route 不再直接 import 生成过程总账函数或 Agent 生成代理，架构边界测试锁定该依赖方向；现有状态码、错误 envelope、日志字段、数据库时序和响应字段保持不变。Service 外层清理失败只记录 project/run 与安全异常类型，不打印底层原文，也不覆盖 Graph 结果或原异常。该修改没有新增、删除、重命名 Graph Node，也没有改变边、路由结果、循环、`current_best` 或终止路径；Graph ASCII/Mermaid 只补充 Graph 外资源边界说明。
+
+## D036 - 产品与 LangGraph 入口收敛为 PNG-to-Shader V1
+
+- 日期：2026-07-15
+- 决策：`langgraph.json` 只注册 `png_to_shader_v1`；删除旧基础对话图和 `shader_generation_graph`，以及仅服务这两个旧图的 Node、State、Prompt、Parser 和 Agent Service。Backend/Frontend 同步下线 legacy 生成与独立 `POST /api/shader/review`，`POST /api/shader/generate` 只接受或默认使用 `procedural_v1`。
+- 原因：用户确认其余两个 Graph 是此前遗留的废弃实现。只删除注册而继续保留 legacy API、默认 UI 和旧 Memory 生命周期会形成悬空入口，也会让“当前架构只有 V1”与运行事实不一致；因此必须沿反向依赖一起清理。
+- 影响：旧客户端发送 `generation_mode=legacy` 或调用 `/api/shader/review` 不再兼容；V1 最终响应中的 Critic Review、评分、Artifact 白名单和项目 Memory 清理继续保留。已有数据库账本不删除，Memory 的旧 `review` 记录保留只读解析兼容；V1 checkpoint 前缀 `png-to-shader-v1:{project_id}` 保持不变。为维持项目删除语义，V1 清理同时删除旧 Graph 遗留的裸 `{project_id}` checkpoint，但不恢复任何旧运行入口。D009、D023、D027 以及 D035 中关于 legacy 分流和 timeout 兼容的部分由本决策取代；D035 确立的薄 Route、Backend 用例 Service 与 Renderer 双层清理边界继续保留。历史记录不删除。此次结构收敛不改变冻结质量门槛：F09 仍为 `active`、最终发布 gate 仍为 no-go。

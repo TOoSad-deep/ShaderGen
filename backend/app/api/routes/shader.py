@@ -1,4 +1,4 @@
-"""Shader 生成、评审和项目 Memory 接口."""
+"""PNG-to-Shader V1 生成和项目 Memory 接口."""
 
 import logging
 import time
@@ -13,13 +13,6 @@ from backend.app.schemas.shader import (
     ShaderGenerationErrorDetail,
     ShaderGenerationErrorResponse,
     ShaderResponse,
-    ShaderReview,
-    ShaderReviewResponse,
-)
-from backend.app.services.agent_process_store import (
-    record_shader_review_failure,
-    record_shader_review_success,
-    start_shader_review_run,
 )
 from backend.app.services.shader import (
     MemoryUnavailableError,
@@ -27,11 +20,8 @@ from backend.app.services.shader import (
     ProjectLockRegistry,
     PublicArtifactNotFoundError,
     clear_png_to_shader_project_memory,
-    clear_shader_project_memory,
     default_png_to_shader_v1_service,
-    default_shader_generation_service,
     read_shader_run_artifact,
-    review_shader_render,
 )
 from backend.app.services.shader_generation import (
     ShaderGenerationCommand,
@@ -84,22 +74,19 @@ async def read_image_upload(file: UploadFile) -> bytes:
     return image
 
 
-def _runtime(request: Request) -> tuple[Any, Any, ProjectLockRegistry]:
-    service = getattr(request.app.state, "shader_service", None)
-    procedural_service = getattr(
+def _runtime(request: Request) -> tuple[Any, ProjectLockRegistry]:
+    service = getattr(
         request.app.state,
         "png_to_shader_v1_service",
         None,
     )
     locks = getattr(request.app.state, "project_locks", None)
     if service is None:
-        service = default_shader_generation_service
-    if procedural_service is None:
-        procedural_service = default_png_to_shader_v1_service
+        service = default_png_to_shader_v1_service
     if locks is None:
         locks = ProjectLockRegistry()
         request.app.state.project_locks = locks
-    return service, procedural_service, locks
+    return service, locks
 
 
 @router.post(
@@ -120,11 +107,11 @@ async def generate_shader(
     request: Request,
     file: UploadFile = File(...),
     project_id: UUID | None = Form(None),
-    generation_mode: GenerationMode = Form("legacy"),
+    generation_mode: GenerationMode = Form("procedural_v1"),
     quality_preset: QualityPresetName = Form("balanced"),
     instruction: str = Form("", max_length=2_000),
 ) -> ShaderResponse:
-    """校验 HTTP 输入并调用 Shader 生成用例服务."""
+    """校验 HTTP 输入并调用 V1 生成用例服务."""
     started_at = time.perf_counter()
     resolved_project_id = project_id or uuid4()
     run_id = uuid4()
@@ -153,7 +140,7 @@ async def generate_shader(
             stop_reason="client_validation",
         ) from exc
 
-    legacy_service, procedural_service, locks = _runtime(request)
+    service, locks = _runtime(request)
     command = ShaderGenerationCommand(
         image=image,
         filename=file.filename,
@@ -167,8 +154,7 @@ async def generate_shader(
     )
     dependencies = ShaderGenerationDependencies(
         pool=getattr(request.app.state, "db_pool", None),
-        legacy_service=legacy_service,
-        procedural_service=procedural_service,
+        procedural_service=service,
         locks=locks,
     )
     try:
@@ -192,12 +178,12 @@ async def get_shader_run_artifact(
     artifact_name: str,
 ) -> Response:
     """下载 final-render、metrics 或 manifest 三种白名单产物."""
-    _service, procedural_service, _locks = _runtime(request)
+    service, _locks = _runtime(request)
     try:
         artifact = read_shader_run_artifact(
             str(run_id),
             artifact_name,
-            service=procedural_service,
+            service=service,
         )
     except (PublicArtifactNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail="未找到该运行产物。") from exc
@@ -212,99 +198,16 @@ async def get_shader_run_artifact(
     )
 
 
-@router.post("/review", response_model=ShaderReviewResponse)
-async def review_shader(
-    request: Request,
-    original_file: UploadFile = File(...),
-    rendered_file: UploadFile = File(...),
-    glsl: str = Form(...),
-    project_id: UUID = Form(...),
-) -> ShaderReviewResponse:
-    """上传原图、渲染图和 GLSL，在同一项目中评审并晋升 Memory."""
-    original_image = await read_image_upload(original_file)
-    rendered_image = await read_image_upload(rendered_file)
-    if not glsl.strip():
-        raise HTTPException(status_code=400, detail="GLSL 代码不能为空。")
-
-    pool = getattr(request.app.state, "db_pool", None)
-    service, _procedural_service, locks = _runtime(request)
-    run_id = uuid4()
-    run_started = False
-    try:
-        async with locks.hold(str(project_id)):
-            if pool is not None:
-                await start_shader_review_run(
-                    pool,
-                    run_id=run_id,
-                    project_id=project_id,
-                    original_content_type=original_file.content_type
-                    or "application/octet-stream",
-                    original_size_bytes=len(original_image),
-                    rendered_content_type=rendered_file.content_type
-                    or "application/octet-stream",
-                    rendered_size_bytes=len(rendered_image),
-                    glsl_chars=len(glsl),
-                )
-                run_started = True
-
-            result = await review_shader_render(
-                original_image,
-                original_file.content_type or "application/octet-stream",
-                rendered_image,
-                rendered_file.content_type or "application/octet-stream",
-                glsl,
-                project_id=str(project_id),
-                run_id=str(run_id),
-                service=service,
-            )
-    except ProjectBusyError as exc:
-        raise HTTPException(
-            status_code=409, detail="当前项目已有任务正在执行。"
-        ) from exc
-    except MemoryUnavailableError as exc:
-        if pool is not None and run_started:
-            await record_shader_review_failure(pool, run_id=run_id, error=exc)
-        logger.exception("shader.review.memory_unavailable")
-        raise HTTPException(status_code=503, detail="任务记忆暂时不可用。") from exc
-    except Exception as exc:
-        if pool is not None and run_started:
-            await record_shader_review_failure(pool, run_id=run_id, error=exc)
-        logger.exception("shader.review.failed")
-        raise HTTPException(status_code=502, detail="评审渲染图失败。") from exc
-
-    if pool is not None:
-        await record_shader_review_success(
-            pool,
-            run_id=run_id,
-            model_name=result.review_model_name,
-            evaluation=result.evaluation,
-            suggestion_count=len(result.suggestions),
-            model_calls=result.model_calls,
-            events=result.events,
-            logs=result.logs,
-        )
-
-    return ShaderReviewResponse(
-        project_id=project_id,
-        review=ShaderReview(
-            evaluation=result.evaluation,
-            suggestions=list(result.suggestions),
-        ),
-        memory_status=result.memory_status,
-    )
-
-
 @router.delete("/projects/{project_id}/memory", status_code=204)
 async def clear_project_memory(request: Request, project_id: UUID) -> Response:
-    """清除当前项目 checkpoint 和长期 Memory，不删除过程账本."""
-    service, procedural_service, locks = _runtime(request)
+    """清除当前项目 V1 checkpoint 和长期 Memory，不删除过程账本."""
+    service, locks = _runtime(request)
     try:
         async with locks.hold(str(project_id)):
             await clear_png_to_shader_project_memory(
                 str(project_id),
-                service=procedural_service,
+                service=service,
             )
-            await clear_shader_project_memory(str(project_id), service=service)
     except ProjectBusyError as exc:
         raise HTTPException(
             status_code=409, detail="当前项目已有任务正在执行。"

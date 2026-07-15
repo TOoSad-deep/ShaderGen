@@ -92,7 +92,7 @@ SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=false
 
 `DATABASE_URL` 配置后，Backend 使用独立 psycopg pool 运行 LangGraph Checkpointer/Store，并使用现有 asyncpg pool 写 Agent 过程账本。首次部署或 persistence 包升级后先执行 `make setup-memory-postgres`。`make test-memory-postgres` 优先使用 `TEST_DATABASE_URL`；未配置时会基于 `DATABASE_URL` 创建随机临时数据库，测试结束后自动删除。
 
-由于 F09 M5 自动质量门禁虽已通过、独立人工偏好门禁仍失败，最终发布 gate 继续为 no-go；页面当前默认使用 `legacy`，`procedural_v1` 仅作为明确标注的实验模式手动选择。V1 服务端完成 WebGL1 render/evaluate/review/refine；正常结果返回 `current_best`、评分和 final Artifact，Evaluator 不可用时返回明确的 WebGL-valid `unscored_fallback`，不伪造评分。Legacy 保留“浏览器渲染后调用 `/review`”路径，并有 180 秒服务端模型 timeout。公开 Artifact API 只允许 final-render、metrics 和 manifest。
+由于 F09 M5 自动质量门禁虽已通过、独立人工偏好门禁仍失败，最终发布 gate 继续为 no-go。当前实现只保留 `png_to_shader_v1` Graph 和 `procedural_v1` 产品路径；旧基础对话 Graph、legacy 生成、独立 `/review` API 及其专属 Node 已删除。V1 服务端完成 WebGL1 render/evaluate/review/refine；正常结果返回 `current_best`、评分和 final Artifact，Evaluator 不可用时返回明确的 WebGL-valid `unscored_fallback`，不伪造评分。页面继续明确标注实验/no-go，唯一实现路径不代表已获准灰度。公开 Artifact API 只允许 final-render、metrics 和 manifest。
 
 `SHADER_GEN_MODEL_NAME` 支持 `provider:model` 形式，例如 `dashscope:qwen3.7-plus`。`dashscope`、`openai`、`deepseek`、`glm` 表示凭据和 base URL 来源；真实模型名再决定使用 Qwen、GLM、DeepSeek 或 OpenAI 系列配置。
 

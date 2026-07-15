@@ -6,14 +6,11 @@ import {
   clearProjectMemory,
   generateShader,
   resolveShaderApiUrl,
-  reviewShader,
   ShaderApiError,
-  type GenerationMode,
   type MemoryStatus,
   type QualityPreset,
   type ShaderApiFailure,
   type ShaderResponse,
-  type ShaderReview,
 } from "./api/shader";
 import { FailureDetails } from "./components/FailureDetails";
 import { RunProgress } from "./components/RunProgress";
@@ -40,20 +37,16 @@ interface ActiveGenerationRequest {
   timeoutMs: number;
 }
 
-const DEFAULT_REQUEST_TIMEOUT_MS: Record<QualityPreset | "legacy", number> = {
-  legacy: 4 * 60 * 1000,
+const DEFAULT_REQUEST_TIMEOUT_MS: Record<QualityPreset, number> = {
   fast: 4 * 60 * 1000,
   balanced: 7 * 60 * 1000,
   high: 12 * 60 * 1000,
 };
 
-function generationRequestTimeoutMs(
-  generationMode: GenerationMode,
-  qualityPreset: QualityPreset,
-): number {
+function generationRequestTimeoutMs(qualityPreset: QualityPreset): number {
   const configured = Number(import.meta.env.VITE_GENERATION_REQUEST_TIMEOUT_MS);
   if (Number.isFinite(configured) && configured >= 10_000) return configured;
-  return DEFAULT_REQUEST_TIMEOUT_MS[generationMode === "legacy" ? "legacy" : qualityPreset];
+  return DEFAULT_REQUEST_TIMEOUT_MS[qualityPreset];
 }
 
 function loadRecentProjects(): RecentProject[] {
@@ -84,14 +77,10 @@ export function App() {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileInfo, setFileInfo] = useState("");
   const [glsl, setGlsl] = useState("");
-  const [generationMode, setGenerationMode] = useState<GenerationMode>("legacy");
   const [qualityPreset, setQualityPreset] = useState<QualityPreset>("balanced");
   const [instruction, setInstruction] = useState("");
   const [runResult, setRunResult] = useState<ShaderResponse | null>(null);
   const [compatibility, setCompatibility] = useState<ClientCompatibilityReport | null>(null);
-  const [review, setReview] = useState<ShaderReview | null>(null);
-  const [reviewLoading, setReviewLoading] = useState(false);
-  const [reviewError, setReviewError] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [apiFailure, setApiFailure] = useState<ShaderApiFailure | null>(null);
@@ -105,7 +94,6 @@ export function App() {
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatus | null>(null);
   const [projectMessage, setProjectMessage] = useState("");
   const copyTimerRef = useRef<number | null>(null);
-  const reviewRequestRef = useRef(0);
   const activeGenerationRef = useRef<ActiveGenerationRequest | null>(null);
 
   useEffect(() => {
@@ -143,14 +131,10 @@ export function App() {
     setGlsl("");
     setRunResult(null);
     setCompatibility(null);
-    setReview(null);
-    setReviewError("");
-    setReviewLoading(false);
     setError("");
     setApiFailure(null);
     setRequestStopNotice("");
     setCopied(false);
-    reviewRequestRef.current += 1;
   }
 
   async function handleFile(file: File) {
@@ -180,7 +164,7 @@ export function App() {
     clearRunOutput();
     setLoading(true);
     const controller = new AbortController();
-    const timeoutMs = generationRequestTimeoutMs(generationMode, qualityPreset);
+    const timeoutMs = generationRequestTimeoutMs(qualityPreset);
     const active: ActiveGenerationRequest = {
       controller,
       timeoutId: 0,
@@ -197,9 +181,8 @@ export function App() {
     try {
       const result = await generateShader(selectedFile, {
         projectId: projectId ?? undefined,
-        generationMode,
         qualityPreset,
-        instruction: generationMode === "procedural_v1" ? instruction.trim() : "",
+        instruction: instruction.trim(),
         signal: controller.signal,
       });
       rememberProject(result.project_id);
@@ -207,7 +190,6 @@ export function App() {
       setProjectMessage("");
       setRunResult(result);
       setGlsl(result.glsl);
-      if (result.generation_mode === "procedural_v1") setReview(result.review ?? null);
     } catch (reason) {
       if (active.stopKind === "user") {
         setRequestStopNotice(
@@ -236,41 +218,6 @@ export function App() {
     active.stopKind = "user";
     active.controller.abort();
   }
-
-  const handleRendered = useCallback(
-    async (renderedImage: Blob) => {
-      if (
-        runResult?.generation_mode === "procedural_v1" ||
-        !selectedFile ||
-        !glsl ||
-        !projectId
-      ) {
-        return;
-      }
-
-      const requestId = reviewRequestRef.current + 1;
-      reviewRequestRef.current = requestId;
-      setReview(null);
-      setReviewError("");
-      setReviewLoading(true);
-
-      try {
-        const result = await reviewShader(selectedFile, renderedImage, glsl, projectId);
-        if (reviewRequestRef.current === requestId) {
-          setReview(result.review);
-          setMemoryStatus(result.memory_status);
-          rememberProject(result.project_id);
-        }
-      } catch (reason) {
-        if (reviewRequestRef.current === requestId) {
-          setReviewError(reason instanceof Error ? reason.message : "评审失败。");
-        }
-      } finally {
-        if (reviewRequestRef.current === requestId) setReviewLoading(false);
-      }
-    },
-    [runResult?.generation_mode, selectedFile, glsl, projectId, rememberProject],
-  );
 
   const handleCompatibility = useCallback((report: ClientCompatibilityReport) => {
     setCompatibility(report);
@@ -332,19 +279,15 @@ export function App() {
     }
   }
 
-  const isProceduralResult = runResult?.generation_mode === "procedural_v1";
+  const review = runResult?.review ?? null;
   const serverRenderUrl = runResult?.final_render_url
     ? resolveShaderApiUrl(runResult.final_render_url)
     : null;
   const statusText = loading
-    ? generationMode === "procedural_v1"
-      ? "闭环运行中"
-      : "生成中"
-    : reviewLoading
-      ? "评审中"
-      : requestStopNotice
-        ? "已停止等待"
-      : error || reviewError || compatibility?.status === "error"
+    ? "闭环运行中"
+    : requestStopNotice
+      ? "已停止等待"
+      : error || compatibility?.status === "error"
         ? "需要处理"
         : runResult
           ? "已完成"
@@ -382,30 +325,17 @@ export function App() {
         <section className="run-config" aria-label="生成配置">
           <label>
             <span>生成模式</span>
-            <select
-              aria-label="生成模式"
-              value={generationMode}
-              disabled={loading}
-              onChange={(event) => {
-                setGenerationMode(event.target.value as GenerationMode);
-                clearRunOutput();
-              }}
-            >
-              <option value="legacy">Legacy 单次生成</option>
-              <option value="procedural_v1">程序化闭环 V1（实验性）</option>
-            </select>
-            {generationMode === "procedural_v1" ? (
-              <small className="experimental-note">
-                实验功能：当前质量门禁未通过，可能超时或无法生成可运行 Shader。
-              </small>
-            ) : null}
+            <strong>程序化闭环 V1</strong>
+            <small className="experimental-note">
+              实验功能：当前质量门禁未通过，可能超时或无法生成可运行 Shader。
+            </small>
           </label>
           <label>
             <span>质量档位</span>
             <select
               aria-label="质量档位"
               value={qualityPreset}
-              disabled={loading || generationMode === "legacy"}
+              disabled={loading}
               onChange={(event) => setQualityPreset(event.target.value as QualityPreset)}
             >
               <option value="fast">Fast</option>
@@ -419,17 +349,10 @@ export function App() {
               aria-label="补充约束"
               value={instruction}
               maxLength={2000}
-              disabled={loading || generationMode === "legacy"}
-              placeholder={
-                generationMode === "legacy"
-                  ? "Legacy 模式暂不支持补充约束。"
-                  : "例如：保留纯白背景，重点复刻左上高光。"
-              }
+              disabled={loading}
+              placeholder="例如：保留纯白背景，重点复刻左上高光。"
               onChange={(event) => setInstruction(event.target.value)}
             />
-            {generationMode === "legacy" ? (
-              <small className="experimental-note">补充约束仅用于程序化闭环 V1。</small>
-            ) : null}
           </label>
         </section>
 
@@ -447,8 +370,8 @@ export function App() {
                 </option>
               ))}
             </select>
-            <button type="button" onClick={handleNewProject} disabled={loading || reviewLoading}>新建项目</button>
-            <button type="button" onClick={() => void handleClearMemory()} disabled={!projectId || loading || reviewLoading}>
+            <button type="button" onClick={handleNewProject} disabled={loading}>新建项目</button>
+            <button type="button" onClick={() => void handleClearMemory()} disabled={!projectId || loading}>
               清除记忆
             </button>
           </div>
@@ -461,7 +384,6 @@ export function App() {
 
         <RunProgress
           loading={loading}
-          mode={generationMode}
           result={runResult}
           compatibility={compatibility}
         />
@@ -496,12 +418,10 @@ export function App() {
               <ShaderPreview
                 imageUrl={imageUrl}
                 glsl={glsl}
-                staticMode={isProceduralResult}
                 renderWidth={runResult?.render_width}
                 renderHeight={runResult?.render_height}
                 serverRenderUrl={serverRenderUrl}
-                onRendered={handleRendered}
-                onCompatibility={isProceduralResult ? handleCompatibility : undefined}
+                onCompatibility={handleCompatibility}
               />
             ) : <div className="empty">{previewEmptyText}</div>}
           </div>
@@ -526,20 +446,17 @@ export function App() {
           <pre>{glsl || codePlaceholder}</pre>
         </section>
 
-        {glsl || reviewLoading || review ? (
+        {glsl || review ? (
           <section className="review-panel">
             <div className="panel-header">
-              <h2>{isProceduralResult ? "自动闭环 Review" : "Review"}</h2>
-              {reviewLoading ? <span>正在评审...</span> : null}
+              <h2>自动闭环 Review</h2>
             </div>
-            {reviewLoading ? <p className="hint">正在评审渲染图...</p> : null}
-            {reviewError ? <p className="error">{reviewError}</p> : null}
             {review ? (
               <div className="review-body">
                 <p>{review.evaluation}</p>
                 {review.suggestions.length ? <ul>{review.suggestions.map((suggestion, index) => <li key={`${index}-${suggestion}`}>{suggestion}</li>)}</ul> : null}
               </div>
-            ) : isProceduralResult ? <p className="hint">本次在进入 Critic 前已满足停止条件。</p> : null}
+            ) : <p className="hint">本次在进入 Critic 前已满足停止条件。</p>}
           </section>
         ) : null}
       </section>

@@ -1,4 +1,4 @@
-"""Shader 生成、评审和项目 Memory 后端编排服务."""
+"""PNG-to-Shader V1 生成和项目 Memory 后端编排服务."""
 
 from __future__ import annotations
 
@@ -6,10 +6,9 @@ import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from agent.app.services import png_to_shader_v1, shader_generation
+from agent.app.services import png_to_shader_v1
 
-MemoryUnavailableError = shader_generation.MemoryUnavailableError
-default_shader_generation_service = shader_generation.default_shader_generation_service
+MemoryUnavailableError = png_to_shader_v1.MemoryUnavailableError
 NoValidatedShaderError = png_to_shader_v1.NoValidatedShaderError
 PublicArtifactNotFoundError = png_to_shader_v1.PublicArtifactNotFoundError
 default_png_to_shader_v1_service = png_to_shader_v1.default_png_to_shader_v1_service
@@ -41,32 +40,9 @@ class ProjectLockRegistry:
                 self._active.discard(project_id)
 
 
-def get_shader_generation_models() -> tuple[str, str]:
-    """返回当前 Shader 生成链路的模型名."""
-    return shader_generation.shader_generation_models()
-
-
 def get_png_to_shader_v1_models() -> tuple[str, str]:
     """返回 PNG-to-Shader V1 的 Author 与视觉模型名."""
     return png_to_shader_v1.png_to_shader_v1_models()
-
-
-async def generate_shader_from_image(
-    image: bytes,
-    content_type: str,
-    *,
-    project_id: str,
-    run_id: str,
-    service: shader_generation.ShaderGenerationService,
-) -> shader_generation.ShaderGenerationResult:
-    """通过 Agent 公共接口生成 Shader."""
-    return await shader_generation.generate_glsl_from_image(
-        image,
-        content_type,
-        project_id=project_id,
-        run_id=run_id,
-        service=service,
-    )
 
 
 async def generate_procedural_shader_from_image(
@@ -99,39 +75,6 @@ def read_shader_run_artifact(
 ) -> png_to_shader_v1.PublicArtifact:
     """通过 V1 Service 读取固定白名单 Artifact."""
     return service.read_public_artifact(run_id, artifact_name)
-
-
-async def review_shader_render(
-    original_image: bytes,
-    original_content_type: str,
-    rendered_image: bytes,
-    rendered_content_type: str,
-    glsl: str,
-    *,
-    project_id: str,
-    run_id: str,
-    service: shader_generation.ShaderGenerationService,
-) -> shader_generation.ShaderReviewResult:
-    """通过 Agent 公共接口评审渲染结果."""
-    return await shader_generation.review_shader_render(
-        original_image,
-        original_content_type,
-        rendered_image,
-        rendered_content_type,
-        glsl,
-        project_id=project_id,
-        run_id=run_id,
-        service=service,
-    )
-
-
-async def clear_shader_project_memory(
-    project_id: str,
-    *,
-    service: shader_generation.ShaderGenerationService,
-) -> shader_generation.ClearMemoryResult:
-    """通过 Agent 公共接口清除项目 Memory."""
-    return await shader_generation.clear_project_memory(project_id, service=service)
 
 
 async def clear_png_to_shader_project_memory(

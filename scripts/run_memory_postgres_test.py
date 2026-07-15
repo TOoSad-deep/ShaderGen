@@ -48,13 +48,20 @@ async def _with_temporary_database(base_url: str) -> None:
     admin = await asyncpg.connect(base_url)
     try:
         await admin.execute(f'CREATE DATABASE "{database_name}"')
+    finally:
+        await admin.close()
+
+    try:
+        await asyncio.to_thread(
+            _run_pytest,
+            _database_url(base_url, database_name),
+        )
+    finally:
+        # 测试可能超过数据库的管理连接 idle timeout；清理前重新连接，
+        # 避免主体已通过却因旧 admin 连接被关闭而留下临时数据库。
+        cleanup_admin = await asyncpg.connect(base_url)
         try:
-            await asyncio.to_thread(
-                _run_pytest,
-                _database_url(base_url, database_name),
-            )
-        finally:
-            await admin.execute(
+            await cleanup_admin.execute(
                 """
                 SELECT pg_terminate_backend(pid)
                 FROM pg_stat_activity
@@ -62,9 +69,9 @@ async def _with_temporary_database(base_url: str) -> None:
                 """,
                 database_name,
             )
-            await admin.execute(f'DROP DATABASE IF EXISTS "{database_name}"')
-    finally:
-        await admin.close()
+            await cleanup_admin.execute(f'DROP DATABASE IF EXISTS "{database_name}"')
+        finally:
+            await cleanup_admin.close()
 
 
 async def _main() -> None:

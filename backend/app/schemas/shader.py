@@ -6,7 +6,7 @@ from uuid import UUID
 from pydantic import BaseModel
 
 MemoryStatus = Literal["durable", "ephemeral", "degraded"]
-GenerationMode = Literal["legacy", "procedural_v1"]
+GenerationMode = Literal["procedural_v1"]
 QualityPresetName = Literal["fast", "balanced", "high"]
 
 
@@ -34,7 +34,7 @@ class ShaderScore(BaseModel):
 
 
 class ShaderResponse(BaseModel):
-    """向后兼容的 Shader 生成响应."""
+    """PNG-to-Shader V1 生成响应."""
 
     project_id: UUID
     run_id: UUID
@@ -70,11 +70,3 @@ class ShaderGenerationErrorResponse(BaseModel):
     """兼容 FastAPI detail envelope 的生成失败响应."""
 
     detail: ShaderGenerationErrorDetail
-
-
-class ShaderReviewResponse(BaseModel):
-    """Shader 渲染评审响应."""
-
-    project_id: UUID
-    review: ShaderReview
-    memory_status: MemoryStatus

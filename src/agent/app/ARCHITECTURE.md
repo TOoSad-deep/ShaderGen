@@ -6,7 +6,7 @@
 
 ```text
 backend/app/services
-  -> agent.app.services.shader_generation / png_to_shader_v1
+  -> agent.app.services.png_to_shader_v1
   -> agent.app.graphs（组合具体 Gateway）
   -> agent.app.nodes
   -> agent.app.context / memory / contracts / prompts / parsers / messages / observability

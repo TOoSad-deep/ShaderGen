@@ -42,6 +42,14 @@ class FakeRendererRegistry:
             raise RuntimeError("private cleanup detail")
 
 
+class RecordingCheckpointer:
+    def __init__(self) -> None:
+        self.deleted_threads: list[str] = []
+
+    async def adelete_thread(self, thread_id: str) -> None:
+        self.deleted_threads.append(thread_id)
+
+
 def make_service(
     tmp_path: Path, output: dict
 ) -> tuple[PngToShaderV1Service, FakeGraph]:
@@ -184,6 +192,29 @@ async def test_service_maps_success_and_uses_isolated_checkpoint_thread(
     assert state["quality_preset"] == "high"
     assert state["instruction"] == "保留白底"
     assert config["configurable"]["thread_id"] == "png-to-shader-v1:project-1"
+
+
+@pytest.mark.anyio
+async def test_clear_memory_removes_v1_and_historical_checkpoint_threads(
+    tmp_path: Path,
+) -> None:
+    checkpointer = RecordingCheckpointer()
+    service = PngToShaderV1Service(
+        FakeGraph({}),
+        checkpointer,
+        InMemoryStore(),
+        LocalArtifactStore(tmp_path / "artifacts"),
+        "ephemeral",
+    )
+    project_id = "11111111-1111-4111-8111-111111111111"
+
+    result = await service.clear_memory(project_id)
+
+    assert checkpointer.deleted_threads == [
+        f"png-to-shader-v1:{project_id}",
+        project_id,
+    ]
+    assert result.deleted_memories == 0
 
 
 @pytest.mark.anyio
