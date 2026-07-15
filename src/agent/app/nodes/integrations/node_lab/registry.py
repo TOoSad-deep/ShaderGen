@@ -29,7 +29,11 @@ class _NodeSpec:
     default_fixture_ids: tuple[str, ...] = ()
 
 
-_RUN_NODES_SOURCE = "src/agent/app/nodes/png_to_shader_v1_run_nodes.py"
+_PREPARATION_SOURCE = "src/agent/app/nodes/png_to_shader_v1/preparation.py"
+_CANDIDATES_SOURCE = "src/agent/app/nodes/png_to_shader_v1/candidates.py"
+_RENDER_EVALUATE_SOURCE = "src/agent/app/nodes/png_to_shader_v1/render_evaluate.py"
+_SELECTION_SOURCE = "src/agent/app/nodes/png_to_shader_v1/selection.py"
+_FINALIZATION_SOURCE = "src/agent/app/nodes/png_to_shader_v1/finalization.py"
 _ROUTING_SOURCE = "src/agent/app/graphs/png_to_shader_v1_routing.py"
 
 _NODE_SPECS = (
@@ -62,7 +66,7 @@ _NODE_SPECS = (
             "events",
         ),
         ("artifact_write",),
-        _RUN_NODES_SOURCE,
+        _PREPARATION_SOURCE,
     ),
     _NodeSpec(
         "prepare_context",
@@ -96,7 +100,7 @@ _NODE_SPECS = (
         ("reference_artifact_id", "max_long_side"),
         ("target_measurements", "measurements_artifact"),
         ("artifact_read", "artifact_write"),
-        _RUN_NODES_SOURCE,
+        _PREPARATION_SOURCE,
     ),
     _NodeSpec(
         "visual_analysis",
@@ -141,7 +145,7 @@ _NODE_SPECS = (
         ("visual_analysis_artifact_id",),
         ("visual_analysis_artifact_id", "phase", "events"),
         ("artifact_write",),
-        _RUN_NODES_SOURCE,
+        _PREPARATION_SOURCE,
     ),
     _NodeSpec(
         "author_initial",
@@ -211,7 +215,7 @@ _NODE_SPECS = (
             "events",
         ),
         ("artifact_write",),
-        _RUN_NODES_SOURCE,
+        _CANDIDATES_SOURCE,
     ),
     _NodeSpec(
         "render_and_evaluate",
@@ -242,7 +246,7 @@ _NODE_SPECS = (
             "stop_reason",
         ),
         ("browser", "artifact_write"),
-        _RUN_NODES_SOURCE,
+        _RENDER_EVALUATE_SOURCE,
         requires_browser=True,
         cold_start_sensitive=True,
     ),
@@ -270,7 +274,7 @@ _NODE_SPECS = (
         ("author_artifact_id", "budget_policy", "compile_repair_count"),
         ("previous_author_artifact_id", "repair_budget", "phase"),
         (),
-        _RUN_NODES_SOURCE,
+        _CANDIDATES_SOURCE,
     ),
     _NodeSpec(
         "author_compile_repair",
@@ -337,7 +341,7 @@ _NODE_SPECS = (
             "events",
         ),
         ("artifact_write",),
-        _RUN_NODES_SOURCE,
+        _SELECTION_SOURCE,
     ),
     _NodeSpec(
         "prepare_measurement_seed",
@@ -364,7 +368,7 @@ _NODE_SPECS = (
             "events",
         ),
         ("artifact_read", "artifact_write"),
-        _RUN_NODES_SOURCE,
+        _CANDIDATES_SOURCE,
     ),
     _NodeSpec(
         "decide_after_selection",
@@ -402,7 +406,7 @@ _NODE_SPECS = (
             "phase",
         ),
         ("artifact_read",),
-        _RUN_NODES_SOURCE,
+        _SELECTION_SOURCE,
     ),
     _NodeSpec(
         "visual_critic",
@@ -465,7 +469,7 @@ _NODE_SPECS = (
             "events",
         ),
         ("artifact_write",),
-        _RUN_NODES_SOURCE,
+        _SELECTION_SOURCE,
     ),
     _NodeSpec(
         "author_visual_refine",
@@ -536,7 +540,7 @@ _NODE_SPECS = (
             "events",
         ),
         ("artifact_read", "artifact_write", "browser_cleanup"),
-        _RUN_NODES_SOURCE,
+        _FINALIZATION_SOURCE,
         requires_browser=True,
         cold_start_sensitive=True,
     ),

@@ -67,7 +67,7 @@ class PngToShaderV1NodeProvider:
         """返回 AI-off benchmark 必须冻结的生产源文件."""
         paths = {
             *Path(ROOT / "src/agent/app/nodes/integrations/node_lab").glob("*.py"),
-            *Path(ROOT / "src/agent/app/nodes").glob("*.py"),
+            *Path(ROOT / "src/agent/app/nodes").rglob("*.py"),
             *Path(ROOT / "src/agent/app/prompts").glob("*.yaml"),
             *Path(ROOT / "src/agent/app/prompts").glob("*.py"),
             *Path(ROOT / "src/agent/app/parsers").glob("*.py"),

@@ -15,15 +15,16 @@ from agent.app.config.model_config import NodeModelConfig
 from agent.app.contracts.llm import LLMCallOptions, LLMResponse
 from agent.app.messages.png_to_shader_v1 import InputBindingError
 from agent.app.nodes import bounded_model_node as bounded_model_module
-from agent.app.nodes import png_to_shader_v1_run_nodes as run_nodes_module
 from agent.app.nodes.bounded_model_node import make_bounded_model_node
-from agent.app.nodes.png_to_shader_v1_run_nodes import (
+from agent.app.nodes.png_to_shader_v1 import finalization as finalization_module
+from agent.app.nodes.png_to_shader_v1 import (
     make_finalize_png_to_shader_v1_node,
     make_materialize_candidate_node,
     make_persist_visual_review_node,
     make_prepare_measurement_seed_node,
     make_render_and_evaluate_node,
 )
+from agent.app.nodes.png_to_shader_v1 import runtime as run_nodes_runtime
 from agent.app.nodes.shader_author_node import (
     make_shader_author_compile_repair_node,
     make_shader_author_initial_node,
@@ -101,7 +102,7 @@ def test_evaluation_measurements_merge_visual_analysis_semantic_regions() -> Non
     measurements = measure_target(REFERENCE_IMAGE.read_bytes())
     analysis = analysis_payload()
 
-    merged = run_nodes_module._evaluation_measurements(
+    merged = run_nodes_runtime._evaluation_measurements(
         {"visual_analysis": analysis},
         measurements,
     )
@@ -683,7 +684,7 @@ def test_validation_event_diagnostics_include_codes_and_source_lines() -> None:
         "smoothstep(0.3, 0.3,",
     )
 
-    diagnostics = run_nodes_module._validation_diagnostics(validate_shader(shader))
+    diagnostics = run_nodes_runtime._validation_diagnostics(validate_shader(shader))
 
     assert diagnostics["violation_codes"] == ["reversed_smoothstep_edges"]
     assert diagnostics["violations"] == [
@@ -827,7 +828,7 @@ async def test_evaluation_failure_returns_unscored_validated_fallback_and_close_
     )
     merged = {**state, **render_update}
     monkeypatch.setattr(
-        run_nodes_module,
+        finalization_module,
         "RENDERER_CLOSE_TIMEOUT_SECONDS",
         0.01,
     )
@@ -870,8 +871,8 @@ def test_balanced_render_work_window_keeps_thirty_seconds_for_finalize() -> None
         "started_at": 0.0,
     }
 
-    assert run_nodes_module._finalize_reserve_seconds(state) == 30.0
-    assert run_nodes_module._work_seconds_before_finalize(state, lambda: 100.0) == (
+    assert run_nodes_runtime._finalize_reserve_seconds(state) == 30.0
+    assert run_nodes_runtime._work_seconds_before_finalize(state, lambda: 100.0) == (
         170.0
     )
 
