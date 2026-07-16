@@ -1,3 +1,5 @@
+import { apiFetch, parseApiError, resolveApiUrl } from "./client";
+
 export type MemoryStatus = "durable" | "ephemeral" | "degraded";
 export type QualityPreset = "fast" | "balanced" | "high";
 
@@ -59,14 +61,8 @@ export class ShaderApiError extends Error {
   }
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8088";
-
 export function resolveShaderApiUrl(path: string): string {
-  return new URL(path, `${API_BASE_URL}/`).toString();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return resolveApiUrl(path);
 }
 
 function readString(value: unknown): string | undefined {
@@ -74,37 +70,17 @@ function readString(value: unknown): string | undefined {
 }
 
 async function readError(response: Response, fallback: string): Promise<ShaderApiError> {
-  const body = await response.text();
-  let message = body.trim() || fallback;
-  let fields: Record<string, unknown> = {};
-
-  try {
-    const parsed: unknown = JSON.parse(body);
-    if (isRecord(parsed)) {
-      const detail = parsed.detail;
-      const nestedFields = isRecord(detail)
-        ? detail
-        : isRecord(parsed.error)
-          ? parsed.error
-          : {};
-      fields = { ...parsed, ...nestedFields };
-      message =
-        readString(nestedFields.message) ??
-        readString(parsed.message) ??
-        readString(detail) ??
-        message;
-    }
-  } catch {
-    // 服务端也可能直接返回纯文本；保留原消息便于定位。
-  }
-
-  return new ShaderApiError(message, {
-    status: response.status,
-    code: readString(fields.code),
-    runId: readString(fields.run_id),
-    stage: readString(fields.stage),
-    retryable: typeof fields.retryable === "boolean" ? fields.retryable : undefined,
-    stopReason: readString(fields.stop_reason),
+  const parsed = await parseApiError(response, fallback);
+  return new ShaderApiError(parsed.message, {
+    status: parsed.status,
+    code: readString(parsed.fields.code),
+    runId: readString(parsed.fields.run_id),
+    stage: readString(parsed.fields.stage),
+    retryable:
+      typeof parsed.fields.retryable === "boolean"
+        ? parsed.fields.retryable
+        : undefined,
+    stopReason: readString(parsed.fields.stop_reason),
   });
 }
 
@@ -126,7 +102,7 @@ export async function generateShader(
   formData.append("quality_preset", options.qualityPreset);
   formData.append("instruction", options.instruction);
 
-  const response = await fetch(`${API_BASE_URL}/api/shader/generate`, {
+  const response = await apiFetch("/api/shader/generate", {
     method: "POST",
     body: formData,
     signal: options.signal,
@@ -140,9 +116,10 @@ export async function generateShader(
 }
 
 export async function clearProjectMemory(projectId: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/shader/projects/${projectId}/memory`, {
-    method: "DELETE",
-  });
+  const response = await apiFetch(
+    `/api/shader/projects/${encodeURIComponent(projectId)}/memory`,
+    { method: "DELETE" },
+  );
 
   if (!response.ok) {
     throw await readError(response, "清除项目记忆失败。");

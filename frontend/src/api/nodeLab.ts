@@ -1,3 +1,5 @@
+import { apiFetch, parseApiError, resolveApiUrl } from "./client";
+
 export type NodeLabExecutionMode = "deterministic" | "fixture" | "mock" | "real";
 export type NodeLabEffectMode = "preview" | "lab_commit" | "project_commit";
 
@@ -93,6 +95,22 @@ export interface NodeLabStep {
   created_at: string;
 }
 
+export interface NodeLabStepSummary {
+  schema_version: "node_lab_step_summary_v1";
+  lab_run_id: string;
+  step_id: string;
+  base_step_id: string | null;
+  node_id: string;
+  execution_mode: string;
+  execution_status: "completed" | "failed";
+  outcome: "success" | "rejected" | "stopped" | "failed";
+  artifact_count: number;
+  next_action: string | null;
+  duration_ms: number;
+  execution_fingerprint: string;
+  created_at: string;
+}
+
 export interface ExecuteNodeLabStepBody {
   node_id: string;
   execution_mode: NodeLabExecutionMode;
@@ -123,44 +141,37 @@ export class NodeLabApiError extends Error {
   }
 }
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8088";
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function readText(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
 async function readError(response: Response): Promise<NodeLabApiError> {
-  let detail: Record<string, unknown> = {};
-  try {
-    const body: unknown = await response.json();
-    if (isRecord(body)) detail = isRecord(body.detail) ? body.detail : body;
-  } catch {
-    // 错误边界只保留安全 fallback，不把 HTML 或供应商原文显示进工作台。
-  }
+  const parsed = await parseApiError(
+    response,
+    `Node Lab 请求失败（HTTP ${response.status}）。`,
+  );
   return new NodeLabApiError({
-    status: response.status,
-    code: readText(detail.code) ?? "http_error",
-    message: readText(detail.message) ?? `Node Lab 请求失败（HTTP ${response.status}）。`,
-    stage: readText(detail.stage),
-    retryable: typeof detail.retryable === "boolean" ? detail.retryable : undefined,
+    status: parsed.status,
+    code: readText(parsed.fields.code) ?? "http_error",
+    message: parsed.message,
+    stage: readText(parsed.fields.stage),
+    retryable:
+      typeof parsed.fields.retryable === "boolean"
+        ? parsed.fields.retryable
+        : undefined,
   });
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(new URL(path, `${API_BASE_URL}/`), init);
+  const response = await apiFetch(path, init);
   if (!response.ok) throw await readError(response);
   return response.json() as Promise<T>;
 }
 
 export function resolveNodeLabArtifactUrl(labRunId: string, artifactId: string): string {
-  return new URL(
+  return resolveApiUrl(
     `/api/lab/v1/runs/${encodeURIComponent(labRunId)}/artifacts/${encodeURIComponent(artifactId)}`,
-    `${API_BASE_URL}/`,
-  ).toString();
+  );
 }
 
 export async function getNodeLabHealth(): Promise<NodeLabHealth> {
@@ -186,17 +197,42 @@ export async function getNodeLabRun(labRunId: string): Promise<NodeLabRun> {
   return requestJson<NodeLabRun>(`/api/lab/v1/runs/${encodeURIComponent(labRunId)}`);
 }
 
-export async function listNodeLabSteps(labRunId: string): Promise<NodeLabStep[]> {
-  const response = await requestJson<{ lab_run_id: string; step_ids: string[] }>(
+export async function listNodeLabSteps(labRunId: string): Promise<NodeLabStepSummary[]> {
+  const response = await requestJson<{
+    lab_run_id: string;
+    step_ids: string[];
+    steps: NodeLabStepSummary[];
+  }>(
     `/api/lab/v1/runs/${encodeURIComponent(labRunId)}/steps`,
   );
-  return Promise.all(
-    response.step_ids.map((stepId) =>
-      requestJson<NodeLabStep>(
-        `/api/lab/v1/runs/${encodeURIComponent(labRunId)}/steps/${encodeURIComponent(stepId)}`,
-      ),
-    ),
+  return response.steps;
+}
+
+export async function getNodeLabStep(
+  labRunId: string,
+  stepId: string,
+): Promise<NodeLabStep> {
+  return requestJson<NodeLabStep>(
+    `/api/lab/v1/runs/${encodeURIComponent(labRunId)}/steps/${encodeURIComponent(stepId)}`,
   );
+}
+
+export function summarizeNodeLabStep(step: NodeLabStep): NodeLabStepSummary {
+  return {
+    schema_version: "node_lab_step_summary_v1",
+    lab_run_id: step.lab_run_id,
+    step_id: step.step_id,
+    base_step_id: step.base_step_id,
+    node_id: step.node_id,
+    execution_mode: step.execution_mode,
+    execution_status: step.execution_status,
+    outcome: step.outcome,
+    artifact_count: step.artifacts.length,
+    next_action: step.next_action,
+    duration_ms: step.duration_ms,
+    execution_fingerprint: step.execution_fingerprint,
+    created_at: step.created_at,
+  };
 }
 
 export async function listNodeLabArtifacts(labRunId: string): Promise<NodeLabArtifact[]> {
@@ -228,8 +264,8 @@ export async function uploadNodeLabArtifact(
   const formData = new FormData();
   formData.append("file", file);
   formData.append("kind", kind);
-  const response = await fetch(
-    new URL(`/api/lab/v1/runs/${encodeURIComponent(labRunId)}/artifacts`, `${API_BASE_URL}/`),
+  const response = await apiFetch(
+    `/api/lab/v1/runs/${encodeURIComponent(labRunId)}/artifacts`,
     { method: "POST", body: formData },
   );
   if (!response.ok) throw await readError(response);

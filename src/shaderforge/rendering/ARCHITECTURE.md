@@ -7,6 +7,7 @@
 ## 边界
 
 - 上游只传 Fragment Shader 字符串和目标宽高；本模块不调用模型，也不修改 Shader。
+- `PlaywrightWebGL1Renderer` 只接受 canonical `WEBGL1_STATIC_NO_TEXTURE_V1`；不等价的 `RenderContract` 在启动浏览器前拒绝。
 - 每次渲染都新建 canvas 和 WebGL context，避免编译失败时误用上一帧。
 - 同一个 `PlaywrightWebGL1Renderer` 生命周期内复用 browser/page；worker 异常时关闭并最多重放一次。
 - WebGL context 固定 `antialias: false`、`preserveDrawingBuffer: true`，且不创建、不绑定输入纹理。

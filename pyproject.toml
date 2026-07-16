@@ -1,12 +1,13 @@
 [project]
 name = "shadergen"
 version = "0.0.1"
-description = "ShaderGen LangGraph 智能体。"
+description = "图片到 WebGL1 Shader 的 React、FastAPI、LangGraph 与 ShaderForge 单仓应用。"
 authors = [
     { name = "William Fu-Hinthorn", email = "13333726+hinthornw@users.noreply.github.com" },
 ]
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = [
     "asyncpg>=0.31.0",
@@ -26,16 +27,17 @@ dependencies = [
 
 
 [project.optional-dependencies]
-dev = ["mypy>=1.11.1", "ruff>=0.6.1"]
+dev = ["mypy>=1.13.0", "ruff>=0.8.2"]
 
 [build-system]
-requires = ["setuptools>=73.0.0", "wheel"]
+requires = ["setuptools>=77.0.3", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = [
     "agent",
     "agent.app",
+    "agent.app.benchmarks",
     "agent.app.config",
     "agent.app.contracts",
     "agent.app.graphs",
@@ -47,8 +49,10 @@ packages = [
     "agent.app.context",
     "agent.app.nodes",
     "agent.app.nodes.png_to_shader_v1",
-    "agent.app.nodes.integrations",
-    "agent.app.nodes.integrations.node_lab",
+    "agent.app.nodes.png_to_shader_v1.deterministic",
+    "agent.app.nodes.png_to_shader_v1.integrations",
+    "agent.app.nodes.png_to_shader_v1.integrations.node_lab",
+    "agent.app.nodes.png_to_shader_v1.model",
     "agent.app.observability",
     "agent.app.parsers",
     "agent.app.prompts",
@@ -64,6 +68,7 @@ packages = [
     "backend.app.middleware",
     "backend.app.schemas",
     "backend.app.services",
+    "backend.sql",
     "shaderforge",
     "shaderforge.analysis",
     "shaderforge.benchmark",
@@ -82,7 +87,7 @@ packages = [
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
 "agent.app.prompts" = ["*.yaml"]
-"backend" = ["sql/*.sql"]
+"backend.sql" = ["*.sql"]
 
 [tool.ruff]
 lint.select = [

@@ -22,7 +22,7 @@ from shaderforge.rendering import (
 )
 from shaderforge.store import LocalArtifactStore
 from shaderforge.validation import validate_shader
-from tests.unit_tests.png_to_shader_v1_samples import (
+from tests.fixtures.png_to_shader_v1_samples import (
     GOLDEN_GLSL,
     analysis_payload,
     author_payload,

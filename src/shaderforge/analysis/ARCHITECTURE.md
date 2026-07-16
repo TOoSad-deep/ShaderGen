@@ -4,7 +4,7 @@
 
 ## 当前能力
 
-- 解码 PNG/JPEG/WebP，并按白色底合成 alpha；
+- 解码 Pillow 当前可安全识别的图片格式，并按白色底合成 alpha；产品 F09 的 HTTP 契约仍只接受 PNG，Analysis 本身不把 PNG/JPEG/WebP 维护成独立 allowlist；
 - 超过运行契约长边时仅对分析副本降采样，保留原始尺寸和 hash；
 - `normalize_target_png()` 为 M3 把模型输入与 Renderer/Oracle 参考图统一成白底 RGB PNG，并在超过契约长边时等比缩小，避免评分尺寸错配；
 - 用边框颜色中位数估计背景；
@@ -16,4 +16,4 @@
 - 坐标统一使用 Shader UV：左下 `(0, 0)`，右上 `(1, 1)`；
 - 自动前景 mask 只适合背景相对稳定的 V1 样例，低置信度时调用方必须降低 geometry loss 权重；
 - 不在这里做 VLM 视觉分层、GLSL 生成、浏览器渲染或候选接受；
-- 模型均为不可变 dataclass，可通过 `to_dict()` 写入 Artifact Store。
+- 模型均为不可变 dataclass；聚合根 `TargetMeasurements.to_dict()` 使用 dataclass 递归序列化嵌套测量，叶子模型不承诺各自提供 `to_dict()`。

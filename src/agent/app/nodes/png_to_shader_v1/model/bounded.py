@@ -8,11 +8,12 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import Any
 
 from agent.app.contracts.llm import LLMGatewayError
-from agent.app.nodes.structured_output import (
+from shaderforge.contracts import BudgetPolicy, StopReason
+
+from .structured_output import (
     StructuredOutputExhaustedError,
     StructuredOutputInvocationError,
 )
-from shaderforge.contracts import BudgetPolicy, StopReason
 
 Clock = Callable[[], float]
 ModelNode = Callable[[Mapping[str, Any]], Awaitable[dict[str, Any]]]

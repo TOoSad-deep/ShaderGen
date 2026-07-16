@@ -17,7 +17,9 @@ from agent.app.lab.models import (
 )
 from agent.app.lab.runner import NodeLabApplication
 from agent.app.lab.store import NodeLabStore
-from agent.app.nodes.integrations.node_lab import build_png_to_shader_v1_registry
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
+    build_png_to_shader_v1_registry,
+)
 from agent.app.services.node_lab import (
     create_lab_run,
     describe_nodes,

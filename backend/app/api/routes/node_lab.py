@@ -16,6 +16,7 @@ from fastapi import (
 )
 from pydantic import ValidationError
 
+from backend.app.core.settings import BackendSettings
 from backend.app.schemas.node_lab import (
     NODE_LAB_RUN_OPENAPI_EXAMPLES,
     NODE_LAB_STEP_OPENAPI_EXAMPLES,
@@ -62,7 +63,12 @@ def _service(request: Request) -> NodeLabBackendService:
     """按 FastAPI 生命周期惰性持有单个 Node Lab Application."""
     service = getattr(request.app.state, "node_lab_service", None)
     if service is None:
-        service = create_default_node_lab_backend_service()
+        settings = getattr(request.app.state, "settings", BackendSettings())
+        service = create_default_node_lab_backend_service(
+            root=settings.node_lab_root,
+            batch_output_root=settings.node_lab_batch_root,
+            real_model_enabled=settings.node_lab_real_model_enabled,
+        )
         request.app.state.node_lab_service = service
     return service
 

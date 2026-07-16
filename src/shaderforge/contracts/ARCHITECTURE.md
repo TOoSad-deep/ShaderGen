@@ -12,4 +12,5 @@
 - 默认值必须能在单元测试中确定性复现；
 - 阈值是初始工程默认值，后续只能依据 benchmark 证据校准；
 - contracts 不读取环境变量、不访问文件、不启动浏览器、不调用模型；
-- Prompt、Validator、Renderer、Graph 和 API 应引用同一个 contract id，不复制一份会漂移的运行时说明。
+- `import shaderforge.contracts` 是轻量契约边界，不得通过 `shaderforge` 父包的兼容导出间接加载 `shaderforge.rendering` 或 Playwright；
+- Prompt、Validator、Renderer、Graph 和 API 应引用同一个 canonical contract；当前 Validator 和 Renderer 只支持 `WEBGL1_STATIC_NO_TEXTURE_V1`，收到不等价的 `RenderContract` 必须拒绝，不能只回显其 contract id 后继续按 V1 规则执行。

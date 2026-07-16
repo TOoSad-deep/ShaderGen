@@ -22,6 +22,15 @@ SMOOTHSTEP_CONSTANT_PATTERN = re.compile(
 )
 
 
+def _require_supported_contract(contract: RenderContract) -> None:
+    """拒绝把 V1 专用规则错误标记为其他运行契约."""
+    if contract != WEBGL1_STATIC_NO_TEXTURE_V1:
+        raise ValueError(
+            "validate_shader 当前只支持 canonical "
+            f"{WEBGL1_STATIC_NO_TEXTURE_V1.contract_id} 契约。"
+        )
+
+
 def _without_comments(source: str) -> str:
     """移除注释但保留换行数量，便于错误定位."""
 
@@ -205,6 +214,7 @@ def validate_shader(
     max_shader_chars: int = 30_000,
 ) -> ValidationResult:
     """按 V1 WebGL1 无贴图契约静态校验 Fragment Shader."""
+    _require_supported_contract(contract)
     violations: list[ValidationViolation] = []
     if not source.strip():
         violations.append(

@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from agent.app.graphs.png_to_shader_v1_graph import png_to_shader_v1_graph
 from agent.app.lab.capabilities import build_deterministic_capability_registry
 from agent.app.lab.models import NodeLabError
-from agent.app.nodes.integrations.node_lab import build_png_to_shader_v1_registry
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
+    build_png_to_shader_v1_registry,
+)
+
+ROOT = Path(__file__).resolve().parents[2]
 
 MODEL_NODE_FIXTURES = {
     "visual_analysis": "visual-analysis-success-v1",
@@ -48,6 +54,7 @@ def test_every_descriptor_has_machine_readable_test_and_benchmark_metadata() -> 
             "invariant_pass",
         ]
         assert descriptor.source_ref.startswith("src/agent/app/")
+        assert (ROOT / descriptor.source_ref).is_file()
         assert descriptor.input_examples
         assert descriptor.input_schema["examples"] == [
             example.inputs for example in descriptor.input_examples

@@ -18,21 +18,22 @@ from agent.app.lab.integration import (
 )
 from agent.app.lab.models import ExecutionMode, NodeDescriptor
 from agent.app.lab.registry import NodeRegistry
-from agent.app.nodes.integrations.node_lab.deterministic import (
+
+from .deterministic import (
     DeterministicNodeExecutor,
     MemoryReader,
     ResourceCleaner,
 )
-from agent.app.nodes.integrations.node_lab.model import (
+from .model import (
     DEFAULT_MODEL_FIXTURE_PATH,
     ModelRoleExecutor,
 )
-from agent.app.nodes.integrations.node_lab.registry import (
+from .registry import (
     build_png_to_shader_v1_descriptors,
 )
 
 PIPELINE_ID = "png_to_shader_v1"
-ROOT = Path(__file__).resolve().parents[6]
+ROOT = Path(__file__).resolve().parents[7]
 MODEL_EXECUTION_MODES: tuple[ExecutionMode, ...] = ("fixture", "mock", "real")
 
 
@@ -66,8 +67,7 @@ class PngToShaderV1NodeProvider:
     def source_paths(self) -> tuple[str, ...]:
         """返回 AI-off benchmark 必须冻结的生产源文件."""
         paths = {
-            *Path(ROOT / "src/agent/app/nodes/integrations/node_lab").glob("*.py"),
-            *Path(ROOT / "src/agent/app/nodes").rglob("*.py"),
+            *Path(ROOT / "src/agent/app/nodes/png_to_shader_v1").rglob("*.py"),
             *Path(ROOT / "src/agent/app/prompts").glob("*.yaml"),
             *Path(ROOT / "src/agent/app/prompts").glob("*.py"),
             *Path(ROOT / "src/agent/app/parsers").glob("*.py"),

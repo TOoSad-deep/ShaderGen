@@ -23,10 +23,11 @@ from agent.app.messages.png_to_shader_v1 import (
     text_part,
     validate_render_evidence_binding,
 )
-from agent.app.nodes.structured_output import invoke_structured_output
 from agent.app.parsers.png_to_shader_v1 import parse_visual_review
 from agent.app.prompts.prompt_loader import load_prompt_definition
 from shaderforge.contracts import WEBGL1_STATIC_NO_TEXTURE_V1
+
+from .structured_output import invoke_structured_output
 
 VISUAL_CRITIC_PROMPT = load_prompt_definition("visual_critic_v1")
 VISUAL_CRITIC_MODEL_CONFIG = NodeModelConfig(

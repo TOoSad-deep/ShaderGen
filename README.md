@@ -8,7 +8,9 @@ ShaderGen 是一个“图片生成视效 Shader”工程。最终技术架构以
 - 架构规范：`docs/ARCHITECTURE.md`
 - 功能状态：`docs/FEATURES.md`
 - 决策记录：`docs/DECISIONS.md`
-- 当前进度：`PROGRESS.md`
+- 当前进度与下一步：`PROGRESS.md`
+- 验收证据与耐久性：`docs/evidence/registry.json`
+- 历史进度快照：`docs/progress/archive/`（仅供审计，不代表当前事实）
 - 前端细则：`frontend/README.md`
 - 后端细则：`backend/README.md`
 
@@ -47,12 +49,14 @@ make check
 make benchmark-ai-off
 make benchmark-node-lab-ai-off
 make benchmark-node-lab-model
+make test-node-lab-ui
 make benchmark-png-to-shader QUALITY_PRESET=balanced MODEL_CALL_BUDGET=80
 npm --prefix frontend run e2e:procedural-v1
-npm --prefix frontend run e2e:node-lab
 ```
 
 `make check` 是默认主干验证，只覆盖单元测试、docs-check、LangGraph validate 和前端构建；跨组件改动仍需按范围追加集成测试、浏览器 E2E、PostgreSQL 或 benchmark，真实模型 benchmark 继续要求显式按量调用。
+
+GitHub 主 CI 使用 Python 3.12、Node 22、`uv sync --locked` 和 `npm ci --prefix frontend` 后执行完整 `make check`、全仓 Ruff 与 `mypy --strict src backend`，另以 Python 3.10/3.11 运行兼容性单测。定时集成测试和 PNG-to-Shader benchmark 才安装 Playwright Chromium；集成测试不注入模型密钥，真实模型 benchmark 仍只在仓库变量或手动输入显式开启时运行。
 
 服务默认地址：
 
@@ -65,25 +69,32 @@ npm --prefix frontend run e2e:node-lab
 
 ## 配置
 
-环境变量放在 `.env`，不要提交真实密钥。常用变量：
+环境变量按运行时分层：
+
+- Agent、Backend 和仓库脚本读取根目录 `.env`；从 `.env.example` 复制，不要提交真实密钥。
+- Vite 只读取 `frontend/.env.local` 或启动它的 shell；从 `frontend/.env.example` 复制。所有 `VITE_*` 值都会进入浏览器产物，禁止放置任何秘密。
+- 服务端关键变量如下，名称与根目录 `.env.example` 保持一致：
 
 ```text
+LANGSMITH_TRACING=false
+LANGSMITH_PROJECT=ShaderGen
 LANGSMITH_API_KEY=
-SHADER_GEN_MODEL_NAME=
-DASHSCOPE_API_KEY=
-DASHSCOPE_BASE_URL=
+SHADER_GEN_MODEL_NAME=dashscope:qwen3.7-plus
 SHADER_GEN_QWEN_ENABLE_THINKING=
-SHADER_GEN_QWEN_OUTPUT_THINKING=
+SHADER_GEN_QWEN_OUTPUT_THINKING=false
+DASHSCOPE_API_KEY=
+DASHSCOPE_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 GLM_API_KEY=
-GLM_BASE_URL=
+GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
 DEEPSEEK_API_KEY=
-DEEPSEEK_BASE_URL=
+DEEPSEEK_BASE_URL=https://api.deepseek.com
 OPENAI_API_KEY=
 OPENAI_BASE_URL=
-DATABASE_URL=
-TEST_DATABASE_URL=
+LOG_LEVEL=INFO
+SHADERGEN_CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
+DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
+TEST_DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/SHADERGEN_TEST
 LANGGRAPH_STRICT_MSGPACK=true
-LOG_LEVEL=
 SHADERGEN_NODE_LAB_ENABLED=false
 SHADERGEN_NODE_LAB_ROOT=
 SHADERGEN_NODE_LAB_BATCH_ROOT=
@@ -92,21 +103,21 @@ SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=false
 
 `DATABASE_URL` 配置后，Backend 使用独立 psycopg pool 运行 LangGraph Checkpointer/Store，并使用现有 asyncpg pool 写 Agent 过程账本。首次部署或 persistence 包升级后先执行 `make setup-memory-postgres`。`make test-memory-postgres` 优先使用 `TEST_DATABASE_URL`；未配置时会基于 `DATABASE_URL` 创建随机临时数据库，测试结束后自动删除。
 
-由于 F09 M5 自动质量门禁虽已通过、独立人工偏好门禁仍失败，最终发布 gate 继续为 no-go。当前实现只保留 `png_to_shader_v1` Graph 和 `procedural_v1` 产品路径；旧基础对话 Graph、legacy 生成、独立 `/review` API 及其专属 Node 已删除。V1 服务端完成 WebGL1 render/evaluate/review/refine；正常结果返回 `current_best`、评分和 final Artifact，Evaluator 不可用时返回明确的 WebGL-valid `unscored_fallback`，不伪造评分。页面继续明确标注实验/no-go，唯一实现路径不代表已获准灰度。公开 Artifact API 只允许 final-render、metrics 和 manifest。
+当前发布状态、阻塞项和 gate 证据只以 `docs/FEATURES.md` 与 `PROGRESS.md` 为准。当前实现只保留 `png_to_shader_v1` Graph 和 `procedural_v1` 产品路径；旧基础对话 Graph、legacy 生成、独立 `/review` API 及其专属 Node 已删除。V1 服务端完成 WebGL1 render/evaluate/review/refine；正常结果返回 `current_best`、评分和 final Artifact，Evaluator 不可用时返回明确的 WebGL-valid `unscored_fallback`，不伪造评分。页面是否显示实验/no-go 必须跟随 F09 状态，唯一实现路径本身不代表已获准灰度。公开 Artifact API 只允许 final-render、metrics 和 manifest。
 
 `SHADER_GEN_MODEL_NAME` 支持 `provider:model` 形式，例如 `dashscope:qwen3.7-plus`。`dashscope`、`openai`、`deepseek`、`glm` 表示凭据和 base URL 来源；真实模型名再决定使用 Qwen、GLM、DeepSeek 或 OpenAI 系列配置。
 
-F09 M5 的确定性 AI-off smoke 可直接运行；真实 10 例 benchmark 会产生按量模型调用，必须使用显式命令和硬预算。报告、逐例失败证据和盲评页面写入 `output/benchmarks/png-to-shader-v1/`。当前正式 run `m5-20260715T023445Z` 的自动检查 12/12 通过，独立盲评 10/10 完成；final/initial/tie 为 3/4/3，final 偏好率 30% 低于冻结的 50% 门槛，因此最终 gate 为 `failed`、灰度 no-go，F09 保持 active。
+F09 M5 的确定性 AI-off smoke 可直接运行；真实 benchmark 会产生按量模型调用，必须使用显式命令和硬预算。报告、逐例失败证据和盲评页面写入 `output/benchmarks/png-to-shader-v1/`。最新 gate、run、比例、证据 hash 和验证基线只在 `PROGRESS.md`、`docs/FEATURES.md` 与 `docs/evidence/registry.json` 维护。
 
-Node Lab 模块 benchmark 使用独立命令：`make benchmark-node-lab-ai-off` 运行 capability、真实 node target、scenario/pipeline、Renderer cold/warm 和 direct-vs-HTTP transport；`make benchmark-node-lab-model` 使用固定 fixture 离线检查五个模型角色。模型报告按角色聚合 Parser/Schema/binding/timeout、latency、token、费用和 requested/actual model；中断可恢复但仍留在分母，样本不足 20 时 p95 为 `null`。真实模型诊断必须运行 `SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=true uv run python scripts/run_node_lab_model_benchmark.py --execution-mode real --allow-model-calls`，并受 manifest 的调用、provider 输出 token、总 token、时间和费用硬预算限制。三类 CLI 只向 stdout 输出 suite/status/report path 单行 JSON，case 失败返回非零。所有 Node Lab 报告都不覆盖 M5 证据。
+Node Lab 模块使用三项独立门禁：`make benchmark-node-lab-ai-off` 覆盖 capability、真实 node target、scenario/pipeline、Renderer cold/warm 和 direct-vs-HTTP transport；`make benchmark-node-lab-model` 用固定 fixture 离线检查五个模型角色；`make test-node-lab-ui` 用假 API 验收工作台。H02 的当前状态与证据见 `docs/FEATURES.md`。模型报告按角色聚合 Parser/Schema/binding/timeout、latency、token、费用和 requested/actual model；中断可恢复但仍留在分母，样本不足 20 时 p95 为 `null`。真实模型诊断必须运行 `SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=true uv run python scripts/run_node_lab_model_benchmark.py --execution-mode real --allow-model-calls`，并受 manifest 的调用、provider 输出 token、总 token、时间和费用硬预算限制。三类 CLI 只向 stdout 输出 suite/status/report path 单行 JSON，case 失败返回非零。所有 Node Lab 报告都不覆盖 M5 证据。
 
-人工学习可使用 `/lab` 页面、Swagger 或 `scripts/run_node_lab_cli.py`；20 个 descriptor（包括确定性 `prepare_measurement_seed`）提供机器可读输入示例，步骤列表可重建 `base_step_id` DAG，Artifact 列表只返回同一 LabRun 的私有 descriptor。启动 Backend 必须使用 `make dev-node-lab` 或在进程导入前设置 `SHADERGEN_NODE_LAB_ENABLED=true`；默认关闭。私有 LabRun/Artifact 默认写入 `output/node-lab/http`，HTTP batch 报告默认写入 `output/benchmarks/node-lab-http`，分别可用 `SHADERGEN_NODE_LAB_ROOT` 与 `SHADERGEN_NODE_LAB_BATCH_ROOT` 覆盖。完整教程见 `docs/NODE_LAB_GUIDE.md`。
+人工学习可使用 `/lab` 页面、Swagger 或 `scripts/run_node_lab_cli.py`；生产 Provider 提供机器可读 descriptor 和输入示例，步骤列表可重建 `base_step_id` DAG，Artifact 列表只返回同一 LabRun 的私有 descriptor。启动 Backend 必须使用 `make dev-node-lab` 或在进程导入前设置 `SHADERGEN_NODE_LAB_ENABLED=true`；默认关闭。私有 LabRun/Artifact 默认写入 `output/node-lab/http`，HTTP batch 报告默认写入 `output/benchmarks/node-lab-http`，分别可用 `SHADERGEN_NODE_LAB_ROOT` 与 `SHADERGEN_NODE_LAB_BATCH_ROOT` 覆盖。完整教程见 `docs/NODE_LAB_GUIDE.md`。
 
 ## 开发规则
 
 - 一次只处理 `docs/FEATURES.md` 中一个 `active` 功能。
 - 未通过验证命令，不得把功能标记为 `passing`。
-- 会话结束前更新 `PROGRESS.md`。
+- 会话结束前原地刷新 `PROGRESS.md` 的当前交接信息；例行验证更新现有基线，只有状态、契约、门禁、里程碑或重要缺口变化时才新增最近变更。
 - 架构、目录边界、命令、环境变量、功能状态或前后端契约变化时，同步更新对应 Markdown。
 - 对仓库事实无法确定且会影响架构、契约、数据、安全或验收的问题，先向用户确认。
 - HTTP route 放 `backend/app/api/routes/`，并在 `backend/app/api/router.py` 注册。

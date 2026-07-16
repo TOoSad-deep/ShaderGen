@@ -7,11 +7,13 @@ import {
   executeNodeLabStep,
   getNodeLabHealth,
   getNodeLabRun,
+  getNodeLabStep,
   listNodeLabArtifacts,
   listNodeLabNodes,
   listNodeLabSteps,
   NodeLabApiError,
   resolveNodeLabArtifactUrl,
+  summarizeNodeLabStep,
   uploadNodeLabArtifact,
   type NodeLabArtifact,
   type NodeLabEffectMode,
@@ -20,6 +22,7 @@ import {
   type NodeLabNodeDescriptor,
   type NodeLabRun,
   type NodeLabStep,
+  type NodeLabStepSummary,
 } from "../api/nodeLab";
 
 function pretty(value: unknown): string {
@@ -58,7 +61,8 @@ export function NodeLabPage() {
   const [selectedNodeId, setSelectedNodeId] = useState("");
   const [search, setSearch] = useState("");
   const [run, setRun] = useState<NodeLabRun | null>(null);
-  const [steps, setSteps] = useState<NodeLabStep[]>([]);
+  const [steps, setSteps] = useState<NodeLabStepSummary[]>([]);
+  const [stepDetails, setStepDetails] = useState<Record<string, NodeLabStep>>({});
   const [selectedStepId, setSelectedStepId] = useState<string | null>(null);
   const [projectId, setProjectId] = useState("node-lab-local");
   const [resumeRunId, setResumeRunId] = useState("");
@@ -78,7 +82,7 @@ export function NodeLabPage() {
   const [error, setError] = useState("");
 
   const selectedNode = nodes.find((node) => node.node_id === selectedNodeId) ?? null;
-  const selectedStep = steps.find((step) => step.step_id === selectedStepId) ?? steps.at(-1) ?? null;
+  const selectedStep = selectedStepId ? stepDetails[selectedStepId] ?? null : null;
   const visibleNodes = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return nodes;
@@ -123,6 +127,26 @@ export function NodeLabPage() {
     setInputsText(pretty(example?.inputs ?? {}));
   }, [selectedNode]);
 
+  useEffect(() => {
+    const labRunId = run?.lab_run_id;
+    const stepId = selectedStepId;
+    if (!labRunId || !stepId || stepDetails[stepId]) return;
+
+    let cancelled = false;
+    void getNodeLabStep(labRunId, stepId)
+      .then((detail) => {
+        if (!cancelled) {
+          setStepDetails((current) => ({ ...current, [stepId]: detail }));
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(errorText(reason));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [run?.lab_run_id, selectedStepId, stepDetails]);
+
   function applyExample(nextExampleId: string) {
     setExampleId(nextExampleId);
     const example = selectedNode?.input_examples.find((item) => item.example_id === nextExampleId);
@@ -147,12 +171,13 @@ export function NodeLabPage() {
 
   function selectRun(
     nextRun: NodeLabRun,
-    nextSteps: NodeLabStep[] = [],
+    nextSteps: NodeLabStepSummary[] = [],
     nextArtifacts: NodeLabArtifact[] = [],
   ) {
     setRun(nextRun);
     setResumeRunId(nextRun.lab_run_id);
     setSteps(nextSteps);
+    setStepDetails({});
     setSelectedStepId(nextSteps.at(-1)?.step_id ?? null);
     setBaseStepId(nextSteps.at(-1)?.step_id ?? "");
     setUploadedArtifacts(nextArtifacts);
@@ -202,7 +227,9 @@ export function NodeLabPage() {
           executionMode === "mock" && mockArtifactId ? mockArtifactId : null,
         inputs: parseObject(inputsText, "节点输入"),
       });
-      setSteps((current) => [...current, completed]);
+      setSteps((current) => [...current, summarizeNodeLabStep(completed)]);
+      setStepDetails((current) => ({ ...current, [completed.step_id]: completed }));
+      setUploadedArtifacts((current) => [...current, ...completed.artifacts]);
       setSelectedStepId(completed.step_id);
       setBaseStepId(completed.step_id);
     });
@@ -223,10 +250,7 @@ export function NodeLabPage() {
     });
   }
 
-  const allArtifacts = [
-    ...uploadedArtifacts,
-    ...steps.flatMap((step) => step.artifacts),
-  ].filter(
+  const allArtifacts = uploadedArtifacts.filter(
     (artifact, index, items) =>
       items.findIndex((candidate) => candidate.artifact_id === artifact.artifact_id) === index,
   );
@@ -240,7 +264,7 @@ export function NodeLabPage() {
           <p>逐节点输入、观察输出、分支步骤并保留可复现证据。</p>
         </div>
         <div className="node-lab-health">
-          <span>{health ? `${nodes.length}/20 节点可用` : "正在连接"}</span>
+          <span>{health ? `${nodes.length} 个节点可用` : "正在连接"}</span>
           <span className={health?.real_model_enabled ? "is-warning" : ""}>
             Real Model：{health?.real_model_enabled ? "服务端已开启" : "关闭"}
           </span>
@@ -425,7 +449,11 @@ export function NodeLabPage() {
                 <pre>{pretty({ diagnostics: selectedStep.diagnostics, usage: selectedStep.usage, provenance: selectedStep.provenance })}</pre>
               </details>
             </>
-          ) : <div className="node-lab-empty">执行一个节点后在这里查看结果。</div>}
+          ) : (
+            <div className="node-lab-empty">
+              {selectedStepId ? "正在读取步骤详情…" : "执行一个节点后在这里查看结果。"}
+            </div>
+          )}
         </section>
       </section>
 

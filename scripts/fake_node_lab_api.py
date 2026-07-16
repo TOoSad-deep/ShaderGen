@@ -9,7 +9,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
-from agent.app.nodes.integrations.node_lab import build_png_to_shader_v1_registry
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
+    build_png_to_shader_v1_registry,
+)
+from backend.app.schemas.node_lab import NodeLabStepListResponse
 
 PORT = int(os.getenv("SHADERGEN_FAKE_API_PORT", "18090"))
 ORIGIN = os.getenv("SHADERGEN_E2E_ORIGIN", "http://127.0.0.1:15175")
@@ -44,6 +47,36 @@ def _artifact(index: int, *, kind: str = "step_json") -> dict[str, Any]:
         "size_bytes": 128 + index,
         "created_at": _now(),
     }
+
+
+def _step_summary(step: dict[str, Any]) -> dict[str, Any]:
+    """把完整假步骤映射为生产 HTTP 契约使用的 DAG 摘要."""
+    return {
+        "schema_version": "node_lab_step_summary_v1",
+        "lab_run_id": step["lab_run_id"],
+        "step_id": step["step_id"],
+        "base_step_id": step["base_step_id"],
+        "node_id": step["node_id"],
+        "execution_mode": step["execution_mode"],
+        "execution_status": step["execution_status"],
+        "outcome": step["outcome"],
+        "artifact_count": len(step["artifacts"]),
+        "next_action": step["next_action"],
+        "duration_ms": step["duration_ms"],
+        "execution_fingerprint": step["execution_fingerprint"],
+        "created_at": step["created_at"],
+    }
+
+
+def _step_list() -> dict[str, Any]:
+    """用 Backend schema 校验 E2E 假 API，防止 transport fixture 漂移."""
+    return NodeLabStepListResponse.model_validate(
+        {
+            "lab_run_id": RUN_ID,
+            "step_ids": [step["step_id"] for step in STEPS],
+            "steps": [_step_summary(step) for step in STEPS],
+        }
+    ).model_dump(mode="json")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -89,9 +122,7 @@ class Handler(BaseHTTPRequestHandler):
             self._json(_run())
             return
         if path == f"/api/lab/v1/runs/{RUN_ID}/steps":
-            self._json(
-                {"lab_run_id": RUN_ID, "step_ids": [step["step_id"] for step in STEPS]}
-            )
+            self._json(_step_list())
             return
         step_prefix = f"/api/lab/v1/runs/{RUN_ID}/steps/"
         if path.startswith(step_prefix):

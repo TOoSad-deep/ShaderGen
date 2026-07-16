@@ -18,13 +18,14 @@ from agent.app.messages.png_to_shader_v1 import (
     multimodal_human_message,
     text_part,
 )
-from agent.app.nodes.structured_output import invoke_structured_output
 from agent.app.parsers.png_to_shader_v1 import (
     parse_visual_analysis,
     repair_visual_analysis_roi_purposes,
 )
 from agent.app.prompts.prompt_loader import load_prompt_definition
 from shaderforge.contracts import WEBGL1_STATIC_NO_TEXTURE_V1
+
+from .structured_output import invoke_structured_output
 
 VISUAL_ANALYSIS_PROMPT = load_prompt_definition("visual_analysis_v1")
 VISUAL_ANALYSIS_MODEL_CONFIG = NodeModelConfig(

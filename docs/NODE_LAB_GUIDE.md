@@ -6,9 +6,21 @@ Node Lab 是 PNG-to-Shader V1 的本地实验工作台。它让人工、Codex、
 
 - 普通 Backend 默认不注册 `/api/lab/v1/*`；只有 `make dev-node-lab` 显式开启。
 - 默认执行 deterministic 或 fixture，不调用真实模型。
-- `project_commit` 一律拒绝；Lab 只写 `output/node-lab/` 下的私有证据，不写产品 run 或真实项目 Memory。
+- `project_commit` 一律拒绝；交互式 LabRun 只写 `output/node-lab/` 下的私有证据，不写产品 run 或真实项目 Memory。模块 benchmark 另写 `output/benchmarks/node-lab*`，两者都不能覆盖 M5 证据。
 - 图片、完整 GLSL、渲染图、ContextPack 和 mock 原文以同一 LabRun 内的不透明 Artifact ID 传递。
-- Real 模型需要环境开关和单次请求/CLI 开关同时允许，并继续受固定 manifest 与预算约束。
+- Real 单步调用需要环境开关和当前请求/CLI 开关同时允许；它使用父 State 的 `BudgetPolicy`，缺失时采用 balanced 默认值。只有独立 real-model benchmark 额外冻结 suite manifest、整套 token/时间/费用预算和价格版本。
+
+## 运行类型、预算与输出
+
+| 场景 | 是否调用真实模型 | 显式门禁 | 预算范围 | 默认输出 |
+|---|---|---|---|---|
+| 浏览器、Swagger、CLI 的 deterministic/fixture/mock 单步 | 否 | Node Lab transport 必须显式开启 | descriptor 输入上限和 Lab 副作用门禁 | HTTP：`output/node-lab/http`；CLI：`output/node-lab/cli` |
+| 浏览器、Swagger、CLI 的 ad-hoc real 单步 | 是 | `SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=true`，且请求 `allow_model_call=true` 或 CLI `--allow-model-call` | 父 State `BudgetPolicy`；缺失时 balanced。没有冻结 suite 总 token/费用预算 | 对应 LabRun 目录 |
+| `make benchmark-node-lab-ai-off` | 否 | 无模型开关 | 固定 AI-off suite、attempt 与 Renderer/transport 预算 | `output/benchmarks/node-lab*` |
+| `make benchmark-node-lab-model` | 否 | 固定 fixture | 固定五角色 manifest 和离线 attempt 预算 | `output/benchmarks/node-lab-model` |
+| `run_node_lab_model_benchmark.py --execution-mode real` | 是 | 环境开关与 `--allow-model-calls` 同时提供 | 固定 manifest 下的调用、provider 输出 token、总 token、wall time、费用和价格版本硬预算 | `output/benchmarks/node-lab-model` |
+
+ad-hoc real 适合受控诊断单个生产模型节点，不等价于正式模型角色 benchmark，也不能引用单步结果宣称整套 manifest 通过。HTTP 使用 `execution_mode="real"` 与 `allow_model_call=true`；CLI 使用相同 execution mode 和 `--allow-model-call`。
 
 ## 最快开始：浏览器工作台
 
@@ -68,8 +80,8 @@ make dev-frontend
 Node Lab 内核只认 `NodeProvider` 协议，不认 PNG-to-Shader 的具体文件、Graph 或节点 ID。新增生产 Node 时：
 
 1. 在生产 Graph 中正常注册 Node，并完成 Graph 可视化与路由测试。
-2. 在 `src/agent/app/nodes/integrations/node_lab/registry.py` 声明 descriptor、Schema 和机器可读示例。
-3. 若 Node 只消费 JSON-safe State 并返回 JSON-safe partial State，用 `DirectNodeExecutor` 绑定 callable；若需要 Artifact、Renderer、Memory、Gateway 或安全输出投影，在生产 integration 包内提供专用 Adapter。
+2. 在所属功能命名空间的 Provider registry 声明 descriptor、Schema 和机器可读示例；当前路径是 `src/agent/app/nodes/png_to_shader_v1/integrations/node_lab/registry.py`。
+3. 若 Node 只消费 JSON-safe State 并返回 JSON-safe partial State，可用 `DirectNodeExecutor` 绑定 callable。当前 V1 的 15 个非模型 descriptor 统一由 `DeterministicNodeExecutor` 负责 Artifact hydration、依赖生命周期、副作用门禁和输出投影，五个模型 descriptor 统一由 `ModelRoleExecutor` 提供 fixture/mock/real binding；不要把 descriptor 数量误写成独立 Adapter 数量。
 4. 不修改 `src/agent/app/lab/` 或 `agent.app.services.node_lab`。一致性测试会要求 Provider descriptor 与生产 Graph 节点集合完全相等，且所有声明的 execution mode 都有 Executor。
 
 这里的“解耦”是指 Harness 不感知 Node 实现；Node Lab 仍会通过 Provider 调用真实生产 Node，以保证它测试的是生产语义，而不是第二套模拟实现。

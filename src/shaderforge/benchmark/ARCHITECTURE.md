@@ -4,7 +4,7 @@
 
 ## 当前能力
 
-- 校验固定 manifest 中每张 PNG 的 SHA-256、尺寸、bbox 与关键 ROI；
+- 只接受 manifest/gate schema v1，并校验字段白名单、canonical contract、非空身份、坐标系统、每张 PNG 的 SHA-256/尺寸/bbox/关键 ROI、ROI id 唯一性，以及整数阈值的类型与非负范围；未知版本和未知字段 fail closed；
 - 从 `TargetMeasurements` 生成固定椭圆 Shader，验证无模型条件下 Validator、WebGL1 Renderer 和 Basic Oracle 可运行；
 - 以运行前冻结的 `m5_gate.yaml` 聚合 compile、静态校验、initial/final 改善、current_best 单调性、证据可追溯性和粉色凝胶局部门槛；
 - 用稳定 hash 随机化 initial/final 的 A/B 位置；新式公开包只写入 `blind-review/reviewer/`，私有 assignment 与 evidence manifest 留在父目录，评审者目录不得包含角色映射；
@@ -19,6 +19,8 @@
 ## 边界
 
 - 真实模型调用、预算、逐样例恢复和输出目录编排属于 `scripts/run_png_to_shader_v1_benchmark.py`；
+- 全局模型调用预算必须 fail-closed：后处理异常优先恢复实际调用数，无可靠计数时按 case 分配上限扣账；异常与取消都保存不含异常原文和 reasoning 的安全失败证据；
+- case Artifact 在 `result.json` 之前写入，`result.json` 通过原子替换提交完成状态；缺失该文件的目录不是已完成事务，恢复时必须重做；
 - runner 必须在首个模型调用前冻结 config schema v3，其中包含 objective 与 initial 选择策略；report schema v3 同时保存 objective loss、生产内部 loss 和候选来源，并以逐调用审计为准区分 requested/actual model；
 - 旧 CandidateRecord 缺少 `origin` 时按 `model` 兼容；旧 config schema v1/v2 的完整运行仍可只读评估，但不完整 AI-on 不允许续接到新 objective，必须使用新的 suite run；
 - 若一个 case 没有成功的模型候选，objective pair 明确为不可比较且不生成盲评包，不允许确定性 seed 同时占据 initial 与 final 制造虚假改善或偏好证据；

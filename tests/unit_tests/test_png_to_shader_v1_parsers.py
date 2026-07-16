@@ -14,7 +14,7 @@ from agent.app.parsers.png_to_shader_v1 import (
     repair_shader_author_initial_bindings,
 )
 from shaderforge.contracts import ProblemDomain
-from tests.unit_tests.png_to_shader_v1_samples import (
+from tests.fixtures.png_to_shader_v1_samples import (
     GOLDEN_GLSL,
     analysis_payload,
     author_payload,

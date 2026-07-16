@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
+import pytest
+
+from shaderforge.contracts import WEBGL1_STATIC_NO_TEXTURE_V1
 from shaderforge.validation import (
     repair_constant_reversed_smoothsteps,
     validate_shader,
@@ -25,6 +30,16 @@ def test_valid_webgl1_no_texture_shader_passes() -> None:
     assert result.valid
     assert result.errors == ()
     assert result.contract_id == "webgl1_static_no_texture_v1"
+
+
+def test_noncanonical_contract_is_rejected_before_validation() -> None:
+    unsupported = replace(
+        WEBGL1_STATIC_NO_TEXTURE_V1,
+        contract_id="webgl1_static_no_texture_custom",
+    )
+
+    with pytest.raises(ValueError, match="只支持 canonical"):
+        validate_shader(VALID_SHADER, contract=unsupported)
 
 
 def test_texture_sampling_is_rejected_but_comment_is_ignored() -> None:

@@ -238,6 +238,11 @@ class PlaywrightWebGL1Renderer:
         replay_on_worker_failure: int = 1,
     ) -> None:
         """配置渲染契约和 worker 失败重放次数."""
+        if contract != WEBGL1_STATIC_NO_TEXTURE_V1:
+            raise ValueError(
+                "PlaywrightWebGL1Renderer 当前只支持 canonical "
+                f"{WEBGL1_STATIC_NO_TEXTURE_V1.contract_id} 契约。"
+            )
         if replay_on_worker_failure < 0:
             raise ValueError("replay_on_worker_failure 不能小于 0。")
         self.contract = contract

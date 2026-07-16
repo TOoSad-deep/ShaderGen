@@ -29,11 +29,18 @@ class _NodeSpec:
     default_fixture_ids: tuple[str, ...] = ()
 
 
-_PREPARATION_SOURCE = "src/agent/app/nodes/png_to_shader_v1/preparation.py"
-_CANDIDATES_SOURCE = "src/agent/app/nodes/png_to_shader_v1/candidates.py"
-_RENDER_EVALUATE_SOURCE = "src/agent/app/nodes/png_to_shader_v1/render_evaluate.py"
-_SELECTION_SOURCE = "src/agent/app/nodes/png_to_shader_v1/selection.py"
-_FINALIZATION_SOURCE = "src/agent/app/nodes/png_to_shader_v1/finalization.py"
+_DETERMINISTIC_ROOT = "src/agent/app/nodes/png_to_shader_v1/deterministic"
+_MODEL_ROOT = "src/agent/app/nodes/png_to_shader_v1/model"
+_PREPARATION_SOURCE = f"{_DETERMINISTIC_ROOT}/preparation.py"
+_CANDIDATES_SOURCE = f"{_DETERMINISTIC_ROOT}/candidates.py"
+_RENDER_EVALUATE_SOURCE = f"{_DETERMINISTIC_ROOT}/render_evaluate.py"
+_SELECTION_SOURCE = f"{_DETERMINISTIC_ROOT}/selection.py"
+_FINALIZATION_SOURCE = f"{_DETERMINISTIC_ROOT}/finalization.py"
+_CONTEXT_SOURCE = f"{_DETERMINISTIC_ROOT}/context.py"
+_PROMOTION_SOURCE = f"{_DETERMINISTIC_ROOT}/promotion.py"
+_VISUAL_ANALYSIS_SOURCE = f"{_MODEL_ROOT}/visual_analysis.py"
+_SHADER_AUTHOR_SOURCE = f"{_MODEL_ROOT}/shader_author.py"
+_VISUAL_CRITIC_SOURCE = f"{_MODEL_ROOT}/visual_critic.py"
 _ROUTING_SOURCE = "src/agent/app/graphs/png_to_shader_v1_routing.py"
 
 _NODE_SPECS = (
@@ -91,7 +98,7 @@ _NODE_SPECS = (
             "events",
         ),
         ("memory_read",),
-        "src/agent/app/nodes/prepare_context_node.py",
+        _CONTEXT_SOURCE,
     ),
     _NodeSpec(
         "measure_target",
@@ -131,7 +138,7 @@ _NODE_SPECS = (
             "logs",
         ),
         ("model_call",),
-        "src/agent/app/nodes/visual_analysis_node.py",
+        _VISUAL_ANALYSIS_SOURCE,
         requires_model=True,
         default_fixture_ids=(
             "visual-analysis-success-v1",
@@ -182,7 +189,7 @@ _NODE_SPECS = (
             "logs",
         ),
         ("model_call",),
-        "src/agent/app/nodes/shader_author_node.py",
+        _SHADER_AUTHOR_SOURCE,
         requires_model=True,
         default_fixture_ids=(
             "author-initial-success-v1",
@@ -310,7 +317,7 @@ _NODE_SPECS = (
             "logs",
         ),
         ("model_call",),
-        "src/agent/app/nodes/shader_author_node.py",
+        _SHADER_AUTHOR_SOURCE,
         requires_model=True,
         default_fixture_ids=(
             "author-compile-repair-success-v1",
@@ -443,7 +450,7 @@ _NODE_SPECS = (
             "logs",
         ),
         ("model_call",),
-        "src/agent/app/nodes/visual_critic_node.py",
+        _VISUAL_CRITIC_SOURCE,
         requires_model=True,
         default_fixture_ids=(
             "visual-critic-success-v1",
@@ -513,7 +520,7 @@ _NODE_SPECS = (
             "logs",
         ),
         ("model_call",),
-        "src/agent/app/nodes/shader_author_node.py",
+        _SHADER_AUTHOR_SOURCE,
         requires_model=True,
         default_fixture_ids=(
             "author-visual-refine-success-v1",
@@ -551,7 +558,7 @@ _NODE_SPECS = (
         ("project_id", "run_id", "current_best_record", "final_result"),
         ("memory_preview", "memory_status", "events"),
         ("memory_preview_only",),
-        "src/agent/app/nodes/promote_validated_strategy_node.py",
+        _PROMOTION_SOURCE,
     ),
 )
 

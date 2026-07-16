@@ -6,6 +6,7 @@
 
 共享内核已提供：
 
+- `__init__.py`：保留 Harness 公共名的惰性导出；仅导入 `agent.app.lab.models` 或访问模型契约不会构造 `runner.py` 的 Application 依赖，也不加载 Renderer/Playwright；
 - `models.py`：严格、JSON-safe 的请求、响应、节点描述、机器可读输入示例和 Artifact 契约；
 - `registry.py`：只校验 Provider 传入的 descriptor 唯一性和 pipeline 一致性，不内置任何生产节点；
 - `integration.py`：定义通用 `NodeProvider`、`NodeExecutorBinding`、`NodeExecutionHost` 和适用于 JSON-safe Node 的 `DirectNodeExecutor`；
@@ -21,36 +22,37 @@
 - `suites.py`：只解析三个仓库内固定 AI-off suite id，不接受客户端 manifest 路径；
 - `runner.py`：在同一 Application API 上同时执行 capability、节点步骤和 suite，并显式管理可复用 Renderer session。
 
-PNG-to-Shader V1 的 20 个 descriptor、执行模式和具体 Adapter 已全部移到生产侧 `agent.app.nodes.integrations.node_lab` Provider。Harness 创建时只读取 Provider 的 descriptor，并自动安装 `(node_id, execution_mode)` binding；`pipeline_id` 由 Provider 决定并与 LabRun 绑定。普通 JSON-safe Node 可直接使用 `DirectNodeExecutor`，有 Artifact、Renderer、Memory 或模型依赖的 Node 在生产 Provider 内提供专用 Adapter。新增 Node 不得修改 `agent.app.lab` 或 Node Lab Service；只在生产 Provider 登记 descriptor/binding，而 Graph 一致性测试会防止漏登记。
+PNG-to-Shader V1 的 20 个 descriptor、执行模式和具体 Adapter 位于生产侧 `agent.app.nodes.png_to_shader_v1.integrations.node_lab` Provider。Harness 创建时只读取 Provider 的 descriptor，并自动安装 `(node_id, execution_mode)` binding；`pipeline_id` 由 Provider 决定并与 LabRun 绑定。普通 JSON-safe Node 可直接使用 `DirectNodeExecutor`，有 Artifact、Renderer、Memory 或模型依赖的 Node 在生产 Provider 内提供专用 Adapter。新增 Node 不得修改 `agent.app.lab` 或 Node Lab Service；只在所属功能命名空间的 Provider 登记 descriptor/binding，而 Graph 一致性测试会防止漏登记。
 
 PNG-to-Shader Provider 内的 `DeterministicNodeExecutor` 仍只做 JSON-safe State/不透明 Artifact 映射，然后直接调用与 Graph 相同的 Node factory/routing；初始化、测量、候选物化、render/evaluate、selection、best 重载、Review 持久化、finalize 和策略晋升预览没有 Lab 平行实现。`prepare_measurement_seed` 的 Author/GLSL/provenance 仍只写私有 Artifact，独立 root、origin、generator version 和 hash 绑定由生产 `materialize_candidate` 校验。
 
-普通 Renderer capability 与单步生产 `render_and_evaluate` 每次创建并关闭独立浏览器生命周期；单步 Node 只改变依赖生命周期，不复制渲染或评分语义。独立 `renderer_warm` suite 在一次 suite 内复用 capability Renderer，并把 warmup 与 measured attempt 分开记录。独立模型 runner 默认以 fixture 离线执行五个角色，real 模式要求三重门禁和 semantic/repair/token/wall/cost 硬预算；provider 输出 token cap 在调用前下推，报告按角色分离 Parser/Schema/binding/timeout、latency、用量和模型身份。逐节点 CLI、HTTP/Swagger 与 `/lab` 页面只消费同一 Application API/descriptor；仍不允许 `project_commit` 或真实 Memory 写入。
+普通 Renderer capability 与单步生产 `render_and_evaluate` 每次创建并关闭独立浏览器生命周期；单步 Node 只改变依赖生命周期，不复制渲染或评分语义。独立 `renderer_warm` suite 在一次 suite 内复用 capability Renderer，并把 warmup 与 measured attempt 分开记录。`agent.app.benchmarks.model_roles` 的独立模型 runner 默认以 fixture 离线执行五个角色，real 模式要求三重门禁和 semantic/repair/token/wall/cost 硬预算；provider 输出 token cap 在调用前下推，报告按角色分离 Parser/Schema/binding/timeout、latency、用量和模型身份。逐节点 CLI、HTTP/Swagger 与 `/lab` 页面只消费同一 Application API/descriptor；仍不允许 `project_commit` 或真实 Memory 写入。
 
 ## 依赖方向
 
 ```text
 agent.app.services.node_lab
   -> agent.app.lab.runner + models/store/benchmark
-  -> agent.app.nodes.integrations.node_lab（仅公共 NodeProvider）
+  -> agent.app.nodes.png_to_shader_v1.integrations.node_lab（仅公共 NodeProvider）
 
 agent.app.lab.runner
   -> NodeProvider / NodeExecutorBinding 通用协议
   -X-> agent.app.nodes / agent.app.graphs / 具体 Gateway
 
-agent.app.nodes.integrations.node_lab
+agent.app.nodes.png_to_shader_v1.integrations.node_lab
   -> production node factories + routing + prompts + parsers
   -> Lab ArtifactStore facade（逻辑 ref 映射为不透明 artifact id）
+  -> route_deciders() -> agent.app.lab.runner -> agent.app.lab.adapters
 
 agent.app.lab.adapters
   -> shaderforge.public
-  -> agent.app.graphs.png_to_shader_v1_routing（仅两个生产纯路由函数）
+  -X-> agent.app.graphs / production routing（只接收 Provider 注入的 RouteDecider）
 
 HTTP / CLI transport
   -> agent.app.services.node_lab
 ```
 
-`lab/` 不依赖 FastAPI、Backend、LangGraph 编译图、具体 LLM Gateway、`agent.app.nodes.*` 或 `agent.app.graphs.*`。独立 routing capability 也通过 Provider 注入纯函数，不再由 `lab/adapters.py` 导入生产 routing。客户端只能选择 Provider 已描述的 node id，禁止按字符串反射 import。
+`lab/` 不依赖 FastAPI、Backend、LangGraph 编译图、具体 LLM Gateway、`agent.app.nodes.*` 或 `agent.app.graphs.*`。这是模块级依赖边界：`models.py` 不依赖 Runner/Adapter/Renderer，只有显式访问 `NodeLabApplication` 等应用层导出时才惰性加载对应实现。独立 routing capability 也通过 Provider 注入纯函数，不再由 `lab/adapters.py` 导入生产 routing。客户端只能选择 Provider 已描述的 node id，禁止按字符串反射 import。
 
 ## 安全与证据规则
 

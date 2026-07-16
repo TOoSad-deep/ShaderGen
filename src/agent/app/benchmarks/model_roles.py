@@ -42,16 +42,12 @@ from agent.app.lab.models import (
     StepExecutionRequest,
     ensure_json_object,
 )
-from agent.app.nodes.shader_author_node import (
+from agent.app.nodes.png_to_shader_v1 import (
     AUTHOR_PROMPTS,
     SHADER_AUTHOR_MODEL_CONFIG,
-)
-from agent.app.nodes.structured_output import STRUCTURED_OUTPUT_REPAIR_PROMPT
-from agent.app.nodes.visual_analysis_node import (
+    STRUCTURED_OUTPUT_REPAIR_PROMPT,
     VISUAL_ANALYSIS_MODEL_CONFIG,
     VISUAL_ANALYSIS_PROMPT,
-)
-from agent.app.nodes.visual_critic_node import (
     VISUAL_CRITIC_MODEL_CONFIG,
     VISUAL_CRITIC_PROMPT,
 )
@@ -1197,14 +1193,15 @@ async def run_model_benchmark(
     store = RunArtifactStore(run_root)
     service_path = Path(__file__).resolve()
     prompt_paths = list((ROOT / "src/agent/app/prompts").glob("*.yaml"))
+    v1_node_paths = list(
+        (ROOT / "src/agent/app/nodes/png_to_shader_v1").rglob("*.py")
+    )
     environment, source_fingerprint, environment_fingerprint = source_environment(
         extra_source_paths=(
             service_path,
-            ROOT / "src/agent/app/nodes/integrations/node_lab/model.py",
-            ROOT / "src/agent/app/nodes/integrations/node_lab/registry.py",
-            ROOT / "src/agent/app/nodes/structured_output.py",
             ROOT / "src/agent/app/parsers/png_to_shader_v1.py",
             suite.fixture_path,
+            *v1_node_paths,
             *prompt_paths,
         )
     )

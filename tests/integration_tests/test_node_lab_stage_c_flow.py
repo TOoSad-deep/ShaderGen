@@ -17,7 +17,7 @@ from agent.app.lab.models import (
     StepExecutionRequest,
     StepExecutionResponse,
 )
-from agent.app.nodes.integrations.node_lab import (
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
     MODEL_EXECUTION_MODES,
     DeterministicNodeExecutor,
     ModelRoleExecutor,
@@ -26,7 +26,7 @@ from agent.app.nodes.integrations.node_lab import (
 from agent.app.services.node_lab import NodeLabApplication, create_node_lab_application
 from backend.app.api.routes.node_lab import router as node_lab_router
 from backend.app.services.node_lab import NodeLabBackendService
-from tests.unit_tests.png_to_shader_v1_samples import GOLDEN_GLSL
+from tests.fixtures.png_to_shader_v1_samples import GOLDEN_GLSL
 
 ROOT = Path(__file__).resolve().parents[2]
 REFERENCE_IMAGE = ROOT / "benchmarks/png_to_shader_v1/images/pink_gel.png"

@@ -1,3 +1,5 @@
+"""PNG-to-Shader V1 单元与集成测试共享的结构化样例."""
+
 from __future__ import annotations
 
 import json

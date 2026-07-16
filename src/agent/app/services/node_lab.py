@@ -40,7 +40,7 @@ from agent.app.lab.suites import (
     describe_registered_suites,
     resolve_registered_suite,
 )
-from agent.app.nodes.integrations.node_lab import (
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
     DEFAULT_MODEL_FIXTURE_PATH,
     MemoryReader,
     ResourceCleaner,

@@ -117,10 +117,11 @@ def test_source_fingerprint_covers_deterministic_and_production_sources(
     )
     hashes = environment["source_hashes"]
 
-    assert "src/agent/app/nodes/integrations/node_lab/deterministic.py" in hashes
-    assert "src/agent/app/nodes/integrations/node_lab/registry.py" in hashes
-    assert "src/agent/app/nodes/png_to_shader_v1/runtime.py" in hashes
-    assert "src/agent/app/nodes/png_to_shader_v1/render_evaluate.py" in hashes
+    node_root = "src/agent/app/nodes/png_to_shader_v1"
+    assert f"{node_root}/integrations/node_lab/deterministic.py" in hashes
+    assert f"{node_root}/integrations/node_lab/registry.py" in hashes
+    assert f"{node_root}/deterministic/runtime.py" in hashes
+    assert f"{node_root}/deterministic/render_evaluate.py" in hashes
     assert "src/agent/app/prompts/shader_author_initial_v1.yaml" in hashes
     assert "src/agent/app/parsers/png_to_shader_v1.py" in hashes
     assert len(source_fingerprint) == 64

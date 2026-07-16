@@ -2,51 +2,74 @@
 
 import json
 import logging
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
+from contextlib import AsyncExitStack, asynccontextmanager
+from typing import cast
 from uuid import uuid4
 
 from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
+from starlette.types import ExceptionHandler, Lifespan
 
-from backend.app.api.router import api_router
+from agent.app.services.png_to_shader_v1 import create_png_to_shader_v1_service
+from backend.app.api.router import build_api_router
 from backend.app.core.logging import configure_logging
+from backend.app.core.settings import BackendSettings
 from backend.app.database.agent_memory import close_agent_memory, open_agent_memory
 from backend.app.database.session import close_database_pool, open_database_pool
 from backend.app.middleware.request_logging import build_request_logging_middleware
 from backend.app.schemas.shader import ShaderGenerationErrorDetail
 from backend.app.services.shader import ProjectLockRegistry
 
-configure_logging()
 logger = logging.getLogger("backend.app")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    """记录后端生命周期."""
-    logger.info("backend.startup")
-    app.state.project_locks = ProjectLockRegistry()
-    await open_database_pool(app)
-    try:
-        await open_agent_memory(app)
-        yield
-    finally:
-        await close_agent_memory(app)
-        await close_database_pool(app)
-        app.state.project_locks = None
-        logger.info("backend.shutdown")
+def _clear_runtime_state(app: FastAPI) -> None:
+    """清空只在单次应用生命周期内有效的依赖."""
+    app.state.png_to_shader_v1_service = None
+    app.state.project_locks = None
+    app.state.node_lab_service = None
 
 
-app = FastAPI(title="ShaderGen API", lifespan=lifespan)
+def build_lifespan(settings: BackendSettings) -> Lifespan[FastAPI]:
+    """为给定冻结配置构造可测试的应用生命周期."""
+
+    @asynccontextmanager
+    async def lifespan_context(app: FastAPI) -> AsyncIterator[None]:
+        logger.info("backend.startup")
+        app.state.project_locks = ProjectLockRegistry()
+        app.state.png_to_shader_v1_service = None
+        app.state.agent_memory = None
+        app.state.db_pool = None
+        app.state.node_lab_service = None
+        try:
+            async with AsyncExitStack() as cleanup:
+                cleanup.callback(_clear_runtime_state, app)
+
+                await open_database_pool(app, settings.database_url)
+                cleanup.push_async_callback(close_database_pool, app)
+
+                memory = await open_agent_memory(app, settings.database_url)
+                cleanup.push_async_callback(close_agent_memory, app)
+                app.state.png_to_shader_v1_service = create_png_to_shader_v1_service(
+                    checkpointer=memory.checkpointer,
+                    store=memory.store,
+                    memory_status=memory.memory_status,
+                )
+                yield
+        finally:
+            logger.info("backend.shutdown")
+
+    return lifespan_context
 
 
-@app.exception_handler(RequestValidationError)
 async def log_request_validation_error(
     request: Request,
     exc: RequestValidationError,
-):
+) -> Response:
     """记录安全 422 字段诊断；生成接口返回稳定错误 envelope."""
     errors = [
         {
@@ -119,13 +142,33 @@ async def log_request_validation_error(
     return await request_validation_exception_handler(request, exc)
 
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+def create_app(settings: BackendSettings | None = None) -> FastAPI:
+    """从显式配置创建完整 FastAPI 应用."""
+    resolved = settings or BackendSettings.from_env()
+    application = FastAPI(
+        title="ShaderGen API",
+        lifespan=build_lifespan(resolved),
+    )
+    application.state.settings = resolved
+    application.add_exception_handler(
+        RequestValidationError,
+        cast(ExceptionHandler, log_request_validation_error),
+    )
+    application.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(resolved.cors_origins),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    application.middleware("http")(build_request_logging_middleware(logger))
+    application.include_router(
+        build_api_router(node_lab_enabled=resolved.node_lab_enabled)
+    )
+    return application
 
-app.middleware("http")(build_request_logging_middleware(logger))
-app.include_router(api_router)
+
+settings = BackendSettings.from_env()
+configure_logging(settings.log_level)
+lifespan = build_lifespan(settings)
+app = create_app(settings)

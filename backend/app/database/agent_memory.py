@@ -5,46 +5,48 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass
+from typing import Literal, TypeAlias, cast
 
-from dotenv import load_dotenv
 from fastapi import FastAPI
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.memory import InMemoryStore
 from langgraph.store.postgres.aio import AsyncPostgresStore
-from psycopg.rows import dict_row
+from psycopg import AsyncConnection
+from psycopg.rows import DictRow, dict_row
 from psycopg_pool import AsyncConnectionPool
 
-from agent.app.services.png_to_shader_v1 import (
-    PngToShaderV1Service,
-    create_png_to_shader_v1_service,
-)
-
 logger = logging.getLogger("backend.agent_memory")
+MemoryPool: TypeAlias = AsyncConnectionPool[AsyncConnection[DictRow]]
 
 
 @dataclass
 class AgentMemoryResources:
     """保存 Backend 生命周期管理的 Memory 资源."""
 
-    png_to_shader_v1_service: PngToShaderV1Service
-    pool: AsyncConnectionPool | None = None
+    checkpointer: InMemorySaver | AsyncPostgresSaver
+    store: InMemoryStore | AsyncPostgresStore
+    memory_status: Literal["durable", "ephemeral"]
+    pool: MemoryPool | None = None
 
 
-def _pool(database_url: str) -> AsyncConnectionPool:
+def _pool(database_url: str) -> MemoryPool:
     """创建独立于 asyncpg 过程账本的 psycopg pool."""
-    return AsyncConnectionPool(
-        conninfo=database_url,
-        min_size=1,
-        max_size=5,
-        open=False,
-        check=AsyncConnectionPool.check_connection,
-        kwargs={
-            "autocommit": True,
-            "prepare_threshold": 0,
-            "row_factory": dict_row,
-        },
-        name="shadergen-agent-memory",
+    return cast(
+        MemoryPool,
+        AsyncConnectionPool(
+            conninfo=database_url,
+            min_size=1,
+            max_size=5,
+            open=False,
+            check=AsyncConnectionPool.check_connection,
+            kwargs={
+                "autocommit": True,
+                "prepare_threshold": 0,
+                "row_factory": dict_row,
+            },
+            name="shadergen-agent-memory",
+        ),
     )
 
 
@@ -73,54 +75,49 @@ async def _verify_schema(
     )
 
 
-async def open_agent_memory(app: FastAPI) -> None:
-    """创建临时或 PostgreSQL Memory 资源并注入 Shader service."""
-    load_dotenv()
+async def open_agent_memory(
+    app: FastAPI,
+    database_url: str | None,
+) -> AgentMemoryResources:
+    """创建临时或 PostgreSQL Memory 资源并返回中立 persistence 资源."""
     os.environ.setdefault("LANGGRAPH_STRICT_MSGPACK", "true")
-    database_url = os.getenv("DATABASE_URL")
     if not database_url:
         saver = InMemorySaver()
         store = InMemoryStore()
-        png_to_shader_v1_service = create_png_to_shader_v1_service(
+        resources = AgentMemoryResources(
             checkpointer=saver,
             store=store,
             memory_status="ephemeral",
         )
-        app.state.agent_memory = AgentMemoryResources(
-            png_to_shader_v1_service=png_to_shader_v1_service,
-        )
-        app.state.png_to_shader_v1_service = png_to_shader_v1_service
+        app.state.agent_memory = resources
         logger.warning("agent.memory.ephemeral database_url_missing=true")
-        return
+        return resources
 
     pool = _pool(database_url)
-    await pool.open(wait=True)
     try:
-        saver = AsyncPostgresSaver(pool)
-        store = AsyncPostgresStore(pool)
-        await _verify_schema(saver, store)
-        png_to_shader_v1_service = create_png_to_shader_v1_service(
-            checkpointer=saver,
-            store=store,
-            memory_status="durable",
-        )
-    except Exception:
+        await pool.open(wait=True)
+        postgres_saver = AsyncPostgresSaver(pool)
+        postgres_store = AsyncPostgresStore(pool)
+        await _verify_schema(postgres_saver, postgres_store)
+    except BaseException:
         await pool.close()
         logger.exception("agent.memory.startup.failed")
         raise
 
-    app.state.agent_memory = AgentMemoryResources(
-        png_to_shader_v1_service=png_to_shader_v1_service,
+    resources = AgentMemoryResources(
+        checkpointer=postgres_saver,
+        store=postgres_store,
+        memory_status="durable",
         pool=pool,
     )
-    app.state.png_to_shader_v1_service = png_to_shader_v1_service
+    app.state.agent_memory = resources
     logger.info("agent.memory.started status=durable")
+    return resources
 
 
 async def close_agent_memory(app: FastAPI) -> None:
     """关闭 Agent Memory psycopg pool 并清空 app state."""
     resources = getattr(app.state, "agent_memory", None)
+    app.state.agent_memory = None
     if resources is not None and resources.pool is not None:
         await resources.pool.close()
-    app.state.agent_memory = None
-    app.state.png_to_shader_v1_service = None

@@ -1,5 +1,32 @@
 # 决策记录
 
+> 本文件保存不可丢失的历史取舍，不是当前实现说明。当前架构、功能状态和交接事实分别以 `docs/ARCHITECTURE.md`、模块旁 `ARCHITECTURE.md`、`docs/FEATURES.md` 和 `PROGRESS.md` 为准。除下表明确标注外，其余决策默认为 `accepted`。
+
+## ADR 状态索引
+
+状态含义：`accepted` 表示当前仍适用；`updated` 表示核心取舍仍适用、正文中的路径或局部实现已由后续决策更新；`superseded` 表示只保留历史审计价值，不得作为当前契约。
+
+| 决策 | 状态 | 后续决策 | 当前解释 |
+|---|---|---|---|
+| D002 | superseded | D010、D037 | 阶段 1 的最小事实源已演进为模块就近文档和有界交接。 |
+| D005 | updated | D043 | 启动时执行幂等业务 SQL 的原则仍有效，SQL 现为显式 wheel 资源包。 |
+| D006 | updated | D035、D036 | Backend 只调用 Agent 公共 service 的边界仍有效，旧 service 路径已删除。 |
+| D007 | updated | D017、D036、D038 | `agent.app.*` 结构仍有效，旧 Graph、models 层和 Node 路径仅属历史。 |
+| D009 | superseded | D036 | 独立 `/api/shader/review` 与浏览器先渲染流程已删除。 |
+| D011 | updated | D036 | Parser 纯边界仍有效，旧 Shader generation service 已删除。 |
+| D012 | updated | D017、D027 | reasoning 默认不进入业务输出的原则仍有效，当前实现位于 LLM Gateway。 |
+| D013 | updated | D017 | provider/model-family 分离仍有效，旧 models 路径已迁入 LLM Gateway。 |
+| D014 | superseded | D017、D036 | 旧 runtime-context 模型配置随旧基础图和 models 层删除。 |
+| D015 | superseded | D016、D027、D036 | 默认采集、打印和写入 reasoning 的行为已取消。 |
+| D016 | superseded | D017、D027、D036 | 旧生成/评审 Node 工厂及其 config 已删除。 |
+| D018 | updated | D036、D044 | V1 Checkpointer、Store 与 GSSC 仍有效，persistence 生命周期现由冻结配置与补偿清理栈管理。 |
+| D023 | updated | D036 | V1 产品化边界仍有效，legacy 分流和独立 Review 部分已删除。 |
+| D027 | updated | D036 | 可靠性与安全账本原则仍有效，legacy 兼容部分已删除。 |
+| D028 | updated | D032、D038 | Node Lab Harness 原则仍有效，节点语义和 Provider 已收敛到生产功能命名空间。 |
+| D032 | updated | D038 | Node 是唯一语义实现仍有效，Provider 当前位于 V1 功能命名空间。 |
+| D034 | updated | D038 | 按职责拆分仍有效，文件已进一步迁入 V1 功能命名空间。 |
+| D035 | updated | D036、D044 | 薄 Route、Backend Service 和 Renderer 双层清理仍有效；Backend persistence 清理由 D044 加固。 |
+
 ## D001 - SVG 是最终架构来源
 
 - 日期：2026-07-07
@@ -269,3 +296,73 @@
 - 决策：`langgraph.json` 只注册 `png_to_shader_v1`；删除旧基础对话图和 `shader_generation_graph`，以及仅服务这两个旧图的 Node、State、Prompt、Parser 和 Agent Service。Backend/Frontend 同步下线 legacy 生成与独立 `POST /api/shader/review`，`POST /api/shader/generate` 只接受或默认使用 `procedural_v1`。
 - 原因：用户确认其余两个 Graph 是此前遗留的废弃实现。只删除注册而继续保留 legacy API、默认 UI 和旧 Memory 生命周期会形成悬空入口，也会让“当前架构只有 V1”与运行事实不一致；因此必须沿反向依赖一起清理。
 - 影响：旧客户端发送 `generation_mode=legacy` 或调用 `/api/shader/review` 不再兼容；V1 最终响应中的 Critic Review、评分、Artifact 白名单和项目 Memory 清理继续保留。已有数据库账本不删除，Memory 的旧 `review` 记录保留只读解析兼容；V1 checkpoint 前缀 `png-to-shader-v1:{project_id}` 保持不变。为维持项目删除语义，V1 清理同时删除旧 Graph 遗留的裸 `{project_id}` checkpoint，但不恢复任何旧运行入口。D009、D023、D027 以及 D035 中关于 legacy 分流和 timeout 兼容的部分由本决策取代；D035 确立的薄 Route、Backend 用例 Service 与 Renderer 双层清理边界继续保留。历史记录不删除。此次结构收敛不改变冻结质量门槛：F09 仍为 `active`、最终发布 gate 仍为 no-go。
+
+## D037 - PROGRESS 采用有界当前交接与只读历史归档
+
+- 日期：2026-07-15
+- 决策：根目录 `PROGRESS.md` 不再作为 append-only 会话日志，而是原地维护的当前交接页，只保存当前状态、唯一 active 功能、下一步、未解决缺口、当前验证基线、最多 5 条最近重要变更和历史索引，UTF-8 体量上限为 20,000 bytes。只有功能状态、架构/契约、质量门禁、阶段里程碑或重要未决缺口变化时才新增最近变更；例行重复验证覆盖现有基线。超出内容移入 `docs/progress/archive/`，并明确标注时间范围和“非当前事实”。
+- 原因：原文件在 8 天内增长到约 87 KB，94 条日期记录中的大部分是重复验证和已被后续实现取代的旧事实；它既消耗新 Agent 的有限上下文，又可能让旧 Graph 数量、已删除入口和过期环境判断干扰当前决策。功能状态、长期取舍、代码演进和冻结 benchmark 本来已经分别有 `docs/FEATURES.md`、`docs/DECISIONS.md`、Git 与产物目录作为更合适的事实来源。
+- 影响：会话结束仍必须检查并更新当前交接信息，但“完成会话”本身不再触发新增日志。`make docs-check` 负责检查主文件必需区块、20,000 bytes 上限、最近重要变更不超过 5 条、历史索引和归档警告。失败 benchmark、人工门禁、run id、关键 SHA-256 与未关闭缺口不得在压缩中丢失；主文件保留当前结论和定位入口，结构化整理前的原始记录无损保存在 `docs/progress/archive/PROGRESS-2026-07-07--2026-07-15.md`。
+
+## D038 - PNG-to-Shader V1 Node 统一使用功能命名空间
+
+- 日期：2026-07-15
+- 决策：`src/agent/app/nodes/png_to_shader_v1/` 作为当前产品 Pipeline 全部 Node 工厂及其支持实现的唯一功能命名空间，内部明确分为 `model/`、`deterministic/` 和 `integrations/node_lab/`。Graph 通过顶层 `__init__.py` 使用稳定工厂；模型角色保持不依赖 Renderer/Oracle/Store，确定性事实层保持不依赖模型角色，Node Lab Provider 只向内适配这两类生产 callable。删除 `nodes/` 根目录的 V1 兼容模块和原 `nodes/integrations/` 路径，不保留旧 import shim；只有被两个以上 Pipeline 实际复用且契约中立的实现，才允许提升到根级公共模块。与条件边共享规则的 `decide_after_render`、`decide_after_selection` 继续由 `graphs/png_to_shader_v1_routing.py` 管理。
+- 原因：此前目录同时使用“模型角色/确定性实现”和“V1/公共实现”两套分类轴。`png_to_shader_v1/` 只包含确定性 Node，但根目录的 bounded、structured output、Analysis、Author、Critic、Context 和策略晋升同样绑定 V1 契约、Prompt、State 或阶段预算，造成根级文件看似跨版本通用、实际无法独立复用。统一功能命名空间能让版本归属、依赖方向和未来 V2/第二 Pipeline 的隔离边界从目录结构直接可见，同时保留 D034 拆分大型确定性实现的收益。
+- 影响：内部 Python import、setuptools 显式 package 清单、Node Lab descriptor `source_ref`、执行 provenance 的真实 `source_ref#node_id` 和 benchmark 源码 fingerprint 路径同步更新；旧模块路径不再兼容。20 个 Graph Node ID、直接边、条件边、路由结果、循环、终止路径、`current_best` 安全语义、Node Lab 对外 node id、产品 API、checkpoint/Memory 和冻结质量门槛均不改变，因此 Graph ASCII/Mermaid 无需改图。D034 的职责拆分继续有效，其旧目录描述由本决策更新；历史决策正文不回写。
+
+## D039 - Validator 与 Renderer 只接受 canonical V1 契约
+
+- 日期：2026-07-16
+- 决策：当前 `validate_shader()` 和 `PlaywrightWebGL1Renderer` 只接受与 `WEBGL1_STATIC_NO_TEXTURE_V1` 值相等的 canonical 契约；传入仅修改 contract id 或任一运行字段的 `RenderContract` 必须在启动浏览器前失败，不得回显新 contract id 后继续使用 V1 的硬编码声明、顶点 Shader 和安全规则。
+- 原因：现有 Validator 与 WebGL host 是明确的 V1 专用实现，并不能正确解释任意 `RenderContract`。假装支持自定义契约会让审计身份与实际校验规则不一致，比显式限制支持范围更危险。
+- 影响：值相等的不可变契约副本仍可使用；未来支持新契约时必须先实现对应 Validator/Renderer 语义和 conformance 测试，再放宽入口。Validation 文档同时明确确定性 smoothstep 修复不是隐式校验步骤，修复后必须重新校验和渲染。
+
+## D040 - Benchmark 异常路径按 fail-closed 方式扣除模型预算
+
+- 日期：2026-07-16
+- 决策：AI-on runner 在模型调用返回后立即保留 State；后续 Artifact、objective、traceability 或报告处理抛错时，优先从模型调用审计和 final result 恢复实际调用数。无法取得可靠计数时，按该 case 在调用前获得的模型调用上限保守扣账。异常与取消都先写安全失败证据和 case 结果再停止或继续，恢复旧式无证据失败结果时同样不得信任零调用。
+- 原因：付费调用可能在后处理失败前已经发生。把异常 case 固定记为零会让后续 case 重新获得已经消费的预算，破坏整套硬预算和成本审计；保守高估比静默超支安全。
+- 影响：失败证据只记录异常类型、阶段、预算记账策略、安全模型审计和候选 Artifact 引用，不保存异常消息、Prompt、GLSL 或 reasoning 原文。`result.json` 是 case 完成的原子提交点；其他 Artifact 可能先落盘，不能被描述为整组文件原子事务。
+
+## D041 - 验收证据显式区分 durable 与 partial
+
+- 日期：2026-07-16
+- 决策：新增 `docs/evidence/registry.json` 作为版本化脱敏索引，登记正式 run 的结论、Artifact 路径或 URI、字节数、SHA-256 和耐久性。只有已进入 Git、Git LFS、Release 或具备不可变保留策略对象存储的关键证据可以标记 `durable`；仅存在于 `.gitignore` 下本地 `output/` 的完整报告必须标记 `partial`，即使 registry 已记录其 hash。
+- 原因：hash 只能验证已经取得的文件，不能保证新 clone、CI 或机器损坏后仍能获得原件。把本地路径写进 PROGRESS 并不等于建立可复验发布证据。
+- 影响：`make docs-check` 在本地 Artifact 可获得时复验 registry 的大小与 SHA-256，并强制所有持久 Artifact 存在；`partial` 可以用于交接和定位，但不能单独支撑功能 `passing` 或发布 gate。完整 M5 和 Node Lab real-model 报告迁入持久介质前，该缺口继续保留在 `PROGRESS.md`。
+
+## D042 - 主 CI 复用仓库门禁并严格消费锁文件
+
+- 日期：2026-07-16
+- 决策：Pull Request 与 main 的主 CI 在 Python 3.12、Node 22 下执行 `uv sync --locked`、`npm ci --prefix frontend`、完整 `make check` 以及 `mypy --strict src backend`，并以 `UV_LOCKED=1` 禁止后续 `uv run` 隐式改写锁文件；Python 3.10/3.11 只追加兼容性单测。普通 Integration workflow 同样严格使用 `uv.lock`，显式关闭真实模型路径且不注入模型密钥；只有独立 benchmark workflow 可以在双重开关和硬预算下获得真实模型凭据。
+- 原因：原 CI 从 `pyproject.toml` 临时解析依赖并重复安装测试工具，既不能证明 `uv.lock` 可复现，也没有执行文档边界、LangGraph 注册和前端 production build。普通集成测试持有模型密钥还会模糊“真实模型只由显式 benchmark 调用”的安全边界。
+- 影响：`make docs-check` 会拒绝未锁定的 workflow、缺失 `make check`/最低 Python 兼容矩阵或普通 Integration 中出现模型凭据与调用开关。Integration workflow 同时覆盖 main push 与相关路径的 Pull Request，主 CI 构建 wheel 以防源码树通过但发布包缺文件。Renderer benchmark 与集成测试仍单独安装 Chromium；有限保留期的 Actions Artifact 继续只算 `partial` 证据。
+
+## D043 - 包根惰性导出，Backend SQL 使用显式资源包
+
+- 日期：2026-07-16
+- 决策：`shaderforge`、`agent.app.lab` 与 `agent.app.contracts` 根包通过 PEP 562 按所属 typed 子包惰性解析既有公共名，保持兼容 API，但轻量契约、LLM 抽象或 Lab 模型导入不得连带加载 V1 契约、Renderer、Runner 或 Playwright。`backend/sql/` 增加无副作用 `__init__.py` 并在 setuptools 中显式登记为 `backend.sql`，SQL package-data 由该包直接持有；项目许可证元数据改用当前 PEP 621 字符串和显式 license file，三个发布包根均携带 `py.typed`。
+- 原因：Python 导入子模块会先执行父包 `__init__`；此前仅导入 `shaderforge.contracts` 或 `agent.app.lab.models` 就加载完整聚合入口和浏览器依赖。与此同时，SQL 目录既被当作 `backend` 数据目录又会被构建工具识别为隐式 namespace package，源码树与 wheel 的所有权不明确。
+- 影响：显式使用 `shaderforge.public` 仍会加载完整稳定聚合面；访问根包某个惰性名只加载其所属领域。回归探针验证轻量导入集合、根包对象 identity、wheel 内 `backend.sql`、SQL 资源与类型标记可读性；wheel 构建不得产生 package-discovery 警告。新增包仍需同步 setuptools 清单、架构文档和 wheel 审计。
+
+## D044 - Backend 在组合根冻结配置并对资源执行补偿清理
+
+- 日期：2026-07-16
+- 决策：Backend 使用不可变 `BackendSettings` 在应用组合根一次性读取数据库、日志、CORS 与 Node Lab 环境配置，再显式注入 Router、Service 和 lifespan。数据库及 Agent Memory open 函数负责在初始化失败或取消时回收自身局部资源；成功资源交由 `AsyncExitStack` 逆序关闭，即使一个 close 失败也继续执行其余 callback。close 在等待底层 pool 前先从 `app.state` 脱离对象，运行期 service 也在统一清理 callback 中失效。
+- 原因：数据库 pool 曾在统一 `try/finally` 外打开，Memory close 抛错会跳过 asyncpg close，初始化中断也可能留下半打开资源。各模块重复读取环境变量还会让 import 时 Router、生命周期和惰性 Node Lab Service 看到不同配置。
+- 影响：`create_app(settings)` 与 `build_lifespan(settings)` 可被无环境副作用地测试；Node Lab 继续默认关闭，真实模型仍需独立显式开关。`SHADERGEN_CORS_ORIGINS` 采用逗号分隔的显式 Origin 且拒绝 `*`。该决定不改变产品 HTTP 路径、Graph、模型预算或 F09 发布状态。
+
+## D045 - 离线 benchmark 与测试 Fixture 脱离在线 Service 和测试层级
+
+- 日期：2026-07-16
+- 决策：五模型角色离线 benchmark 从 `agent.app.services` 移入 `agent.app.benchmarks`，CLI 与测试通过该离线入口调用；生产 `services` 只保留在线 Application use case。跨单元/集成测试共享的 PNG-to-Shader 样本从 `tests/unit_tests` 移入中立的 `tests/fixtures`，集成测试不得导入 unit test 模块。
+- 原因：离线 runner、固定 manifest、预算和报告协议不是线上用例服务，把它们放入 `services` 会扩大生产依赖面并模糊真实模型调用边界。集成测试反向复用 `unit_tests` 也会把测试执行层级当作公共库，目录重排时容易产生隐蔽耦合。
+- 影响：benchmark 的模型角色、fixture、预算、报告与真实模型双重开关保持不变；普通线上 Agent service 不依赖离线 runner。仓库结构测试锁定 `services -> benchmarks` 和 `integration_tests -> unit_tests` 两条禁止依赖，新增共享样本应继续放入 `tests/fixtures`。
+
+## D046 - 前端通过统一 API Client 访问后端，Node Lab 明细按需加载
+
+- 日期：2026-07-16
+- 决策：所有浏览器端 HTTP 访问统一经过 `frontend/src/api/client.ts`，由它负责 API base URL、请求发送和安全错误提取；页面与组件不得直接 `fetch`。Node Lab 的步骤列表直接使用后端已有 summary，完整步骤只在选中时按需读取并缓存，Artifact descriptor 使用独立状态维护。
+- 原因：组件自行拼 URL 会让环境配置、错误语义和 URL 编码分散；原 Node Lab 恢复 DAG 时先列 id、再逐项拉取完整步骤，会随历史长度产生 N+1 请求，并把步骤与 Artifact 两类资源混入同一刷新路径。
+- 影响：产品与 Node Lab 的公开 HTTP 路径和 Schema 不变；假 API 也必须经 Backend response model 校验 summary 契约。仓库结构测试拒绝 `frontend/src/api` 之外的直接 `fetch`，Node Lab 页面验收继续覆盖恢复、分支、Artifact 与 DAG 行为。

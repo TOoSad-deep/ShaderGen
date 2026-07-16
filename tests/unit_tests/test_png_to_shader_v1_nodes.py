@@ -14,36 +14,36 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from agent.app.config.model_config import NodeModelConfig
 from agent.app.contracts.llm import LLMCallOptions, LLMResponse
 from agent.app.messages.png_to_shader_v1 import InputBindingError
-from agent.app.nodes import bounded_model_node as bounded_model_module
-from agent.app.nodes.bounded_model_node import make_bounded_model_node
 from agent.app.nodes.png_to_shader_v1 import (
     RunRendererRegistry,
+    StructuredOutputExhaustedError,
+    StructuredOutputInvocationError,
+    make_bounded_model_node,
     make_finalize_png_to_shader_v1_node,
     make_materialize_candidate_node,
     make_persist_visual_review_node,
     make_prepare_measurement_seed_node,
     make_render_and_evaluate_node,
-)
-from agent.app.nodes.png_to_shader_v1 import finalization as finalization_module
-from agent.app.nodes.png_to_shader_v1 import runtime as run_nodes_runtime
-from agent.app.nodes.shader_author_node import (
     make_shader_author_compile_repair_node,
     make_shader_author_initial_node,
     make_shader_author_visual_refine_node,
+    make_visual_analysis_node,
+    make_visual_critic_node,
 )
-from agent.app.nodes.structured_output import (
-    StructuredOutputExhaustedError,
-    StructuredOutputInvocationError,
+from agent.app.nodes.png_to_shader_v1.deterministic import (
+    finalization as finalization_module,
 )
-from agent.app.nodes.visual_analysis_node import make_visual_analysis_node
-from agent.app.nodes.visual_critic_node import make_visual_critic_node
+from agent.app.nodes.png_to_shader_v1.deterministic import (
+    runtime as run_nodes_runtime,
+)
+from agent.app.nodes.png_to_shader_v1.model import bounded as bounded_model_module
 from shaderforge.analysis import measure_target, normalize_target_png
 from shaderforge.contracts import BudgetPolicy, StopReason
 from shaderforge.evaluation import CandidateRecord, ScoreBreakdownV1
 from shaderforge.rendering import CompileResult, RenderResult
 from shaderforge.store import LocalArtifactStore
 from shaderforge.validation import validate_shader
-from tests.unit_tests.png_to_shader_v1_samples import (
+from tests.fixtures.png_to_shader_v1_samples import (
     GOLDEN_GLSL,
     analysis_payload,
     author_payload,
@@ -578,9 +578,11 @@ async def test_visual_refine_binds_current_best_and_protected_regions() -> None:
 
 
 def test_role_default_configs_prioritize_reliable_structured_output() -> None:
-    from agent.app.nodes.shader_author_node import SHADER_AUTHOR_MODEL_CONFIG
-    from agent.app.nodes.visual_analysis_node import VISUAL_ANALYSIS_MODEL_CONFIG
-    from agent.app.nodes.visual_critic_node import VISUAL_CRITIC_MODEL_CONFIG
+    from agent.app.nodes.png_to_shader_v1 import (
+        SHADER_AUTHOR_MODEL_CONFIG,
+        VISUAL_ANALYSIS_MODEL_CONFIG,
+        VISUAL_CRITIC_MODEL_CONFIG,
+    )
 
     for config in (
         VISUAL_ANALYSIS_MODEL_CONFIG,

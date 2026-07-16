@@ -9,17 +9,17 @@ from typing import Any
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
+from agent.app.benchmarks.model_roles import (
+    BudgetedModelGateway,
+    ModelBenchmarkBudgets,
+    load_model_benchmark_manifest,
+    run_model_benchmark,
+)
 from agent.app.contracts.llm import (
     LLMCallOptions,
     LLMInvocationError,
     LLMResponse,
     TokenUsage,
-)
-from agent.app.services.node_lab_model_benchmark import (
-    BudgetedModelGateway,
-    ModelBenchmarkBudgets,
-    load_model_benchmark_manifest,
-    run_model_benchmark,
 )
 from scripts import run_node_lab_model_benchmark as model_benchmark_cli
 
@@ -165,6 +165,7 @@ def test_default_fixture_run_is_offline_atomic_and_self_contained(
     assert len(list(run_root.glob("cases/*/attempts/*/execution.json"))) == 5
     assert list(run_root.rglob("*.tmp")) == []
     config = json.loads((run_root / "config.json").read_bytes())
+    environment = json.loads((run_root / "environment.json").read_bytes())
     assert config["fixture_hashes"] == suite.fixture_hashes
     assert set(config["prompt_hashes"]) == {
         "visual_analysis",
@@ -173,6 +174,25 @@ def test_default_fixture_run_is_offline_atomic_and_self_contained(
         "visual_critic",
         "author_visual_refine",
     }
+    source_hashes = environment["source_hashes"]
+    model_root = "src/agent/app/nodes/png_to_shader_v1/model"
+    for source_name in (
+        "bounded.py",
+        "shader_author.py",
+        "structured_output.py",
+        "visual_analysis.py",
+        "visual_critic.py",
+    ):
+        assert f"{model_root}/{source_name}" in source_hashes
+    assert (
+        "src/agent/app/nodes/png_to_shader_v1/integrations/node_lab/model.py"
+        in source_hashes
+    )
+    assert "src/agent/app/nodes/png_to_shader_v1/__init__.py" in source_hashes
+    assert (
+        "src/agent/app/nodes/png_to_shader_v1/integrations/node_lab/__init__.py"
+        in source_hashes
+    )
     for attempt_path in run_root.glob("cases/*/attempts/*/execution.json"):
         attempt = json.loads(attempt_path.read_bytes())
         assert attempt["correctness_passed"] is True

@@ -18,6 +18,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  UV_LOCKED: "1"
+
 jobs:
   ai-off-smoke:
     name: AI-off Renderer and Oracle Smoke
@@ -27,11 +30,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install dependencies
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          uv sync --frozen
-          uv run playwright install --with-deps chromium
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install locked Python dependencies
+        run: uv sync --locked
+      - name: Install Playwright Chromium and system dependencies
+        run: uv run playwright install --with-deps chromium
       - name: Run deterministic benchmark smoke
         run: make benchmark-ai-off
       - name: Upload AI-off evidence
@@ -55,11 +62,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install dependencies
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          uv sync --frozen
-          uv run playwright install --with-deps chromium
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install locked Python dependencies
+        run: uv sync --locked
+      - name: Install Playwright Chromium and system dependencies
+        run: uv run playwright install --with-deps chromium
       - name: Run fixed balanced suite
         run: make benchmark-png-to-shader QUALITY_PRESET=balanced MODEL_CALL_BUDGET=80
       - name: Upload benchmark and blind-review package

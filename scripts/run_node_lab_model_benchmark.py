@@ -9,7 +9,7 @@ import os
 import sys
 from pathlib import Path
 
-from agent.app.services.node_lab_model_benchmark import (
+from agent.app.benchmarks.model_roles import (
     DEFAULT_MODEL_BENCHMARK_LAB_ROOT,
     DEFAULT_MODEL_BENCHMARK_MANIFEST,
     DEFAULT_MODEL_BENCHMARK_OUTPUT_ROOT,

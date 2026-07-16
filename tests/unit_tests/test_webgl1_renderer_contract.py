@@ -1,9 +1,11 @@
 import asyncio
+from dataclasses import replace
 from hashlib import sha256
 from unittest.mock import AsyncMock
 
 import pytest
 
+from shaderforge.contracts import WEBGL1_STATIC_NO_TEXTURE_V1
 from shaderforge.rendering import (
     CompileResult,
     PlaywrightWebGL1Renderer,
@@ -22,6 +24,16 @@ void main() {
     gl_FragColor = vec4(v_uv, 0.5, 1.0);
 }
 """
+
+
+def test_renderer_rejects_noncanonical_contract() -> None:
+    unsupported = replace(
+        WEBGL1_STATIC_NO_TEXTURE_V1,
+        varying_name="custom_uv",
+    )
+
+    with pytest.raises(ValueError, match="只支持 canonical"):
+        PlaywrightWebGL1Renderer(contract=unsupported)
 
 
 @pytest.mark.anyio

@@ -19,12 +19,12 @@ from agent.app.graphs.png_to_shader_v1_routing import (
     route_next_action,
 )
 from agent.app.llms.gateway import LangChainLLMGateway
-from agent.app.nodes.bounded_model_node import make_bounded_model_node
 from agent.app.nodes.png_to_shader_v1 import (
     Clock,
     RendererFactory,
     RenderEvaluator,
     RunRendererRegistry,
+    make_bounded_model_node,
     make_finalize_png_to_shader_v1_node,
     make_initialize_png_to_shader_v1_node,
     make_load_current_best_node,
@@ -33,21 +33,17 @@ from agent.app.nodes.png_to_shader_v1 import (
     make_persist_visual_analysis_node,
     make_persist_visual_review_node,
     make_prepare_compile_repair_node,
+    make_prepare_context_node,
     make_prepare_measurement_seed_node,
+    make_promote_validated_strategy_node,
     make_render_and_evaluate_node,
     make_select_current_best_node,
-)
-from agent.app.nodes.prepare_context_node import make_prepare_context_node
-from agent.app.nodes.promote_validated_strategy_node import (
-    make_promote_validated_strategy_node,
-)
-from agent.app.nodes.shader_author_node import (
     make_shader_author_compile_repair_node,
     make_shader_author_initial_node,
     make_shader_author_visual_refine_node,
+    make_visual_analysis_node,
+    make_visual_critic_node,
 )
-from agent.app.nodes.visual_analysis_node import make_visual_analysis_node
-from agent.app.nodes.visual_critic_node import make_visual_critic_node
 from agent.app.states.agent_state import PngToShaderV1State
 from shaderforge.evaluation import evaluate_render
 from shaderforge.rendering import PlaywrightWebGL1Renderer

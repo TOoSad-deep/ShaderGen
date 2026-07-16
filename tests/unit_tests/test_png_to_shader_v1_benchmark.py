@@ -21,6 +21,7 @@ from scripts.run_png_to_shader_v1_benchmark import (
     _evaluate_objective_candidate,
     _objective_pair_fields,
     _report_markdown,
+    _resume_model_call_charge,
     _run,
     _select_model_initial,
     _traceability,
@@ -186,6 +187,250 @@ def _valid_review_evidence(
         "items": [{"case_id": case["case_id"], "choice": "A"} for case in cases],
     }
     return assignments, review
+
+
+def _ai_on_runner_args(
+    output_dir: Path,
+    *,
+    suite_run_id: str,
+    model_call_budget: int = 8,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        mode="ai-on",
+        quality_preset=QualityPreset.BALANCED.value,
+        cases="solid_circle,ellipse_gradient",
+        suite_run_id=suite_run_id,
+        output_dir=output_dir,
+        allow_model_calls=True,
+        model_call_budget=model_call_budget,
+        instruction="",
+        human_review=None,
+        require_gate_passed=False,
+    )
+
+
+def _patch_model_routing(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "scripts.run_png_to_shader_v1_benchmark._structured_model_routing_snapshot",
+        lambda: {
+            "shader_author": {"model_ref": "test:model"},
+            "visual_analysis": {"model_ref": "test:model"},
+            "visual_critic": {"model_ref": "test:model"},
+        },
+    )
+
+
+def _safe_model_audit(attempt: int) -> dict:
+    return {
+        "role": "shader_author",
+        "mode": "initial",
+        "attempt": attempt,
+        "requested_model_ref": "test:model",
+        "model_ref": "test:model",
+        "model_identity_source": "response_metadata",
+        "response_format": "json_object",
+        "prompt_version": "test_prompt_v1",
+        "latency_ms": 10.0,
+        "output_sha256": f"{attempt:x}" * 64,
+        "parse_status": "success",
+        "error_codes": [],
+        "validation_issues": [],
+        "input_tokens": 10,
+        "output_tokens": 5,
+        "total_tokens": 15,
+    }
+
+
+def test_postprocessing_failure_recovers_actual_calls_and_reduces_remaining_budget(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_model_routing(monkeypatch)
+    remaining_values: list[int] = []
+
+    async def injected_case_failure(
+        case,
+        _suite_root,
+        _suite_run_id,
+        _preset,
+        _instruction,
+        remaining_model_calls,
+        *,
+        failure_context=None,
+    ):
+        remaining_values.append(remaining_model_calls)
+        if case.case_id == "solid_circle":
+            assert failure_context is not None
+            failure_context.state = {
+                "model_calls": tuple(_safe_model_audit(index) for index in range(1, 4)),
+                "events": (
+                    {
+                        "stage": "render_evaluate",
+                        "event_type": "current_best_updated",
+                        "payload": {"candidate_id": "candidate-1"},
+                    },
+                ),
+                "candidate_records": (
+                    _candidate_record(
+                        "candidate-1",
+                        iteration=0,
+                        internal_total_loss=0.2,
+                    ),
+                ),
+                "current_best_id": "candidate-1",
+                "final_result": {
+                    "success": True,
+                    "candidate_id": "candidate-1",
+                    "model_call_count": 3,
+                    "elapsed_seconds": 1.25,
+                },
+            }
+            raise RuntimeError("provider-secret-must-not-be-persisted")
+        return {
+            "success": False,
+            "failure_reason": "global_model_budget_exhausted",
+            "model_call_count": 0,
+            "final_compile_passed": False,
+            "final_static_passed": False,
+            "final_matches_current_best": False,
+            "best_updates_monotonic": False,
+            "traceability_passed": False,
+        }
+
+    monkeypatch.setattr(
+        "scripts.run_png_to_shader_v1_benchmark._run_ai_on_case",
+        injected_case_failure,
+    )
+
+    suite_root, report = asyncio.run(
+        _run(
+            _ai_on_runner_args(
+                tmp_path,
+                suite_run_id="suite-postprocess-failure",
+            )
+        )
+    )
+
+    assert suite_root == tmp_path
+    assert remaining_values == [8, 5]
+    case_result = json.loads(
+        (tmp_path / "cases/solid_circle/result.json").read_text(encoding="utf-8")
+    )["ai_on"]
+    assert case_result["model_call_count"] == 3
+    assert case_result["observed_model_call_count"] == 3
+    assert case_result["model_call_accounting"] == "recovered_actual"
+    assert case_result["input_tokens"] == 30
+    assert case_result["output_tokens"] == 15
+    assert case_result["total_tokens"] == 45
+    assert report["summary"]["model_call_total"] == 3
+
+    evidence = json.loads(
+        (tmp_path / case_result["failure_evidence_path"]).read_text(encoding="utf-8")
+    )
+    assert evidence["model_call_accounting"] == {
+        "allocated_model_calls": 8,
+        "charged_model_calls": 3,
+        "observed_model_calls": 3,
+        "strategy": "recovered_actual",
+    }
+    assert len(evidence["model_calls"]) == 3
+    assert evidence["candidate_records"][0]["candidate_id"] == "candidate-1"
+    assert "provider-secret-must-not-be-persisted" not in json.dumps(evidence)
+
+
+def test_failure_without_reliable_state_charges_allocated_case_limit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_model_routing(monkeypatch)
+    remaining_values: list[int] = []
+
+    async def injected_unknown_failure(
+        case,
+        _suite_root,
+        _suite_run_id,
+        _preset,
+        _instruction,
+        remaining_model_calls,
+        *,
+        failure_context=None,
+    ):
+        remaining_values.append(remaining_model_calls)
+        if case.case_id == "solid_circle":
+            assert failure_context is not None
+            assert failure_context.state is None
+            raise RuntimeError("unknown-provider-secret")
+        return {
+            "success": False,
+            "failure_reason": "global_model_budget_exhausted",
+            "model_call_count": 0,
+            "final_compile_passed": False,
+            "final_static_passed": False,
+            "final_matches_current_best": False,
+            "best_updates_monotonic": False,
+            "traceability_passed": False,
+        }
+
+    monkeypatch.setattr(
+        "scripts.run_png_to_shader_v1_benchmark._run_ai_on_case",
+        injected_unknown_failure,
+    )
+
+    _suite_root, report = asyncio.run(
+        _run(
+            _ai_on_runner_args(
+                tmp_path,
+                suite_run_id="suite-unknown-failure",
+            )
+        )
+    )
+
+    assert remaining_values == [8, 0]
+    case_result = json.loads(
+        (tmp_path / "cases/solid_circle/result.json").read_text(encoding="utf-8")
+    )["ai_on"]
+    assert case_result["model_call_count"] == 8
+    assert case_result["observed_model_call_count"] is None
+    assert case_result["model_call_accounting"] == "allocated_limit_fail_closed"
+    assert report["summary"]["model_call_total"] == 8
+
+    evidence = json.loads(
+        (tmp_path / case_result["failure_evidence_path"]).read_text(encoding="utf-8")
+    )
+    assert evidence["model_call_accounting"] == {
+        "allocated_model_calls": 8,
+        "charged_model_calls": 8,
+        "observed_model_calls": None,
+        "strategy": "allocated_limit_fail_closed",
+    }
+    assert evidence["model_calls"] == []
+    assert "unknown-provider-secret" not in json.dumps(evidence)
+
+
+def test_resume_fail_closes_legacy_exception_result_without_usage_evidence() -> None:
+    assert (
+        _resume_model_call_charge(
+            {
+                "success": False,
+                "failure_reason": "RuntimeError",
+                "model_call_count": 0,
+            },
+            QualityPreset.BALANCED,
+        )
+        == 8
+    )
+    assert (
+        _resume_model_call_charge(
+            {
+                "success": False,
+                "failure_reason": "RuntimeError",
+                "model_call_count": 3,
+                "evidence_path": "cases/example/ai-on/failure.json",
+            },
+            QualityPreset.BALANCED,
+        )
+        == 3
+    )
 
 
 def test_manifest_and_gate_policy_are_frozen_and_valid() -> None:

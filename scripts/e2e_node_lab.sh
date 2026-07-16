@@ -49,7 +49,7 @@ require_text() {
 
 "$PWCLI" -s="$SESSION" open "$VITE_ORIGIN/lab" >/dev/null
 "$PWCLI" -s="$SESSION" snapshot >/dev/null
-require_text '20/20 节点可用'
+require_text '20 个节点可用'
 require_text 'Real Model：关闭'
 
 CREATE_REF="$(find_role_ref button '新建 LabRun')"

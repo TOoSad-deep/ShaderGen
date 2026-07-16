@@ -4,17 +4,18 @@
 
 ## 目录规范
 
-- `app/main.py`：创建 FastAPI 应用、注册中间件、生命周期和路由。
+- `app/main.py`：应用组合根；通过 `create_app(settings)` 创建 FastAPI 应用，并用 `AsyncExitStack` 组装资源生命周期、Agent service、中间件和路由。
 - `app/api/router.py`：聚合后端 HTTP 路由。
 - `app/api/routes/`：HTTP 路由。只做请求解析、边界校验、调用 service、返回响应。
 - `app/services/`：后端编排逻辑。可以调用 `src/agent/` 或后续 `src/shaderforge/`，但不要把大型领域算法写在这里。
 - `app/services/shader_generation.py`：`POST /api/shader/generate` 的 V1 用例服务；统一负责项目锁、V1 模型选择、Agent 调用、生成总账、失败分类和公开响应契约。
 - `app/schemas/`：请求和响应数据结构。API 契约稳定后放这里，避免散落在 route 文件。
 - `app/database/session.py`：数据库连接生命周期、schema 初始化和健康检查查询。
-- `app/database/agent_memory.py`：LangGraph psycopg saver/store 生命周期、健康检查和独立 setup。
+- `app/database/agent_memory.py`：LangGraph psycopg saver/store 生命周期、健康检查和独立 setup；只返回中立的 Memory 资源，不反向创建 Agent service。
 - `app/middleware/`：FastAPI 中间件，例如请求日志。
-- `app/core/`：应用级基础配置，例如日志配置。
-- `sql/`：手写 SQL schema 记录目录。当前只存建表脚本，不放 Python 迁移框架。
+- `app/core/settings.py`：不可变 Backend 配置模型；只在应用组合根读取根目录 `.env` 和环境变量。
+- `app/core/`：其余应用级基础设施，例如日志配置；底层模块不得自行重复读取环境变量。
+- `sql/`：手写 SQL schema 资源包。`backend.sql` 在 wheel 中显式登记，`__init__.py` 只声明包边界；当前只存建表脚本，不放 Python 迁移或业务编排。
 
 ## 数据库 SQL 规则
 
@@ -23,6 +24,8 @@
 - 配置 `DATABASE_URL` 时，后端启动会按文件名顺序执行 `sql/*.sql`，确保表结构存在。
 - Agent 过程数据落业务表；运行内需要查询的安全诊断摘要可写入 `agent_logs`。
 - LangGraph Checkpointer/Store 使用独立 psycopg pool，并在每次借出连接前执行 `AsyncConnectionPool.check_connection`；远端关闭的陈旧连接必须在进入 Graph 前淘汰，不能通过重试整个 Graph 恢复，以免重复模型调用或候选写入。
+- FastAPI lifespan 在每项资源初始化前登记对应补偿清理：启动任一步失败也会逆序回滚，关闭 Agent Memory 失败不得跳过 asyncpg 过程账本连接池关闭。关闭函数先从 `app.state` 脱离资源再等待底层 pool，以免关闭异常留下可继续借用的失效对象。
+- `BackendSettings` 在应用组合根一次性读取根目录 `.env`，并把数据库、日志、CORS 与 Node Lab 开关作为不可变配置注入 lifespan、Router 和 Service；底层数据库或 Node Lab 模块不得再次读取环境变量。`SHADERGEN_CORS_ORIGINS` 使用逗号分隔的显式 Origin，禁止通配符 `*`。
 - `POST /api/shader/generate` 在数据库连接池可用时，会写入 `agent_runs`、`agent_events` 和 `agent_logs`。
 - `procedural_v1` 把模式、质量档位和补充约束写入 run input，把停止原因、current_best、评分和公开 Artifact URL 写入 run result；Graph 返回的每个阶段事件与 `current_best_updated` 逐项写入 `agent_events`。
 - 生成终态的模型调用、阶段事件、Agent 日志和 `agent_runs` 更新使用同一个 asyncpg 显式事务；任一步失败必须整体回滚。事务先 `FOR UPDATE` 锁定 run：相同终态重放直接 no-op，不同终态重放显式报冲突，禁止静默覆盖。
@@ -81,17 +84,22 @@
 ## Schema 规则
 
 - 对外 API 请求/响应优先放在 `app/schemas/`；只有一次性内部临时结构才留在局部文件。
-- schema 字段名应和前端 `src/api/` 类型保持一致。
+- schema 字段名应和前端 `frontend/src/api/` 类型保持一致。
 - 对外响应不要暴露内部异常类型、模型供应商字段或密钥相关信息。
 
 ## 测试规则
 
-- route 和 service 改动至少运行：
+- route、schema 和 service 改动至少运行受影响的 unit/TestClient 测试；跨模块或无法可靠缩小范围时运行 `uv run pytest tests/unit_tests`。
+- 按受影响边界追加门禁：
 
-```bash
-uv run pytest tests/unit_tests
-make test-memory-postgres
-```
+| 改动范围 | 追加验证 |
+|---|---|
+| 数据库生命周期、Checkpointer、Store、Memory 隔离或清理 | `make test-memory-postgres` |
+| Backend → Agent → ShaderForge 产品流程或 Artifact 契约 | `uv run pytest tests/integration_tests/test_png_to_shader_v1_api.py` |
+| 产品浏览器行为 | `npm --prefix frontend run e2e:procedural-v1`；Memory 行为再追加 `npm --prefix frontend run e2e:memory` |
+| Node Lab Route、schema 或 transport | 相关 unit/TestClient 测试，并追加 `make test-node-lab-ui` |
+
+跨多个范围时运行对应验证的并集；例如只改 health route 不要求 PostgreSQL 验收。
 
 首次部署先运行 `make setup-memory-postgres`。应用运行时不执行 LangGraph DDL，只验证 saver/store schema；无 `DATABASE_URL` 时使用明确标记的进程内临时记忆。
 

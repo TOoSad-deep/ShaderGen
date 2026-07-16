@@ -29,12 +29,12 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 - 每次只处理一个 `active` 功能。
 - 未通过验证不得在 `docs/FEATURES.md` 标记为 `passing`。
 - 涉及跨组件行为必须跑对应端到端或集成检查；没有自动化检查时，在 `PROGRESS.md` 写明缺口。
-- 会话结束前更新 `PROGRESS.md`，重要取舍写入 `docs/DECISIONS.md`。
+- 会话结束前原地刷新 `PROGRESS.md` 的当前状态、下一步、未解决缺口和验证基线；只有功能状态、架构/契约、质量门禁、阶段里程碑或重要缺口变化时才新增“最近重要变更”，例行重复验证不得形成逐会话流水账。重要取舍写入 `docs/DECISIONS.md`。
 - 文档、计划、代码注释和 SQL 注释尽量使用中文；保留必要的英文技术名词、代码标识符和外部 API 名称。
 - 架构、目录边界、命令、环境变量、功能状态或前后端契约变化时，必须同步更新对应 Markdown。
 - Graph 可视化属于 Graph 实现的一部分：凡是新增、删除、重命名节点，修改直接边、条件边、路由结果、循环、终止路径、`current_best` 安全边界或 `langgraph.json` 注册，必须在同一次改动中同步对应 `*_graph.py` Builder 上方的 ASCII 图、`src/agent/app/graphs/ARCHITECTURE.md` 的 Mermaid 区块及相关路由表/安全说明；未通过 `make docs-check` 和 `uv run langgraph validate` 不得视为完成。
 - 对仓库事实无法确定且会影响架构、契约、数据、安全或验收的问题，先向用户确认，不要自行猜测。
-- 密钥只放 `.env`，不要提交真实 API key。
+- 本地密钥只放根目录 `.env`，部署使用环境变量或 Secret Manager；任何密钥都不得进入 `VITE_*`、示例文件或 Git。
 - 真实模型 benchmark 不进入普通测试；必须使用固定 manifest、显式调用开关和整套硬预算，失败产物不得覆盖或删除。
 
 ## 按需阅读
@@ -43,6 +43,8 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 - 功能状态机：`docs/FEATURES.md`
 - 决策记录：`docs/DECISIONS.md`
 - 当前进度：`PROGRESS.md`
+- 验收证据：`docs/evidence/registry.json`（先看 `durability_status`，`partial` 不等于跨环境可复验）
+- 历史审计：`docs/progress/archive/`（只在追溯时读取，不作为当前事实来源）
 - 前端细则：`frontend/README.md`
 - 后端细则：`backend/README.md`
 - Graph 与路由开发：`src/agent/app/graphs/ARCHITECTURE.md`（涉及 Graph、routing 或节点跳转语义时必须先读）

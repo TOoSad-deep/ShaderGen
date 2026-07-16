@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 import re
 from pathlib import Path
 from typing import Any
@@ -28,11 +27,6 @@ ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_NODE_LAB_ROOT = ROOT / "output/node-lab/http"
 DEFAULT_NODE_LAB_BATCH_ROOT = ROOT / "output/benchmarks/node-lab-http"
 _BATCH_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-
-
-def _env_enabled(name: str) -> bool:
-    """只把显式 true 值视为启用，缺失或拼写错误均 fail closed."""
-    return os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 class NodeLabBackendService:
@@ -258,22 +252,25 @@ class NodeLabBackendService:
         return descriptor.to_dict(), data
 
 
-def create_default_node_lab_backend_service() -> NodeLabBackendService:
-    """按受控环境变量创建本地 Node Lab Service."""
-    root = Path(os.getenv("SHADERGEN_NODE_LAB_ROOT", str(DEFAULT_NODE_LAB_ROOT)))
-    batch_root = Path(
-        os.getenv(
-            "SHADERGEN_NODE_LAB_BATCH_ROOT",
-            str(DEFAULT_NODE_LAB_BATCH_ROOT),
-        )
+def create_default_node_lab_backend_service(
+    *,
+    root: str | Path | None = None,
+    batch_output_root: str | Path | None = None,
+    real_model_enabled: bool = False,
+) -> NodeLabBackendService:
+    """使用组合根传入的冻结配置创建本地 Node Lab Service."""
+    resolved_root = Path(root) if root is not None else DEFAULT_NODE_LAB_ROOT
+    resolved_batch_root = (
+        Path(batch_output_root)
+        if batch_output_root is not None
+        else DEFAULT_NODE_LAB_BATCH_ROOT
     )
-    real_model_enabled = _env_enabled("SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED")
     return NodeLabBackendService(
         create_default_model_node_lab_application(
-            root=root,
+            root=resolved_root,
             real_model_enabled=real_model_enabled,
         ),
-        batch_output_root=batch_root,
+        batch_output_root=resolved_batch_root,
         real_model_enabled=real_model_enabled,
     )
 

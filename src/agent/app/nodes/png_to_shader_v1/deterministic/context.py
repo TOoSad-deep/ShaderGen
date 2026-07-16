@@ -1,4 +1,4 @@
-"""准备 Shader 模型调用所需的历史 Context."""
+"""准备 PNG-to-Shader V1 模型调用所需的历史 Context."""
 
 from __future__ import annotations
 

@@ -34,9 +34,9 @@ ShaderGen/ShaderForge 将用户意图、参考图、约束和验收标准转成�
 7. `Search Engine 调优`：CMA-ES、MAP-Elites、结构变异。
 8. `VLM / HITL`：模型评审、人工评审、Store 记录。
 
-当前仓库只保留 `png_to_shader_v1_graph.py` 一个对外 Graph。它先运行 `prepare_context` 和参考图确定性测量，再调用 Analyst/Author/Critic，通过静态 Validator、项目自有 Playwright/Chromium WebGL1 Renderer、Basic Oracle 和 LocalArtifactStore 形成有界 initial / compile-repair / visual-refine 循环。首个成功 model best 后还会生成一次与 case/manifest/gate 无关的 measurement affine 独立根候选；它不消耗模型或视觉迭代预算，但必须经过同一事实层与 Selector。生产 Oracle 保留确定性测量 ROI，并追加严格 VisualAnalysis 的语义 ROI。纯 Selector 只在硬约束通过、总损失达到最小改善且保护区不超退化时更新 `current_best`；Critic/refine 与 finalize 均从 best Artifact 重载 GLSL/PNG/metrics，模型或新候选失败不会覆盖已有 best。任务内轻量状态由 LangGraph Checkpointer 保存，图片、完整 GLSL、渲染图、ContextPack、Candidate 大对象和过程摘要使用 `UntrackedValue`；项目长期 Memory 只保存精炼摘要，并且只晋升确定性验证过的 best 策略。`backend.app.services.shader_generation` 只编排 V1 用例，并通过 `agent.app.services.png_to_shader_v1` 调用 Graph；V1 使用稳定的 checkpoint thread 前缀和项目 Store，Backend 生命周期统一注入 persistence。Graph 与 Service 共享 run 级 Renderer registry，正常路径由 `finalize` 关闭，Graph 外异常由 Service `finally` 限时、幂等兜底。过程事件由公共结果交给 Backend 写入账本。HTTP 只开放 final-render/metrics/manifest 白名单，前端按服务端规范化尺寸重编译 GLSL 并比较像素 RMSE。旧基础对话图、legacy 生成/独立 Review 图及其产品入口已下线。
+当前仓库只保留 `png_to_shader_v1_graph.py` 一个对外 Graph。它先运行 `prepare_context` 和参考图确定性测量，再调用 Analyst/Author/Critic，通过静态 Validator、项目自有 Playwright/Chromium WebGL1 Renderer、Basic Oracle 和 LocalArtifactStore 形成有界 initial / compile-repair / visual-refine 循环。首个成功 model best 后还会生成一次与 case/manifest/gate 无关的 measurement affine 独立根候选；它不消耗模型或视觉迭代预算，但必须经过同一事实层与 Selector。生产 Oracle 保留确定性测量 ROI，并追加严格 VisualAnalysis 的语义 ROI。纯 Selector 只在硬约束通过、总损失达到最小改善且保护区不超退化时更新 `current_best`；Critic/refine 与 finalize 均从 best Artifact 重载 GLSL/PNG/metrics，模型或新候选失败不会覆盖已有 best。任务内轻量状态由 LangGraph Checkpointer 保存，图片、完整 GLSL、渲染图、ContextPack、Candidate 大对象和过程摘要使用 `UntrackedValue`；项目长期 Memory 只保存精炼摘要，并且只晋升确定性验证过的 best 策略。`backend.app.services.shader_generation` 只编排 V1 用例，并通过 `agent.app.services.png_to_shader_v1` 调用 Graph；V1 使用稳定的 checkpoint thread 前缀和项目 Store。Backend 在组合根把环境解析为不可变 `BackendSettings`，再向 Router、Service 与 lifespan 注入；lifespan 使用补偿清理栈管理 asyncpg 与 Agent Memory persistence，初始化半失败、取消或某一关闭失败均不得跳过其余资源清理。Graph 与 Service 共享 run 级 Renderer registry，正常路径由 `finalize` 关闭，Graph 外异常由 Service `finally` 限时、幂等兜底。过程事件由公共结果交给 Backend 写入账本。HTTP 只开放 final-render/metrics/manifest 白名单，前端按服务端规范化尺寸重编译 GLSL 并比较像素 RMSE。旧基础对话图、legacy 生成/独立 Review 图及其产品入口已下线。
 
-Node Lab 以 transport-free Application API 和通用 `NodeProvider` 协议复用生产 Node。Harness 内核不导入任何具体 Node/Graph，pipeline id、descriptor、执行模式、routing capability 与 Adapter 均由生产侧 `agent.app.nodes.integrations.node_lab` Provider 提供。当前 PNG-to-Shader Provider 暴露 20 个图节点、机器可读示例和离线成功/拒绝路径；15 个非模型节点通过 Artifact facade 直接调用生产 Node factory/routing，五个模型节点调用生产角色 Node factory 与 bounded wrapper。新 Node 只在生产 Provider 登记 descriptor/binding，不修改 Node Lab 内核或 Service；Lab 只负责输入投影、私有 Artifact 和副作用门禁，不维护 initialize/materialize/render/select/finalize/promotion 的平行语义。完整 ContextPack、GLSL、图片、模型原始内容只存 Lab Artifact，策略 Memory 只 preview。八个确定性 capability、不可变步骤、真实 node target、scenario/pipeline、Renderer cold/warm、transport AI-off 和独立模型角色 benchmark 共用同一 Harness；失败/中断证据不可覆盖。可选 `/api/lab/v1/*` 仅在显式环境开关下注册，不进入产品 API；HTTP batch 只接受仓库内三个固定 AI-off suite id。`scripts/run_node_lab_cli.py`、Swagger 和 `/lab` 工作台分别提供自动化、HTTP 与人工入口，只消费公共 Application API/descriptor。
+Node Lab 以 transport-free Application API 和通用 `NodeProvider` 协议复用生产 Node。Harness 内核不导入任何具体 Node/Graph，pipeline id、descriptor、执行模式、routing capability 与 Adapter 均由生产侧 `agent.app.nodes.png_to_shader_v1.integrations.node_lab` Provider 提供。当前 PNG-to-Shader Provider 暴露 20 个图节点、机器可读示例和离线成功/拒绝路径；15 个非模型节点通过 Artifact facade 直接调用生产 Node factory/routing，五个模型节点调用生产角色 Node factory 与 bounded wrapper。新 Node 只在所属功能命名空间的 Provider 登记 descriptor/binding，不修改 Node Lab 内核或 Service；Lab 只负责输入投影、私有 Artifact 和副作用门禁，不维护 initialize/materialize/render/select/finalize/promotion 的平行语义。完整 ContextPack、GLSL、图片、模型原始内容只存 Lab Artifact，策略 Memory 只 preview。八个确定性 capability、不可变步骤、真实 node target、scenario/pipeline、Renderer cold/warm、transport AI-off 和独立模型角色 benchmark 共用同一 Harness；失败/中断证据不可覆盖。可选 `/api/lab/v1/*` 仅在显式环境开关下注册，不进入产品 API；HTTP batch 只接受仓库内三个固定 AI-off suite id。`scripts/run_node_lab_cli.py`、Swagger 和 `/lab` 工作台分别提供自动化、HTTP 与人工入口，只消费公共 Application API/descriptor。
 
 M5 以固定 10 例 manifest、AI-off smoke、成本受控 AI-on runner、运行前冻结 gate 和匿名 A/B 页面独立于产品请求执行；新 run 对 model initial 与 final 使用同一 manifest ROI objective，并严格区分 model/deterministic provenance。Node Lab benchmark 与 M5 证据互不覆盖。Intent IR、DSL、Search Engine 和完整 VLM/HITL 仍是后续工作。
 
@@ -69,14 +69,15 @@ ShaderGen/
 │   │   ├── middleware/       # 请求日志等 FastAPI 中间件
 │   │   ├── schemas/          # API 请求/响应 schema
 │   │   └── services/         # 后端用例编排
-│   └── sql/                  # 手写 SQL schema 记录目录
+│   └── sql/                  # 显式打包的手写 SQL schema 资源包
 ├── src/
 │   ├── agent/                # LangGraph 编排、模型调用、Prompt 策略
 │   │   └── app/
+│   │       ├── benchmarks/   # 显式离线 Agent benchmark，不进入在线路径
 │   │       ├── config/       # Agent 配置
 │   │       ├── graphs/       # LangGraph 图入口
 │   │       ├── states/       # 图状态和运行上下文
-│   │       ├── nodes/        # 图节点
+│   │       ├── nodes/        # 按 Pipeline/版本组织的图节点命名空间
 │   │       ├── prompts/      # Prompt YAML 和加载器
 │   │       ├── parsers/      # 模型输出解析器
 │   │       ├── contracts/    # LLM Gateway 等中立契约
@@ -148,6 +149,7 @@ frontend 用户输入
 - M5 人工质量门禁未通过期间，Frontend/HTTP 仍只提供 `procedural_v1`，但必须明确显示实验/no-go 状态；“唯一实现路径”不等于“已获准灰度发布”。
 - V1 的 wall-time 预算按阶段分配，模型不得占用留给确定性修复、Renderer、Evaluator 和 finalize 的保留时间。
 - Renderer registry 的正常释放属于 Graph `finalize`，越过 Graph 的未知异常由 Agent Service `finally` 使用同一 registry 再次幂等释放；清理故障不得遮蔽原始生成结果或异常。
+- Backend 只在应用组合根读取环境变量；数据库、日志、CORS 和 Node Lab 开关冻结后注入依赖。数据库与 Memory 的 open 函数负责回收自身半初始化资源，lifespan 再按逆序执行全部已登记 close；关闭前先从 `app.state` 脱离对象，避免失败资源继续被请求借用。
 - `current_best` 只能来自 Selector。只有当 Evaluator 不可用且候选已经通过静态检查和真实 WebGL 时，才允许返回明确标记的 `unscored_fallback`；它没有评分、metrics、Critic 绑定或长期 Memory 晋升资格。
 - API 错误必须区分请求校验、Shader validation、模型供应商/配置/响应、Renderer、persistence、timeout 和内部 pipeline 错误。未知内部异常不得伪装成用户可修复的 422。
 - 过程终态在单个数据库事务中提交事件、日志和 run 状态；普通日志/事件禁止完整 GLSL、图片、reasoning、供应商原文或编译器原文。原始编译证据只进入私有 Artifact。
@@ -158,7 +160,7 @@ frontend 用户输入
 - 先有功能项，再有目录。没有对应 `docs/FEATURES.md` 功能，不创建 `src/shaderforge/*` 空子包。
 - 新建领域子包时，必须同时添加最小单元测试。
 - 共享类型只在两个以上模块需要时抽出；单模块内部类型留在本模块。
-- API 请求/响应 schema 放 `backend/app/schemas/`；HTTP route 放 `backend/app/api/routes/`；手写 SQL 放 `backend/sql/`。领域内部结构优先放 `src/shaderforge/*`，不要让后端 schema 泄漏进核心层。
+- API 请求/响应 schema 放 `backend/app/schemas/`；HTTP route 放 `backend/app/api/routes/`；手写 SQL 放 `backend/sql/`，并以显式 `backend.sql` 资源包进入 wheel，不在其中放运行时 Python 编排。领域内部结构优先放 `src/shaderforge/*`，不要让后端 schema 泄漏进核心层。
 - 后端新增 route 必须在 `backend/app/api/router.py` 注册；新增 service 必须表达一个真实后端用例；不创建 `auth`、`user`、`file` 等空包。
 - Agent 新增对后端能力时，入口放在 `agent.app.services.*`；Node 只通过 `agent.app.contracts.llm.LLMGateway` 使用模型能力，具体实现由 Graph 从 `agent.app.llms` 注入。
 - 如果创建 `src/shaderforge/`，必须同步更新 `pyproject.toml` 的包发现配置，确保 `uv run` 和测试环境能导入。
@@ -169,14 +171,21 @@ frontend 用户输入
 - 常用命令、启动方式、端口、环境变量变化：更新 `README.md`、`AGENTS.md`，必要时更新目录 README。
 - 前端目录、组件、API、样式规则变化：更新 `frontend/README.md`。
 - 后端路由、service、schema、错误处理、测试规则变化：更新 `backend/README.md`。
-- 功能状态、验证命令、完成证据变化：更新 `docs/FEATURES.md` 和 `PROGRESS.md`。
-- 会话结束时无论是否改代码，都要在 `PROGRESS.md` 记录当前状态、下一步和验证结果。
+- 功能状态、验证命令、完成证据变化：更新 `docs/FEATURES.md`，并原地刷新 `PROGRESS.md` 的当前交接信息。
+- 会话结束时无论是否改代码，都要确认 `PROGRESS.md` 的当前状态、下一步、未解决缺口和验证基线准确；没有实质变化时不新增历史项。
+
+## 进度文档维护规则
+
+- `docs/FEATURES.md` 是功能状态机和通过证据的事实来源；`PROGRESS.md` 是新会话接手所需的有界当前交接页；`docs/DECISIONS.md` 保存带状态的历史取舍；`docs/evidence/registry.json` 登记验收摘要、文件 hash 与耐久性。Git commit 保存实现演进，只有 registry 标为 `durable` 的冻结证据才可视为跨环境可获得。
+- `PROGRESS.md` 采用原地更新，不是 append-only 会话日志。“最近重要变更”只记录功能状态、架构/契约、质量门禁、阶段里程碑或重要未决缺口变化，最多保留 5 条；例行重复验证只覆盖“当前验证基线”。
+- `PROGRESS.md` 的 UTF-8 体量不得超过 20,000 bytes。超出内容迁入 `docs/progress/archive/`；归档必须标注时间范围和“非当前事实”，只在审计追溯时读取，不得进入常规接手路径。
+- 失败 benchmark、人工门禁、run id、关键 SHA-256 和仍未关闭的验收缺口不得因压缩而删除；主文件保留当前结论和 registry 定位入口，完整证据继续只增不改保存在冻结产物或历史快照中。本地忽略目录只能标为 `partial`，不得冒充持久归档。
 
 ## 不确定性处理规则
 
 - 先从仓库事实来源判断：`README.md`、`AGENTS.md`、`docs/`、目录 README、现有代码和测试。
 - 如果仍无法确定，并且选择会影响架构、API 契约、数据结构、安全、验证方式或用户体验验收，必须先向用户确认。
-- 如果问题只影响局部实现细节，且现有规范已有默认方向，按现有规范选择最小可行方案，并在 `PROGRESS.md` 记录假设。
+- 如果问题只影响局部实现细节，且现有规范已有默认方向，按现有规范选择最小可行方案；只有仍会影响后续接手或验收时，才把假设写入 `PROGRESS.md` 的未解决缺口。
 - 用户确认形成长期规则时，写入 `docs/DECISIONS.md` 或对应目录 README。
 
 ## 测试映射
@@ -185,7 +194,7 @@ frontend 用户输入
 - `frontend/` 改动：至少运行 `npm --prefix frontend run build`。
 - `backend/` 路由/service 改动：运行 `uv run pytest tests/unit_tests`，必要时补 TestClient 测试。
 - `src/agent/` 改动：使用模拟模型测试节点行为；不要在单元测试中调用真实模型。
-- `src/shaderforge/intent`、`dsl`、`generation`、`rendering`、`evaluation`、`search`、`review`、`store` 改动：补聚焦单元测试；跨模块流程放 `tests/integration_tests/`。
+- 已实现的 `src/shaderforge/*/` 子包改动：补聚焦单元测试；跨模块流程放 `tests/integration_tests/`。尚未落地的 Intent、DSL、Search、Review 等目标能力不提前创建空目录或虚构测试入口。
 - 跨前端、后端、agent、领域核心的用户流程，必须在 `docs/FEATURES.md` 中写清验证命令和证据。
 
 ## 代码边界

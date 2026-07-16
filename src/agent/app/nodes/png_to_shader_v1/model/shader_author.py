@@ -30,13 +30,14 @@ from agent.app.messages.png_to_shader_v1 import (
     text_part,
     validate_render_evidence_binding,
 )
-from agent.app.nodes.structured_output import invoke_structured_output
 from agent.app.parsers.png_to_shader_v1 import (
     parser_for_author,
     repair_shader_author_initial_bindings,
 )
 from agent.app.prompts.prompt_loader import PromptDefinition, load_prompt_definition
 from shaderforge.contracts import WEBGL1_STATIC_NO_TEXTURE_V1
+
+from .structured_output import invoke_structured_output
 
 AUTHOR_PROMPTS: dict[AuthorMode, PromptDefinition] = {
     AuthorMode.INITIAL: load_prompt_definition("shader_author_initial_v1"),

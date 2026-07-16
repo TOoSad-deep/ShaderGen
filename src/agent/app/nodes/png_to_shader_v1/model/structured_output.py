@@ -1,4 +1,4 @@
-"""执行一次语义调用并最多修复一次结构化 JSON."""
+"""执行 PNG-to-Shader V1 模型调用并最多修复一次结构化 JSON."""
 
 from __future__ import annotations
 

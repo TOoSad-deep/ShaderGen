@@ -35,26 +35,22 @@ from agent.app.lab.models import (
     NodeLabError,
     ensure_json_object,
 )
-from agent.app.nodes import bounded_model_node as bounded_model
-from agent.app.nodes.bounded_model_node import make_bounded_model_node
-from agent.app.nodes.shader_author_node import (
+from agent.app.nodes.png_to_shader_v1.model import (
     AUTHOR_PROMPTS,
+    VISUAL_ANALYSIS_PROMPT,
+    VISUAL_CRITIC_PROMPT,
+    make_bounded_model_node,
     make_shader_author_compile_repair_node,
     make_shader_author_initial_node,
     make_shader_author_visual_refine_node,
-)
-from agent.app.nodes.visual_analysis_node import (
-    VISUAL_ANALYSIS_PROMPT,
     make_visual_analysis_node,
-)
-from agent.app.nodes.visual_critic_node import (
-    VISUAL_CRITIC_PROMPT,
     make_visual_critic_node,
 )
+from agent.app.nodes.png_to_shader_v1.model import bounded as bounded_model
 from agent.app.prompts.prompt_loader import PromptDefinition
 from shaderforge.contracts import BudgetPolicy, QualityPreset, budget_for_preset
 
-ROOT = Path(__file__).resolve().parents[6]
+ROOT = Path(__file__).resolve().parents[7]
 DEFAULT_MODEL_FIXTURE_PATH = (
     ROOT / "benchmarks/node_lab/png_to_shader_v1/fixtures/model_roles_v1.json"
 )

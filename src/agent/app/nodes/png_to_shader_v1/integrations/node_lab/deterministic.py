@@ -30,11 +30,9 @@ from agent.app.lab.models import (
     StepExecutionRequest,
     ensure_json_object,
 )
-from agent.app.nodes.integrations.node_lab.registry import (
-    build_png_to_shader_v1_descriptors,
-)
-from agent.app.nodes.png_to_shader_v1 import (
+from agent.app.nodes.png_to_shader_v1.deterministic import (
     NodeEvidenceError,
+    ProjectMemoryReader,
     RunRendererRegistry,
     make_finalize_png_to_shader_v1_node,
     make_initialize_png_to_shader_v1_node,
@@ -44,16 +42,11 @@ from agent.app.nodes.png_to_shader_v1 import (
     make_persist_visual_analysis_node,
     make_persist_visual_review_node,
     make_prepare_compile_repair_node,
+    make_prepare_context_node,
     make_prepare_measurement_seed_node,
+    make_preview_validated_strategy_node,
     make_render_and_evaluate_node,
     make_select_current_best_node,
-)
-from agent.app.nodes.prepare_context_node import (
-    ProjectMemoryReader,
-    make_prepare_context_node,
-)
-from agent.app.nodes.promote_validated_strategy_node import (
-    make_preview_validated_strategy_node,
 )
 from shaderforge.public import (
     ArtifactRef,
@@ -64,6 +57,10 @@ from shaderforge.public import (
     measure_target,
 )
 from shaderforge.store import LocalArtifactStore
+
+from .registry import (
+    build_png_to_shader_v1_descriptors,
+)
 
 SUPPORTED_NODE_IDS = frozenset(
     descriptor.node_id
@@ -839,11 +836,7 @@ class DeterministicNodeExecutor:
             if output.get("memory_preview") is None:
                 outcome = "stopped"
 
-        implementation = f"agent.app.nodes.{descriptor.node_id}"
-        if descriptor.node_id in {"decide_after_render", "decide_after_selection"}:
-            implementation = (
-                f"agent.app.graphs.png_to_shader_v1_routing.{descriptor.node_id}"
-            )
+        implementation = f"{descriptor.source_ref}#{descriptor.node_id}"
         usage: dict[str, Any] = {
             "model_call_count": 0,
             "browser_launch_count": execution_usage["browser_launch_count"],

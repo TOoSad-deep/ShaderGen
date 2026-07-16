@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
+import { apiFetch } from "../api/client";
+
 const VERTEX_SHADER = `
 attribute vec2 a_position;
 varying vec2 v_uv;
@@ -58,7 +60,7 @@ async function compareRenderBlobs(
   clientBlob: Blob,
   serverRenderUrl: string,
 ): Promise<ClientCompatibilityReport> {
-  const response = await fetch(serverRenderUrl, { cache: "no-store" });
+  const response = await apiFetch(serverRenderUrl, { cache: "no-store" });
   if (!response.ok) throw new Error("无法读取服务端最终渲染图。");
 
   const [clientImage, serverImage] = await Promise.all([

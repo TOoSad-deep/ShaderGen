@@ -16,8 +16,10 @@ from agent.app.lab.models import (
     StepExecutionRequest,
 )
 from agent.app.memory.models import MEMORY_SCHEMA_VERSION, MemoryItem
-from agent.app.nodes.integrations.node_lab import build_png_to_shader_v1_registry
-from agent.app.nodes.integrations.node_lab.deterministic import (
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
+    build_png_to_shader_v1_registry,
+)
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab.deterministic import (
     SUPPORTED_NODE_IDS,
     DeterministicNodeExecutor,
 )
@@ -31,7 +33,7 @@ from shaderforge.public import (
 )
 from shaderforge.rendering import CompileResult, RenderResult
 from shaderforge.validation import validate_shader
-from tests.unit_tests.png_to_shader_v1_samples import (
+from tests.fixtures.png_to_shader_v1_samples import (
     GOLDEN_GLSL,
     analysis_payload,
     author_payload,
@@ -308,6 +310,10 @@ async def test_stage_c_executor_allowlist_and_initialize_use_only_lab_artifacts(
     assert result.output_patch["reference_artifact_id"] in artifacts.values
     assert result.output_patch["run_config_artifact_id"] in artifacts.values
     assert "image" not in result.output_patch
+    assert result.provenance["implementation"] == (
+        "src/agent/app/nodes/png_to_shader_v1/deterministic/preparation.py"
+        "#initialize_run"
+    )
 
 
 @pytest.mark.anyio

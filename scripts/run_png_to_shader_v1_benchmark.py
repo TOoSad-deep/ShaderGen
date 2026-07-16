@@ -57,6 +57,16 @@ class _ObjectiveMetrics:
     bbox_max_error_uv: float | None
 
 
+@dataclass
+class _AIOnFailureContext:
+    """把 case 分配预算与已返回状态带回 runner 的异常边界."""
+
+    allocated_model_calls: int
+    project_id: str
+    run_id: str
+    state: Mapping[str, Any] | None = None
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -122,9 +132,11 @@ def _progress(message: str) -> None:
 
 def _structured_model_routing_snapshot() -> dict[str, Any]:
     """在调用模型前冻结三个结构化角色的真实调用配置."""
-    from agent.app.nodes.shader_author_node import SHADER_AUTHOR_MODEL_CONFIG
-    from agent.app.nodes.visual_analysis_node import VISUAL_ANALYSIS_MODEL_CONFIG
-    from agent.app.nodes.visual_critic_node import VISUAL_CRITIC_MODEL_CONFIG
+    from agent.app.nodes.png_to_shader_v1 import (
+        SHADER_AUTHOR_MODEL_CONFIG,
+        VISUAL_ANALYSIS_MODEL_CONFIG,
+        VISUAL_CRITIC_MODEL_CONFIG,
+    )
 
     def node_snapshot(config: Any) -> dict[str, Any]:
         return {
@@ -339,6 +351,219 @@ def _record(value: Any) -> CandidateRecord:
     if not isinstance(value, Mapping):
         raise TypeError("candidate record 必须是 object。")
     return CandidateRecord.from_dict(dict(value))
+
+
+def _non_negative_int(value: Any) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _non_negative_float(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    result = float(value)
+    return result if result >= 0.0 else None
+
+
+def _allocated_model_calls(preset: QualityPreset, remaining_model_calls: int) -> int:
+    """返回本 case 最多可消费的调用数，负 remaining 按 0 处理."""
+    return max(
+        0,
+        min(
+            budget_for_preset(preset).max_model_calls,
+            remaining_model_calls,
+        ),
+    )
+
+
+def _safe_failure_candidate_refs(state: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """从异常状态提取不含 GLSL、Prompt 或 reasoning 的候选引用."""
+    raw_records = state.get("candidate_records")
+    if not isinstance(raw_records, (list, tuple)):
+        return []
+    result: list[dict[str, Any]] = []
+    for raw in raw_records:
+        try:
+            record = _record(raw)
+        except (KeyError, TypeError, ValueError):
+            continue
+        result.append(
+            {
+                "candidate_id": record.candidate_id,
+                "parent_candidate_id": record.parent_candidate_id,
+                "glsl_sha256": record.glsl_sha256,
+                "glsl_ref": record.glsl_ref,
+                "provenance_ref": record.provenance_ref,
+                "compile_ref": record.compile_ref,
+                "render_ref": record.render_ref,
+                "render_sha256": record.render_sha256,
+                "metrics_ref": record.metrics_ref,
+                "origin": record.origin,
+                "generator_version": record.generator_version,
+                "hard_constraints_passed": record.hard_constraints_passed,
+            }
+        )
+    return result
+
+
+def _safe_token_total(audits: Sequence[Mapping[str, Any]], field: str) -> int:
+    total = 0
+    for audit in audits:
+        value = _non_negative_int(audit.get(field))
+        if value is not None:
+            total += value
+    return total
+
+
+def _failure_model_usage(
+    context: _AIOnFailureContext,
+) -> tuple[int, int | None, str, list[dict[str, Any]]]:
+    """优先恢复实际调用数；证据不可靠时按 case 分配上限扣账."""
+    state = context.state
+    if state is None:
+        return (
+            context.allocated_model_calls,
+            None,
+            "allocated_limit_fail_closed",
+            [],
+        )
+
+    audits = _safe_model_audits(state)
+    observed_counts: list[int] = []
+    raw_audits = state.get("model_calls")
+    if isinstance(raw_audits, (list, tuple)) and raw_audits and all(
+        isinstance(item, Mapping) for item in raw_audits
+    ):
+        observed_counts.append(len(raw_audits))
+
+    final = state.get("final_result")
+    if isinstance(final, Mapping):
+        final_count = _non_negative_int(final.get("model_call_count"))
+        if final_count is not None:
+            observed_counts.append(final_count)
+
+    if observed_counts:
+        observed = max(observed_counts)
+        return observed, observed, "recovered_actual", audits
+    return (
+        context.allocated_model_calls,
+        None,
+        "allocated_limit_fail_closed",
+        audits,
+    )
+
+
+def _resume_model_call_charge(
+    ai_on: Mapping[str, Any],
+    preset: QualityPreset,
+) -> int:
+    """恢复运行时拒绝信任旧式、无证据的零调用异常结果."""
+    if not ai_on:
+        return 0
+    count = _non_negative_int(ai_on.get("model_call_count"))
+    if count is None:
+        return budget_for_preset(preset).max_model_calls
+    if (
+        bool(ai_on.get("success"))
+        or isinstance(ai_on.get("evidence_path"), str)
+        and bool(ai_on.get("evidence_path"))
+        or ai_on.get("failure_reason") == "global_model_budget_exhausted"
+        or ai_on.get("model_call_accounting")
+        in {"recovered_actual", "allocated_limit_fail_closed"}
+    ):
+        return count
+    return max(count, budget_for_preset(preset).max_model_calls)
+
+
+def _persist_ai_on_failure(
+    *,
+    case: BenchmarkCaseSpec,
+    suite_root: Path,
+    preset: QualityPreset,
+    context: _AIOnFailureContext,
+    error: BaseException,
+    interrupted: bool,
+) -> dict[str, Any]:
+    """持久化安全失败证据，并返回可参与全局预算扣账的 case 结果."""
+    charged_calls, observed_calls, accounting, audits = _failure_model_usage(context)
+    state = context.state or {}
+    events = _safe_events(state)
+    candidate_refs = _safe_failure_candidate_refs(state)
+    final = state.get("final_result")
+    final_value = final if isinstance(final, Mapping) else {}
+    output = _case_root(suite_root, case.case_id) / "ai-on"
+    evidence_path = output / ("interrupted.json" if interrupted else "failure.json")
+    error_type = type(error).__name__
+    failure_stage = "postprocessing" if context.state is not None else "invoke_or_pre_state"
+    accounting_evidence = {
+        "strategy": accounting,
+        "allocated_model_calls": context.allocated_model_calls,
+        "observed_model_calls": observed_calls,
+        "charged_model_calls": charged_calls,
+    }
+    evidence = {
+        "schema_version": 1,
+        "case_id": case.case_id,
+        "project_id": context.project_id,
+        "run_id": context.run_id,
+        "quality_preset": preset.value,
+        "failure": {
+            "error_type": error_type,
+            "stage": failure_stage,
+            "interrupted": interrupted,
+        },
+        "model_call_accounting": accounting_evidence,
+        "model_calls": audits,
+        "events": events,
+        "candidate_records": candidate_refs,
+        "current_best_candidate_id": str(state.get("current_best_id", "")) or None,
+        "final_result": {
+            key: final_value.get(key)
+            for key in (
+                "success",
+                "stop_reason",
+                "candidate_id",
+                "model_call_count",
+                "unscored_fallback",
+            )
+            if key in final_value
+        },
+        "recorded_at": datetime.now(UTC).isoformat(),
+    }
+    _write_json(evidence_path, evidence)
+    evidence_ref = _relative(suite_root, evidence_path)
+    elapsed_seconds = _non_negative_float(final_value.get("elapsed_seconds")) or 0.0
+    return {
+        "success": False,
+        "failure_reason": error_type,
+        "failure_stage": failure_stage,
+        "interrupted": interrupted,
+        "project_id": context.project_id,
+        "run_id": context.run_id,
+        "quality_preset": preset.value,
+        "stop_reason": final_value.get("stop_reason"),
+        "candidate_count": len(candidate_refs),
+        "model_call_count": charged_calls,
+        "observed_model_call_count": observed_calls,
+        "allocated_model_call_budget": context.allocated_model_calls,
+        "model_call_accounting": accounting,
+        "input_tokens": _safe_token_total(audits, "input_tokens"),
+        "output_tokens": _safe_token_total(audits, "output_tokens"),
+        "total_tokens": _safe_token_total(audits, "total_tokens"),
+        "elapsed_seconds": elapsed_seconds,
+        "best_update_count": sum(
+            event.get("event_type") == "current_best_updated" for event in events
+        ),
+        "best_updates_monotonic": False,
+        "traceability_passed": False,
+        "traceability_errors": ("benchmark_case_processing_failed",),
+        "final_compile_passed": False,
+        "final_static_passed": False,
+        "final_matches_current_best": False,
+        "evidence_path": evidence_ref,
+        "failure_evidence_path": evidence_ref,
+    }
 
 
 def _read_object(store: Any, relative_path: str) -> dict[str, Any]:
@@ -585,6 +810,8 @@ async def _run_ai_on_case(
     preset: QualityPreset,
     instruction: str,
     remaining_model_calls: int,
+    *,
+    failure_context: _AIOnFailureContext | None = None,
 ) -> dict[str, Any]:
     from agent.app.services.png_to_shader_v1 import (
         default_png_to_shader_v1_service,
@@ -604,7 +831,7 @@ async def _run_ai_on_case(
         }
     case_budget = replace(
         preset_budget,
-        max_model_calls=min(preset_budget.max_model_calls, remaining_model_calls),
+        max_model_calls=_allocated_model_calls(preset, remaining_model_calls),
     )
     project_id = f"benchmark-{suite_run_id}-{case.case_id}"
     run_id = f"{suite_run_id}-{case.case_id}"
@@ -625,6 +852,8 @@ async def _run_ai_on_case(
             "logs": (),
         },
     )
+    if failure_context is not None:
+        failure_context.state = state
     store = default_png_to_shader_v1_service.artifact_store.start_run(
         project_id, run_id
     )
@@ -1729,9 +1958,9 @@ async def _run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
 
     if modes_with_ai_on:
         consumed = sum(
-            int(result.get("ai_on", {}).get("model_call_count", 0))
+            _resume_model_call_charge(result["ai_on"], preset)
             for result in results.values()
-            if isinstance(result.get("ai_on"), Mapping)
+            if isinstance(result.get("ai_on"), Mapping) and result["ai_on"]
         )
         for index, case in enumerate(cases, 1):
             if results[case.case_id].get("ai_on"):
@@ -1742,6 +1971,11 @@ async def _run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                 f"[ai-on {index}/{len(cases)}] {case.case_id}: running "
                 f"(remaining global calls={remaining})"
             )
+            failure_context = _AIOnFailureContext(
+                allocated_model_calls=_allocated_model_calls(preset, remaining),
+                project_id=f"benchmark-{suite_run_id}-{case.case_id}",
+                run_id=f"{suite_run_id}-{case.case_id}",
+            )
             try:
                 ai_on = await _run_ai_on_case(
                     case,
@@ -1750,30 +1984,28 @@ async def _run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
                     preset,
                     args.instruction,
                     remaining,
+                    failure_context=failure_context,
                 )
-            except asyncio.CancelledError:
-                _write_json(
-                    _case_root(suite_root, case.case_id) / "ai-on/interrupted.json",
-                    {
-                        "error_type": "CancelledError",
-                        "recorded_at": datetime.now(UTC).isoformat(),
-                    },
+            except asyncio.CancelledError as exc:
+                ai_on = _persist_ai_on_failure(
+                    case=case,
+                    suite_root=suite_root,
+                    preset=preset,
+                    context=failure_context,
+                    error=exc,
+                    interrupted=True,
                 )
+                results[case.case_id]["ai_on"] = ai_on
+                _save_case_result(suite_root, case, results[case.case_id])
                 raise
             except Exception as exc:
-                ai_on = {
-                    "success": False,
-                    "failure_reason": type(exc).__name__,
-                    "model_call_count": 0,
-                    "final_compile_passed": False,
-                    "final_static_passed": False,
-                    "final_matches_current_best": False,
-                    "best_updates_monotonic": False,
-                    "traceability_passed": False,
-                }
-                _write_json(
-                    _case_root(suite_root, case.case_id) / "ai-on/failure.json",
-                    {"error_type": type(exc).__name__},
+                ai_on = _persist_ai_on_failure(
+                    case=case,
+                    suite_root=suite_root,
+                    preset=preset,
+                    context=failure_context,
+                    error=exc,
+                    interrupted=False,
                 )
             results[case.case_id]["ai_on"] = ai_on
             consumed += int(ai_on.get("model_call_count", 0))

@@ -75,7 +75,7 @@ def test_repair_prompt_is_json_only_and_treats_original_as_untrusted_data() -> N
 def test_prompt_bodies_only_live_in_runtime_prompt_package() -> None:
     node_source = "\n".join(
         path.read_text(encoding="utf-8")
-        for path in (ROOT / "src/agent/app/nodes").glob("*.py")
+        for path in (ROOT / "src/agent/app/nodes").rglob("*.py")
     )
 
     assert "你是 PNG 转无贴图 Shader 系统" not in node_source

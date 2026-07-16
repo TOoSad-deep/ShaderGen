@@ -11,12 +11,12 @@ from langchain_core.messages import AIMessage
 
 from agent.app.contracts.llm import LLMResponse, TokenUsage
 from agent.app.lab.models import ArtifactDescriptor, NodeLabError
-from agent.app.nodes.integrations.node_lab.model import (
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab.model import (
     SUPPORTED_NODE_IDS,
     ModelRoleExecutor,
 )
 from shaderforge.contracts import BudgetPolicy
-from tests.unit_tests.png_to_shader_v1_samples import (
+from tests.fixtures.png_to_shader_v1_samples import (
     GOLDEN_GLSL,
     analysis_payload,
     author_payload,

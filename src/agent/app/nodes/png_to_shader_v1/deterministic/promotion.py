@@ -1,4 +1,4 @@
-"""晋升经过 Renderer、Oracle 和 Selector 验证的 PNG-to-Shader 策略."""
+"""晋升经过 Renderer、Oracle 和 Selector 验证的 PNG-to-Shader V1 策略."""
 
 from __future__ import annotations
 

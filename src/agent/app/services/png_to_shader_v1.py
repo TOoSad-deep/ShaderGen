@@ -27,6 +27,20 @@ from shaderforge.store import LocalArtifactStore
 logger = logging.getLogger("agent.png_to_shader")
 SERVICE_RENDERER_CLOSE_TIMEOUT_SECONDS = 3.0
 
+__all__ = [
+    "ClearPngToShaderMemoryResult",
+    "MemoryUnavailableError",
+    "NoValidatedShaderError",
+    "PngToShaderV1Result",
+    "PngToShaderV1Service",
+    "PublicArtifact",
+    "PublicArtifactNotFoundError",
+    "create_png_to_shader_v1_service",
+    "default_png_to_shader_v1_service",
+    "generate_png_to_shader_v1",
+    "png_to_shader_v1_models",
+]
+
 PUBLIC_ARTIFACTS = {
     "final-render": ("final/render.png", "image/png", "final-render.png"),
     "metrics": (

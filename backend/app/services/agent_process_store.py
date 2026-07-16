@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable, Mapping
-from contextlib import asynccontextmanager
-from typing import Any
+from collections.abc import AsyncIterator, Iterable, Mapping
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from typing import Any, Protocol, cast
 from uuid import UUID
 
 logger = logging.getLogger("backend.agent_process")
@@ -54,6 +54,22 @@ class AgentRunOutcomeConflictError(RuntimeError):
     """表示同一 run_id 已经存在不同终态，禁止静默覆盖."""
 
 
+class _DatabaseConnection(Protocol):
+    """描述过程账本实际使用的最小异步连接能力."""
+
+    async def execute(self, query: str, *args: Any) -> Any:
+        """执行一条参数化 SQL."""
+        ...
+
+
+class _DatabasePool(Protocol):
+    """描述过程账本实际使用的最小异步连接池能力."""
+
+    def acquire(self) -> AbstractAsyncContextManager[_DatabaseConnection]:
+        """借出一条由异步上下文管理器托管的连接."""
+        ...
+
+
 def _jsonb(value: dict[str, Any] | None) -> str:
     """把 Python 字典转成稳定 JSON 字符串，交给 SQL 转 jsonb."""
     return json.dumps(value or {}, ensure_ascii=False, separators=(",", ":"))
@@ -79,7 +95,11 @@ def _safe_error_summary(error: Exception, stop_reason: str) -> str:
     return f"{type(error).__name__}: {stop_reason}"
 
 
-async def _execute_many(connection, query: str, rows: list[tuple[Any, ...]]) -> None:
+async def _execute_many(
+    connection: _DatabaseConnection,
+    query: str,
+    rows: list[tuple[Any, ...]],
+) -> None:
     """生产连接使用批量协议；简单测试替身回退为逐条 execute."""
     if not rows:
         return
@@ -92,7 +112,9 @@ async def _execute_many(connection, query: str, rows: list[tuple[Any, ...]]) -> 
 
 
 @asynccontextmanager
-async def _outcome_transaction(connection):
+async def _outcome_transaction(
+    connection: _DatabaseConnection,
+) -> AsyncIterator[None]:
     """生产 asyncpg 使用显式事务；仅兼容缺少 transaction 的简单测试替身."""
     transaction = getattr(connection, "transaction", None)
     if transaction is None:
@@ -102,7 +124,10 @@ async def _outcome_transaction(connection):
         yield
 
 
-async def _locked_existing_outcome(connection, run_id: UUID) -> Mapping[str, Any]:
+async def _locked_existing_outcome(
+    connection: _DatabaseConnection,
+    run_id: UUID,
+) -> Mapping[str, Any]:
     """锁定 run 终态；简单测试替身没有 fetchrow 时视为 running."""
     fetchrow = getattr(connection, "fetchrow", None)
     if fetchrow is None:
@@ -110,11 +135,11 @@ async def _locked_existing_outcome(connection, run_id: UUID) -> Mapping[str, Any
     existing = await fetchrow(_RUN_OUTCOME_LOCK_SQL, run_id)
     if existing is None:
         raise AgentRunOutcomeConflictError("Agent run 不存在，无法写入终态。")
-    return existing
+    return cast(Mapping[str, Any], existing)
 
 
 async def _persist_generation_outcome(
-    pool,
+    pool: _DatabasePool,
     *,
     event_rows: list[tuple[Any, ...]],
     log_rows: list[tuple[Any, ...]],
@@ -156,7 +181,7 @@ async def _persist_generation_outcome(
 
 
 async def create_agent_run(
-    pool,
+    pool: _DatabasePool,
     *,
     run_id: UUID,
     project_id: UUID | None = None,
@@ -189,7 +214,7 @@ async def create_agent_run(
 
 
 async def start_shader_generation_run(
-    pool,
+    pool: _DatabasePool,
     *,
     run_id: UUID,
     project_id: UUID,
@@ -230,7 +255,7 @@ async def start_shader_generation_run(
 
 
 async def record_shader_generation_success(
-    pool,
+    pool: _DatabasePool,
     *,
     run_id: UUID,
     model_name: str,
@@ -337,7 +362,7 @@ async def record_shader_generation_success(
 
 
 async def record_shader_generation_failure(
-    pool,
+    pool: _DatabasePool,
     *,
     run_id: UUID,
     error: Exception,
@@ -440,7 +465,7 @@ async def record_shader_generation_failure(
 
 
 async def append_agent_event(
-    pool,
+    pool: _DatabasePool,
     *,
     run_id: UUID,
     seq: int,
@@ -463,7 +488,7 @@ async def append_agent_event(
 
 
 async def append_agent_log(
-    pool,
+    pool: _DatabasePool,
     *,
     run_id: UUID,
     level: str,
@@ -486,7 +511,7 @@ async def append_agent_log(
 
 
 async def complete_agent_run(
-    pool,
+    pool: _DatabasePool,
     *,
     run_id: UUID,
     result: dict[str, Any] | None = None,
@@ -496,7 +521,7 @@ async def complete_agent_run(
 
 
 async def fail_agent_run(
-    pool,
+    pool: _DatabasePool,
     *,
     run_id: UUID,
     error: str,
@@ -513,7 +538,7 @@ async def fail_agent_run(
 
 
 async def _finish_agent_run(
-    pool,
+    pool: _DatabasePool,
     *,
     run_id: UUID,
     status: str,
