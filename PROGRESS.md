@@ -12,6 +12,7 @@
 - Backend 已在组合根冻结数据库、日志、CORS 与 Node Lab 配置；数据库和 Agent Memory 的半初始化、取消及关闭失败均进入补偿清理。主 CI 使用 Python/Node 锁定安装执行完整 `make check` 与 `mypy --strict src backend`，普通 Integration 不持有真实模型凭据。
 - 仓库结构边界已加固：五模型角色离线 benchmark 与在线 Agent Service 分离，共享测试样本归入 `tests/fixtures`，轻量包导入不再 eager-load 浏览器/Runner/V1 契约；前端统一通过 API client 访问后端，Node Lab 只对选中步骤加载完整明细。
 - 正式 run `m5-20260715T023445Z` 的自动质量检查 12/12 通过，但独立人工盲评 final/initial/tie 为 `3/4/3`，final 偏好率 `30%` 低于冻结的 `50%` 门槛；最终 gate 为 `failed`，F09 继续 active、灰度 no-go。
+- V2–V5 实施方案已完成拆分后正式 Review，形成总纲、四个版本方案和 Review 报告；结论为 Conditional Go，仅允许在 F09 M6.2 证据冻结后进入 V2.0 契约冻结，不代表 F02–F05 或异步产品能力已经实现。
 
 ## 当前 active 功能
 
@@ -22,12 +23,14 @@
 - 执行 `F09 M6.2 人类偏好对齐`：在 Node Lab 中优先诊断 topology、实例数量、轮廓/镂空、高光/阴影语义层保留，以及 Selector 的结构感知不足。
 - 重点解释 deterministic affine seed 为何在自动 objective 上晋升，却在 `rimmed_disk`、`arc_highlight_orb`、`dual_disks`、`pink_gel` 上被人工选择 initial；不得加入 benchmark case、manifest、golden 或 gate 特判。
 - 离线回归完成后，必须使用新 suite-run-id、完整硬预算重新运行真实模型 M5，并进行新一轮独立盲评；不得复用当前人工结果宣称修复通过。
+- M6.2 诊断与证据冻结后，按 `human_doc/png-to-shader-v2-v5-plan/` 从 V2.0 开始：先冻结 TargetHypothesis、RequestConstraintSet、Artifact、Genome Hash、Candidate、State/Budget Schema、golden fixture 和数据 Manifest；不得跳过 V2.0 同时启动 Intent Prompt、Compiler 或新 Graph。
 
 ## 未解决缺口
 
 - 自动 objective 尚不能充分保护人类偏好的视觉拓扑、实例数量和高光/阴影层次，这是 F09 当前的质量发布阻塞项。
 - 正式 M5 与 Node Lab real-model 的完整报告仍位于被忽略的本地 `output/benchmarks/`；`docs/evidence/registry.json` 已登记摘要、字节数和 SHA-256，但耐久性仍为 `partial`。在完整脱敏证据进入 Git LFS、Release 或不可变对象存储前，不能仅凭本地路径独立复验。
 - 服务端仍是阻塞式 API；浏览器停止等待不等于服务端取消。端到端 deadline、任务化/cancel、outbox/reaper、多 worker 分布式锁和真实发生顺序事件属于后续可靠性设计，不与 M6.2 混写。
+- V2–V5 当前只有 Review 通过的设计契约；release-held-out 清单、canonical hash golden、Oracle perturbation、SearchJournal failpoint、HumanEvaluation 和 V5 BenchmarkManifest 尚未实现或冻结，因此所有对应功能继续保持 `not_started`。
 
 ## 当前验证基线
 
@@ -41,11 +44,11 @@
 
 ## 最近重要变更
 
+- 2026-07-16：完成 V2–V5 实施方案的拆分后正式 Review，关闭多假设、ConstraintSet、版本化 State、SearchJournal、SelectionSnapshot、双 fencing 和可重复量化协议等设计缺口；结论仅允许从 V2.0 契约冻结开始实施。
 - 2026-07-16：完成跨模块结构修复：离线 benchmark 脱离在线 Service，共享 Fixture 脱离 unit test 层级，前端统一 API client 并消除 Node Lab 步骤 N+1 请求；新增依赖方向、直接 fetch、惰性导入和生命周期回归门禁。
 - 2026-07-16：完成第二批 Harness 加固：主 CI 改为锁文件安装并执行完整门禁，普通 Integration 移除模型凭据；包根改为按领域惰性导出，Backend SQL/许可证打包歧义消除，Backend 配置冻结与资源补偿清理覆盖初始化、取消和关闭失败。
 - 2026-07-16：完成第一批仓库 Harness 治理：历史阶段总结迁入归档，Graph/Lab/State 事实错误、Validator/Renderer 契约漂移和 benchmark 预算失真已修复；manifest 改为严格校验，并新增证据 registry、live/archive、命令/路径、导入边界及 Graph 双向一致性门禁。
 - 2026-07-15：将全部 PNG-to-Shader V1 Node 工厂及支持实现收拢到单一功能命名空间，并按 model、deterministic、Node Lab integration 明确依赖方向；Graph 的 20 个 Node ID、边、路由和安全语义不变。
-- 2026-07-15：Node Lab 完成 Provider 解耦，Node 成为唯一节点语义实现，20/20 descriptor、CLI、HTTP、工作台和模块 benchmark 共用通用 Harness。
 
 ## 历史索引
 

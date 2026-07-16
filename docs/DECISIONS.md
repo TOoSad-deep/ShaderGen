@@ -366,3 +366,10 @@
 - 决策：所有浏览器端 HTTP 访问统一经过 `frontend/src/api/client.ts`，由它负责 API base URL、请求发送和安全错误提取；页面与组件不得直接 `fetch`。Node Lab 的步骤列表直接使用后端已有 summary，完整步骤只在选中时按需读取并缓存，Artifact descriptor 使用独立状态维护。
 - 原因：组件自行拼 URL 会让环境配置、错误语义和 URL 编码分散；原 Node Lab 恢复 DAG 时先列 id、再逐项拉取完整步骤，会随历史长度产生 N+1 请求，并把步骤与 Artifact 两类资源混入同一刷新路径。
 - 影响：产品与 Node Lab 的公开 HTTP 路径和 Schema 不变；假 API 也必须经 Backend response model 校验 summary 契约。仓库结构测试拒绝 `frontend/src/api` 之外的直接 `fetch`，Node Lab 页面验收继续覆盖恢复、分支、Artifact 与 DAG 行为。
+
+## D047 - V2–V5 按版本契约递进实施，先冻结 V2.0 再扩展 Pipeline
+
+- 日期：2026-07-16
+- 决策：后续 PNG-to-Shader 演进采用 `human_doc/png-to-shader-v2-v5-plan/` 中已正式 Review 的总纲与四版本方案：V2 建立 TargetHypothesis、RequestConstraintSet、Intent IR、Effect Genome 和 Deterministic Compiler；V3 在固定拓扑上建立版本化 Oracle、SelectionKey、SearchJournal 和确定性参数搜索；V4 只在结构停滞后通过受限 GenomePatch、版本化 shortlist、Pairwise/HITL 和 staging SelectionSnapshot 改变结构或偏好；V5 再引入 Async Run、Ledger、Checkpoint/NodeCommit、RunJob/RendererJob 双 fencing、SSE、取消和恢复。Review 结论为 Conditional Go，仅允许先实施 V2.0 Schema、Hash、Artifact Adapter、golden fixture、数据 Manifest 和 State 恢复契约；不得跳过 V2.0 并行启动 Prompt、Compiler、Search 或新 Graph。
+- 原因：第一稿在多测量假设、ConstraintSet 集合级身份、跨版本 State、Search 恢复、evaluation revision 原子发布、Renderer 幂等与 durable 副作用等位置存在可编码性断层；把 V2–V5 合成一个大任务会迫使后续版本依赖仍在变化的根契约。正式 Review 已将事实、推断、约束、Genome、Evidence、选择语义和持久化边界拆成可独立冻结的版本层，并为质量、人工评测和恢复建立可重复判定协议。
+- 影响：当前 F09 仍是唯一 `active` 功能，F02–F05 及异步产品能力继续为 `not_started`；本决策和方案文档不改变现有 V1 Graph、API、RenderContract、`current_best`、checkpoint 或发布 gate。F09 M6.2 证据冻结后，首个实现 PR 只交付 V2.0 契约和测试资产；后续每个增量必须满足总纲的一次一个 active 功能、版本化 Manifest、V1 只读兼容和对应退出门槛。
