@@ -5,6 +5,8 @@
 > 目标：用 1–2 周验证一条可端到端运行的最小技术路径——一个注册进 `langgraph.json` 的 LangGraph Agent，输入单主体粉球类 PNG，自动产出无贴图 GLSL、真实 WebGL1 渲染图和 MAE 报告。
 >
 > 定位：`png_to_shader_min` 是 F09 下与现有 `png_to_shader_v1` 并行的技术验证图，不是已经完成的产品替换。现有 V1 Backend、Frontend、Memory、Node Lab、benchmark 与失败证据在独立产品切换里程碑通过前全部保留；最小图的 CLI 验收不能作为删除 V1 的依据。
+>
+> 长期方向：以《PNG转无贴图Shader-Agent-目标架构详细版.md》为 F09 后续算法与演进的权威目标；旧 `png-to-shader-v2-v5-plan` 只作历史参考，不构成本方案的前置阶段或冻结约束。
 
 领域逻辑放在 `src/shaderforge/` 新模块；LLM Gateway、WebGL1 运行契约、Validator、Artifact Store 和现有图像处理能力优先复用。Renderer 与评分热路径只有在满足本方案的新接口和性能门禁后，才称为“复用”。
 

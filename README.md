@@ -1,6 +1,6 @@
 # ShaderGen
 
-ShaderGen 是一个“图片生成视效 Shader”工程。最终技术架构以 `human_doc/shaderforge-technical-architecture-aligned(1).svg` 为准。
+ShaderGen 是一个“图片生成视效 Shader”工程。`human_doc/shaderforge-technical-architecture-aligned(1).svg` 保留为最初设计参考，不作为当前架构的覆盖性权威。
 
 ## 事实来源
 
@@ -26,7 +26,7 @@ ShaderGen/
 │   └── shaderforge/ # 确定性领域核心：契约、测量、校验、渲染、评分、制品
 ├── tests/           # Python 单元测试和集成测试
 ├── docs/            # 架构、决策、功能状态
-└── human_doc/       # 用户提供的权威材料
+└── human_doc/       # 用户提供的源材料；具体权威关系见 docs/ARCHITECTURE.md
 ```
 
 `src/shaderforge/` 只创建已经进入 active 功能且有真实实现与测试的子包，不预建空目录。

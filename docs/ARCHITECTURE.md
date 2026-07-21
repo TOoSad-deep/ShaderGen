@@ -2,7 +2,11 @@
 
 ## 权威来源
 
-最终产品架构以 `human_doc/shaderforge-technical-architecture-aligned(1).svg` 为准。如果本文档与该 SVG 不一致，以 SVG 为准。
+当前已实现架构和组件边界以本文件、模块旁 `ARCHITECTURE.md`、代码与运行配置共同记录；若文档和实现不一致，视为必须修复的漂移，不能用历史材料静默覆盖当前事实。
+
+F09 PNG 转无贴图 GLSL 的后续算法与演进以 `human_doc/PNG转无贴图Shader-Agent-目标架构详细版.md` 为权威目标，以 `human_doc/PNG转无贴图Shader-Agent-最小骨架快速版.md` 为当前实施切片。`human_doc/png-to-shader-v2-v5-plan/` 自 2026-07-21 起只保留为历史审计和概念参考，不再规定向前实现顺序或契约冻结门禁。当前运行时事实仍以本文件、模块架构文档和代码为准；目标文档不能被表述为已经实现。
+
+`human_doc/shaderforge-technical-architecture-aligned(1).svg` 是项目最初设计，只作为产品概念和历史背景参考；它不能覆盖后续用户确认的方案、`docs/DECISIONS.md`、当前架构文档或实现事实。
 
 ## 产品目标
 

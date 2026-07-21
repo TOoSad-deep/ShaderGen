@@ -2,7 +2,7 @@
 
 ## 项目概览
 
-ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输入，后端提供 API，LangGraph agent 和后续 ShaderForge 核心流水线把需求转成可评估的 GLSL/渲染结果。最终技术架构以 `human_doc/shaderforge-technical-architecture-aligned(1).svg` 为准。
+ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输入，后端提供 API，LangGraph agent 和后续 ShaderForge 核心流水线把需求转成可评估的 GLSL/渲染结果。`human_doc/shaderforge-technical-architecture-aligned(1).svg` 是项目最初设计参考，不覆盖当前架构文档、决策、实现事实或已确认的新方案。
 
 ## 常用命令
 

@@ -8,6 +8,7 @@
 
 | 决策 | 状态 | 后续决策 | 当前解释 |
 |---|---|---|---|
+| D001 | superseded | D050 | SVG 降为最初设计参考，不再是当前架构的覆盖性权威。 |
 | D002 | superseded | D010、D037 | 阶段 1 的最小事实源已演进为模块就近文档和有界交接。 |
 | D005 | updated | D043 | 启动时执行幂等业务 SQL 的原则仍有效，SQL 现为显式 wheel 资源包。 |
 | D006 | updated | D035、D036 | Backend 只调用 Agent 公共 service 的边界仍有效，旧 service 路径已删除。 |
@@ -29,6 +30,7 @@
 
 ## D001 - SVG 是最终架构来源
 
+- 状态：`superseded`，已由 D050 取代；以下内容只保留历史审计价值。
 - 日期：2026-07-07
 - 决策：`human_doc/shaderforge-technical-architecture-aligned(1).svg` 是权威架构。
 - 原因：这是用户指定的最终项目架构。
@@ -380,3 +382,17 @@
 - 决策：在 F09 内新增 `png_to_shader_min` 技术验证路线，以严格 scene JSON 作为唯一可编辑 Shader 表示，由模板生成参数化 WebGL1 GLSL，LLM 只生成初始 scene 和单个 typed patch，数值拟合交给节点内 CMA-ES。该路线先完成 prepared Renderer/typed uniform 与轻量 MAE 性能门禁，再按 12 节点、3 个纯路由函数实现 Graph/CLI。最小图与现有 `png_to_shader_v1` 并行注册；在独立产品切换里程碑完成前，V1 继续作为唯一 Backend/Frontend 产品路径。
 - 原因：V1 的自由 GLSL 路线已通过自动事实门禁但人工偏好率只有 30%，结构与数值耦合使确定性优化难以介入；scene/template 路线可以把模型结构决策与数值搜索分离。但当前 Renderer 每次重新编译并编码 PNG，不支持任意 uniform 热路径，且快速版只定义 CLI 验收，尚不足以安全替换 API、UI、Memory、Node Lab 和 benchmark。
 - 影响：D047 的 V2–V5 仍是目标架构输入，但在进入其大范围契约实施前先形成这条有界技术证据；快速版不改变 F09 的 `active` 状态，不把 F02–F05 标为已开始。现有 V1 代码、发布 gate、历史 benchmark 和失败证据不得因最小图开发而删除或覆盖。只有 M7 通过 Backend integration、浏览器 E2E、生命周期、Artifact 和文档门禁后，才能另行决定下线 V1。
+
+## D049 - 目标架构详细版取代 V2–V5 作为 F09 向前实施依据
+
+- 日期：2026-07-21
+- 决策：`human_doc/PNG转无贴图Shader-Agent-目标架构详细版.md` 成为 F09 后续算法与演进的权威目标，`human_doc/PNG转无贴图Shader-Agent-最小骨架快速版.md` 是当前 MVP 实施切片。旧 `human_doc/png-to-shader-v2-v5-plan/` 及 D047 继续保留为历史审计和概念参考，但不再规定向前实现顺序、Schema、Graph 或阶段冻结门禁。本决策取代 D048 中“D047 的 V2–V5 仍是目标架构输入”的表述；D048 关于最小图并行验证、V1 产品链路保留和 M7 切换门禁的其余部分继续有效。
+- 原因：用户已明确选择新的 scene/template/optimization 详细架构取代旧 V2–V5 路线。继续同时维护两套权威阶段会让 MVP 在 State、场景表示、优化调度和升级顺序上出现互斥约束，无法形成单一可执行路线。
+- 影响：F09 算法目标改由详细版约束。当前只有 F09 为 `active`，F02–F05 状态不变；详细版中的多假设、置信度标定、特征块调度、沙箱和完整评测仍是未实现目标。旧 V1 代码、API、UI、Node Lab、benchmark 和冻结失败证据在独立 M7 通过前继续保留，不因路线切换而删除或覆盖。总体架构材料的权威关系由 D050 进一步澄清。
+
+## D050 - 初始架构 SVG 降为历史设计参考
+
+- 日期：2026-07-21
+- 决策：`human_doc/shaderforge-technical-architecture-aligned(1).svg` 只作为项目最初产品设计和历史背景参考，不再是当前或最终架构的覆盖性权威。本决策取代 D001。当前实现事实由代码、运行配置、`docs/ARCHITECTURE.md` 和模块旁架构文档共同记录；F09 的目标与当前实施切片分别以目标架构详细版和最小骨架快速版为准。
+- 原因：SVG 反映的是项目早期设想，后续已经形成经过验证的 V1 实现和用户明确确认的新 scene/template/optimization 方案。继续规定“冲突时以 SVG 为准”会让历史草图反向覆盖新决策和可验证事实。
+- 影响：README、AGENTS 和全局架构文档不再使用“最终架构以 SVG 为准”的表述。SVG 文件继续原样保留，不删除、不静默改写；可以用于追溯最初产品概念，但不能据此否决后续方案、决策、契约或代码。
