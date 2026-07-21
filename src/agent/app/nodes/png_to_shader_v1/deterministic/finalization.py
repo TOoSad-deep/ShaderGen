@@ -136,6 +136,8 @@ def make_finalize_png_to_shader_v1_node(
         else:
             render_width = int(measurements.analysis_width)
             render_height = int(measurements.analysis_height)
+        budget_value = state.get("budget_policy")
+        acceptance_value = state.get("acceptance_policy")
         result.update(
             {
                 "schema_version": 1,
@@ -152,6 +154,20 @@ def make_finalize_png_to_shader_v1_node(
                 "elapsed_seconds": max(
                     0.0,
                     clock() - float(state["started_at"]),
+                ),
+                "runtime_policy_schema_version": state.get(
+                    "runtime_policy_schema_version"
+                ),
+                "runtime_policy_sha256": state.get("runtime_policy_sha256"),
+                "budget_policy": (
+                    dict(budget_value)
+                    if isinstance(budget_value, Mapping)
+                    else None
+                ),
+                "acceptance_policy": (
+                    dict(acceptance_value)
+                    if isinstance(acceptance_value, Mapping)
+                    else None
                 ),
             }
         )

@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 MemoryStatus = Literal["durable", "ephemeral", "degraded"]
 GenerationMode = Literal["procedural_v1"]
-QualityPresetName = Literal["fast", "balanced", "high"]
+QualityPresetName = Literal["fast", "balanced", "high", "ultra"]
 
 
 class ShaderReview(BaseModel):

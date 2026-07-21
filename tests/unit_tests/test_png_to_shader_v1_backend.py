@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import asdict
+from hashlib import sha256
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -12,7 +15,9 @@ from agent.app.services.png_to_shader_v1 import (
     PublicArtifactNotFoundError,
 )
 from backend.app.api.routes import shader as shader_route
-from backend.app.main import app
+from backend.app.core.runtime_policy import DEFAULT_RUNTIME_POLICY_PATH
+from backend.app.core.settings import BackendSettings
+from backend.app.main import app, create_app
 from backend.app.services import shader_generation as shader_generation_service
 
 
@@ -32,18 +37,41 @@ def score() -> dict:
     }
 
 
+def runtime_policy_result(kwargs: dict) -> dict:
+    return {
+        "runtime_policy_schema_version": kwargs[
+            "runtime_policy_schema_version"
+        ],
+        "runtime_policy_sha256": kwargs["runtime_policy_sha256"],
+        "budget_policy": asdict(kwargs["budget_policy"]),
+        "acceptance_policy": asdict(kwargs["acceptance_policy"]),
+    }
+
+
 def test_generate_procedural_v1_contract(monkeypatch) -> None:
     async def fake_generate(image: bytes, content_type: str, **kwargs):
         assert image == b"image"
         assert content_type == "image/png"
-        assert kwargs["quality_preset"] == "high"
+        assert kwargs["quality_preset"] == "ultra"
         assert kwargs["instruction"] == "保留左上高光"
+        assert kwargs["budget_policy"].max_model_calls == 40
+        assert kwargs["budget_policy"].max_visual_refinements == 10
+        assert kwargs["budget_policy"].max_compile_repairs == 5
+        assert kwargs["budget_policy"].max_wall_time_seconds == 2400
+        assert kwargs["acceptance_policy"].quality_threshold == 0.12
+        assert kwargs["acceptance_policy"].stagnation_rounds == 6
+        assert (
+            kwargs["runtime_policy_schema_version"]
+            == "png_to_shader_runtime_policy_v2"
+        )
+        assert len(kwargs["runtime_policy_sha256"]) == 64
+        int(kwargs["runtime_policy_sha256"], 16)
         return PngToShaderV1Result(
             project_id=kwargs["project_id"],
             run_id=kwargs["run_id"],
             glsl="precision mediump float; void main(){gl_FragColor=vec4(1.0);}",
             memory_status="ephemeral",
-            quality_preset="high",
+            quality_preset="ultra",
             iterations=2,
             stop_reason="stagnation",
             best_candidate_id="candidate-0002",
@@ -70,6 +98,7 @@ def test_generate_procedural_v1_contract(monkeypatch) -> None:
                     "payload": {"candidate_id": "candidate-0002"},
                 },
             ),
+            **runtime_policy_result(kwargs),
         )
 
     monkeypatch.setattr(
@@ -88,7 +117,7 @@ def test_generate_procedural_v1_contract(monkeypatch) -> None:
         files={"file": ("target.png", b"image", "image/png")},
         data={
             "generation_mode": "procedural_v1",
-            "quality_preset": "high",
+            "quality_preset": "ultra",
             "instruction": "保留左上高光",
         },
     )
@@ -98,7 +127,7 @@ def test_generate_procedural_v1_contract(monkeypatch) -> None:
     UUID(payload["project_id"])
     UUID(payload["run_id"])
     assert payload["generation_mode"] == "procedural_v1"
-    assert payload["quality_preset"] == "high"
+    assert payload["quality_preset"] == "ultra"
     assert payload["iterations"] == 2
     assert payload["stop_reason"] == "stagnation"
     assert payload["best_candidate_id"] == "candidate-0002"
@@ -110,6 +139,62 @@ def test_generate_procedural_v1_contract(monkeypatch) -> None:
         "evaluation": "高光已接近。",
         "suggestions": ["rim：略微收窄（右侧边缘偏厚）"],
     }
+
+
+def test_custom_runtime_policy_flows_from_lifespan_to_online_generation(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    source = Path(DEFAULT_RUNTIME_POLICY_PATH).read_text(encoding="utf-8")
+    policy_path = tmp_path / "custom-runtime-policy.yaml"
+    policy_path.write_text(
+        source.replace("max_model_calls: 8", "max_model_calls: 7", 1),
+        encoding="utf-8",
+    )
+    observed: dict[str, object] = {}
+
+    async def fake_generate(*args, **kwargs):
+        observed.update(kwargs)
+        return PngToShaderV1Result(
+            project_id=kwargs["project_id"],
+            run_id=kwargs["run_id"],
+            glsl="precision mediump float; void main(){gl_FragColor=vec4(1.0);}",
+            memory_status="ephemeral",
+            quality_preset="balanced",
+            iterations=0,
+            stop_reason="quality_threshold_met",
+            best_candidate_id="candidate-0001",
+            render_width=32,
+            render_height=24,
+            score=score(),
+            unscored_fallback=False,
+            review=None,
+            glsl_model_name="fake-author",
+            vision_model_name="fake-vision",
+            **runtime_policy_result(kwargs),
+        )
+
+    monkeypatch.setattr(
+        shader_generation_service,
+        "generate_procedural_shader_from_image",
+        fake_generate,
+    )
+    custom_app = create_app(
+        BackendSettings(runtime_policy_path=str(policy_path))
+    )
+
+    with TestClient(custom_app) as client:
+        response = client.post(
+            "/api/shader/generate",
+            files={"file": ("target.png", b"image", "image/png")},
+            data={"generation_mode": "procedural_v1"},
+        )
+
+    assert response.status_code == 200
+    assert observed["budget_policy"].max_model_calls == 7
+    assert observed["runtime_policy_sha256"] == sha256(
+        policy_path.read_bytes()
+    ).hexdigest()
 
 
 def test_generate_unscored_fallback_returns_shader_and_records_truthful_summary(
@@ -147,6 +232,7 @@ def test_generate_unscored_fallback_returns_shader_and_records_truthful_summary(
                     "payload": {"error_type": "EvaluatorUnavailableError"},
                 },
             ),
+            **runtime_policy_result(kwargs),
         )
 
     monkeypatch.setattr(
@@ -185,6 +271,8 @@ def test_generate_unscored_fallback_returns_shader_and_records_truthful_summary(
     assert summary["metrics_available"] is False
     assert summary["metrics_url"] is None
     assert summary["unscored_fallback"] is True
+    assert summary["runtime_policy"]["profile"] == "balanced"
+    assert summary["runtime_policy"]["budget"]["max_model_calls"] == 8
 
 
 def test_response_contract_failure_is_recorded_as_failed_before_success(
@@ -221,6 +309,7 @@ def test_response_contract_failure_is_recorded_as_failed_before_success(
             review=None,
             glsl_model_name="fake-author",
             vision_model_name="fake-vision",
+            **runtime_policy_result(kwargs),
         )
 
     monkeypatch.setattr(
@@ -286,6 +375,7 @@ def test_generate_defaults_to_procedural_v1(monkeypatch) -> None:
             review=None,
             glsl_model_name="fake-author",
             vision_model_name="fake-vision",
+            **runtime_policy_result(kwargs),
         )
 
     monkeypatch.setattr(
@@ -756,6 +846,7 @@ def test_procedural_success_persistence_error_does_not_mask_shader(
             review=None,
             glsl_model_name="fake-author",
             vision_model_name="fake-vision",
+            **runtime_policy_result(kwargs),
         )
 
     monkeypatch.setattr(

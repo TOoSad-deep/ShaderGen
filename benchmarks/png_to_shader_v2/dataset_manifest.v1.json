@@ -1,0 +1,1473 @@
+{
+  "schema_version": "png_to_shader_dataset_manifest_v1",
+  "manifest_id": "png_to_shader_v2_0_initial_dataset",
+  "dataset_version": "v2.0-initial-r2",
+  "contract_id": "webgl1_static_no_texture_v1",
+  "coordinate_system": "shader_uv_bottom_left",
+  "split_policy_version": "visual_family_hash_group_v1",
+  "expected_primitives_taxonomy": {
+    "path": "png_to_shader_v2/expected_primitives_taxonomy.v1.json",
+    "sha256": "ffc1d36df1a17e55e25ce03de0998d54bb43e0372134d3f7d101b1e55b48b4e4",
+    "taxonomy_version": "png_to_shader_expected_primitives_v1",
+    "node_registry_version": "effect_node_registry_v0"
+  },
+  "source_records": [
+    {
+      "source_suite_id": "png_to_shader_v1_m0",
+      "provenance_path": "png_to_shader_v2/sources/v1_regression.v1.md",
+      "provenance_sha256": "f89704b25fe1b9f957d760a005171662b91dc41b0b7860269440655ec9e1161e",
+      "source_url": "repo://benchmarks/png_to_shader_v1",
+      "license_id": "MIT",
+      "license_url": "repo://LICENSE"
+    },
+    {
+      "source_suite_id": "freegameui_cc0_validation_v1",
+      "provenance_path": "png_to_shader_v2/sources/freegameui_cc0_validation.v1.md",
+      "provenance_sha256": "f7e534c4bfb14510c2a4518f93f33068b06dd9c1a24ba2c3f7c53d02726b17f6",
+      "source_url": "https://freegameui.net/",
+      "license_id": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    },
+    {
+      "source_suite_id": "freegameui_cc0_complex_validation_v1",
+      "provenance_path": "png_to_shader_v2/sources/complex_validation.v1.md",
+      "provenance_sha256": "848958fc0a688bf943e39a8a2137c31c911ea5eb86b39e4cb3ab933d6e8dfd0d",
+      "source_url": "https://freegameui.net/assets/buttons/",
+      "license_id": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    },
+    {
+      "source_suite_id": "oga_cc0_complex_validation_v1",
+      "provenance_path": "png_to_shader_v2/sources/complex_validation.v1.md",
+      "provenance_sha256": "848958fc0a688bf943e39a8a2137c31c911ea5eb86b39e4cb3ab933d6e8dfd0d",
+      "source_url": "https://opengameart.org/content/explosion-particles-sprite-atlas",
+      "license_id": "CC0-1.0",
+      "license_url": "https://creativecommons.org/publicdomain/zero/1.0/"
+    }
+  ],
+  "critical_class_minimums": {
+    "multi_instance": 10,
+    "ring": 10,
+    "hollow": 10,
+    "required_highlight": 10,
+    "required_rim": 10,
+    "required_outline": 10
+  },
+  "splits": [
+    {
+      "name": "development",
+      "status": "available",
+      "access_policy": "development",
+      "purpose": "V1 固定 10 例只读回归，不计入 validation 或 release-held-out。",
+      "samples": [
+        {
+          "case_id": "solid_circle",
+          "dataset_role": "regression",
+          "source_suite_id": "png_to_shader_v1_m0",
+          "image": "png_to_shader_v1/images/solid_circle.png",
+          "sha256": "7ed59045ada3434c126f70a60a079d75ebf461359e34165f6f56700c1d360ac8",
+          "resolution": [192, 192],
+          "visual_family": "solid_circle",
+          "hash_group": "v1.solid_circle",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": ["base_fill"],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": ["circle_sdf", "fill"]
+          }
+        },
+        {
+          "case_id": "ellipse_gradient",
+          "dataset_role": "regression",
+          "source_suite_id": "png_to_shader_v1_m0",
+          "image": "png_to_shader_v1/images/ellipse_gradient.png",
+          "sha256": "799877174ff433b4764877f2835e71c2b87a62487ae67edf55ad487a5bf9f1da",
+          "resolution": [192, 192],
+          "visual_family": "ellipse_gradient",
+          "hash_group": "v1.ellipse_gradient",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": ["base_fill"],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": ["ellipse_sdf", "linear_position_field"]
+          }
+        },
+        {
+          "case_id": "shadow_disk",
+          "dataset_role": "regression",
+          "source_suite_id": "png_to_shader_v1_m0",
+          "image": "png_to_shader_v1/images/shadow_disk.png",
+          "sha256": "1fa4fb6e8ada9fdabc3bb2f14c1678f1e79cf93e85ee061c0b17e6a1534f2eeb",
+          "resolution": [192, 192],
+          "visual_family": "shadowed_disk",
+          "hash_group": "v1.shadow_disk",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": ["shadow", "base_fill"],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": ["circle_sdf", "gaussian_shadow"]
+          }
+        },
+        {
+          "case_id": "rimmed_disk",
+          "dataset_role": "regression",
+          "source_suite_id": "png_to_shader_v1_m0",
+          "image": "png_to_shader_v1/images/rimmed_disk.png",
+          "sha256": "a50d8f24fd99f98225c9d859e036ac6830307e1c5f7ffd87522ff37109298b6a",
+          "resolution": [192, 192],
+          "visual_family": "rimmed_disk",
+          "hash_group": "v1.rimmed_disk",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": ["base_fill", "rim", "outline"],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": ["circle_sdf", "rim_band", "outline_band"]
+          }
+        },
+        {
+          "case_id": "arc_highlight_orb",
+          "dataset_role": "regression",
+          "source_suite_id": "png_to_shader_v1_m0",
+          "image": "png_to_shader_v1/images/arc_highlight_orb.png",
+          "sha256": "9498fb7fd872848d17fe12e060e7a0b6a3c642e0619d3f168c08129a56d623c3",
+          "resolution": [192, 192],
+          "visual_family": "arc_highlight_orb",
+          "hash_group": "v1.arc_highlight_orb",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": ["base_fill", "rim", "highlight"],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": ["circle_sdf", "radial_band", "angular_window"]
+          }
+        },
+        {
+          "case_id": "color_lobes",
+          "dataset_role": "regression",
+          "source_suite_id": "png_to_shader_v1_m0",
+          "image": "png_to_shader_v1/images/color_lobes.png",
+          "sha256": "b182875646efc1d9291b35d8763f0bf1fe5edf8b37b40f8afd259e5ef2723d07",
+          "resolution": [192, 192],
+          "visual_family": "color_lobe_disk",
+          "hash_group": "v1.color_lobes",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": ["base_fill", "color_lobe"],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": ["circle_sdf", "linear_position_field", "gaussian_color_lobe"]
+          }
+        },
+        {
+          "case_id": "rounded_rect_glow",
+          "dataset_role": "regression",
+          "source_suite_id": "png_to_shader_v1_m0",
+          "image": "png_to_shader_v1/images/rounded_rect_glow.png",
+          "sha256": "847aa84441d964390cd2232d3086cd67639b19390e776e1ea2c4e4d475019170",
+          "resolution": [192, 192],
+          "visual_family": "rounded_rect_glow",
+          "hash_group": "v1.rounded_rect_glow",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": ["base_fill", "glow"],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": ["rounded_rect_sdf", "gaussian_glow"]
+          }
+        },
+        {
+          "case_id": "neon_ring",
+          "dataset_role": "regression",
+          "source_suite_id": "png_to_shader_v1_m0",
+          "image": "png_to_shader_v1/images/neon_ring.png",
+          "sha256": "4d71d1c6db64f707e7b74e3ae1636d619bfd1fc5dce03c20781a8f4ca0154c88",
+          "resolution": [192, 192],
+          "visual_family": "neon_ring",
+          "hash_group": "v1.neon_ring",
+          "topology": "ring",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": ["base_fill", "glow"],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": ["radial_band", "gaussian_glow"]
+          }
+        },
+        {
+          "case_id": "dual_disks",
+          "dataset_role": "regression",
+          "source_suite_id": "png_to_shader_v1_m0",
+          "image": "png_to_shader_v1/images/dual_disks.png",
+          "sha256": "541fa4659f685fda838eb482b8dc9f1c4c4c180da2f532b0125d0e60827b9e51",
+          "resolution": [192, 192],
+          "visual_family": "multi_instance_disks",
+          "hash_group": "v1.dual_disks",
+          "topology": "solid",
+          "instance_count": 2,
+          "hole_count": 0,
+          "required_layers": ["base_fill"],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": ["circle_sdf", "over_blend"]
+          }
+        },
+        {
+          "case_id": "pink_gel",
+          "dataset_role": "regression",
+          "source_suite_id": "png_to_shader_v1_m0",
+          "image": "png_to_shader_v1/images/pink_gel.png",
+          "sha256": "5f182a927055e607dc85261c7d035d45fe5cef4081f833a71858dbcafe184140",
+          "resolution": [192, 192],
+          "visual_family": "layered_gel_orb",
+          "hash_group": "v1.pink_gel",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": ["shadow", "base_fill", "color_lobe", "haze", "rim", "highlight"],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": ["circle_sdf", "gaussian_shadow", "gaussian_color_lobe", "rim_band", "angular_window"]
+          }
+        }
+      ]
+    },
+    {
+      "name": "validation",
+      "status": "available",
+      "access_policy": "visible_validation",
+      "purpose": "V2.1 阶段 gate 与阈值校准；FreeGameUI CC0 可见验证组，按来源视觉族整体隔离于 release-held-out。",
+      "samples":       [
+        {
+          "case_id": "freegameui_ring_blue_gold_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring_blue-gold_01.png",
+          "sha256": "4978671de5dedeed1b743615a7a359018111235622c15e9da441819a2b7182c5",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_ring_gauge",
+          "hash_group": "freegameui.gauge_ring",
+          "topology": "ring",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_cyber_cyan_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring_cyber-cyan_01.png",
+          "sha256": "d9e110ebc50d0bc4767a13f4d21661902e641183f5f7665b0f0e618148216656",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_ring_gauge",
+          "hash_group": "freegameui.gauge_ring",
+          "topology": "ring",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_cyber_cyan_02",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring_cyber-cyan_02.png",
+          "sha256": "a9a19576c37aa7cdca54762ce81c280f5c039b186dc9fd6fbcee11b34aed1516",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_ring_gauge",
+          "hash_group": "freegameui.gauge_ring",
+          "topology": "ring",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_cyber_cyan_03",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring_cyber-cyan_03.png",
+          "sha256": "a7f8071b43c74db681299d314526dc8cd5d92592d654eed435a1dc02eda981dc",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_ring_gauge",
+          "hash_group": "freegameui.gauge_ring",
+          "topology": "ring",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_neon_amber_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring_neon-amber_01.png",
+          "sha256": "9cc733aa3eb7a158be2283e2207fecc488e6f99c8b7701c1dcca765387e00e21",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_ring_gauge",
+          "hash_group": "freegameui.gauge_ring",
+          "topology": "ring",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_neon_amber_02",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring_neon-amber_02.png",
+          "sha256": "ea8edf6211c79346b265f3e619e7e54b396fc78acebf2a788533493ef2cb938a",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_ring_gauge",
+          "hash_group": "freegameui.gauge_ring",
+          "topology": "ring",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_neon_amber_03",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring_neon-amber_03.png",
+          "sha256": "57d6d0cd3ffeae92af582c686708b800284d0c108c72724e35d34151b20f0922",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_ring_gauge",
+          "hash_group": "freegameui.gauge_ring",
+          "topology": "ring",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_neon_green_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring_neon-green_01.png",
+          "sha256": "b6124524699296dc2d544421cfee19c03e6dc510c436350cdb38a13a33fc08c4",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_ring_gauge",
+          "hash_group": "freegameui.gauge_ring",
+          "topology": "ring",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_neon_green_02",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring_neon-green_02.png",
+          "sha256": "3296166229f6b6ec1670e4b5c06f72ba4136c3aa861b0f95389cf9239aa19285",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_ring_gauge",
+          "hash_group": "freegameui.gauge_ring",
+          "topology": "ring",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_neon_green_03",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring_neon-green_03.png",
+          "sha256": "849ec4568033c538023230f5c8901e249357a5f2471916ffb5d86e2e902405ce",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_ring_gauge",
+          "hash_group": "freegameui.gauge_ring",
+          "topology": "ring",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_segmented_black_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring-segmented_black_01.png",
+          "sha256": "b06c30a712acce730bab92a97fe08f75ea678c65d414bed5afb36630b878c49b",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_segmented_ring_gauge",
+          "hash_group": "freegameui.gauge_ring_segmented",
+          "topology": "ring",
+          "instance_count": 12,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "union_mask",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_segmented_blue_gold_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring-segmented_blue-gold_01.png",
+          "sha256": "ff2fe961f036c4c79e7ca7f4da17295e3658ac33cf23e67abf3312cc76b3ace5",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_segmented_ring_gauge",
+          "hash_group": "freegameui.gauge_ring_segmented",
+          "topology": "ring",
+          "instance_count": 12,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "union_mask",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_segmented_blue_gold_02",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring-segmented_blue-gold_02.png",
+          "sha256": "b4ea8204b705f156589234e4d24fce51ac8181faf872adaae4b3a9145784473e",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_segmented_ring_gauge",
+          "hash_group": "freegameui.gauge_ring_segmented",
+          "topology": "ring",
+          "instance_count": 18,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "union_mask",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_segmented_cyber_cyan_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring-segmented_cyber-cyan_01.png",
+          "sha256": "5da9c3c224f40d8dcf1770b7aec16f86e8ee3827b92e4094aafc8bafee2dc1a7",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_segmented_ring_gauge",
+          "hash_group": "freegameui.gauge_ring_segmented",
+          "topology": "ring",
+          "instance_count": 12,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "union_mask",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_segmented_cyber_cyan_02",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring-segmented_cyber-cyan_02.png",
+          "sha256": "7959af8ab8ab79a8200b6eb11a2ebe6774c3a6ba2aba5a7f0e5f6d9f37e255c4",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_segmented_ring_gauge",
+          "hash_group": "freegameui.gauge_ring_segmented",
+          "topology": "ring",
+          "instance_count": 18,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "union_mask",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_segmented_dark_gold_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring-segmented_dark-gold_01.png",
+          "sha256": "725d5343f7961c9cefc2055ed0621c8cc5b60465345bef8fa515219ed76c9106",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_segmented_ring_gauge",
+          "hash_group": "freegameui.gauge_ring_segmented",
+          "topology": "ring",
+          "instance_count": 12,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "union_mask",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_segmented_dark_silver_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring-segmented_dark-silver_01.png",
+          "sha256": "4f868e4f43d6e8b4c91350ff2be47957de83fd0221700c4e80fe93a89fc78853",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_segmented_ring_gauge",
+          "hash_group": "freegameui.gauge_ring_segmented",
+          "topology": "ring",
+          "instance_count": 12,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "union_mask",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_segmented_neon_amber_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring-segmented_neon-amber_01.png",
+          "sha256": "c16fb62fafb85daf80d07c1a8c1c2214d02608d76824e3030d9589403199cee4",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_segmented_ring_gauge",
+          "hash_group": "freegameui.gauge_ring_segmented",
+          "topology": "ring",
+          "instance_count": 12,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "union_mask",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_segmented_neon_green_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring-segmented_neon-green_01.png",
+          "sha256": "18131683d137ad98a05914950d81bd8560c933551aa147f2bfa3b66dea9a9946",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_segmented_ring_gauge",
+          "hash_group": "freegameui.gauge_ring_segmented",
+          "topology": "ring",
+          "instance_count": 12,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "union_mask",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_ring_segmented_white_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/gauge_ring-segmented_white_01.png",
+          "sha256": "0c7b1f1b94fe9ce66a3db3b139bc22375b6b1db7c4952dda42750e8c6edcaab7",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_segmented_ring_gauge",
+          "hash_group": "freegameui.gauge_ring_segmented",
+          "topology": "ring",
+          "instance_count": 12,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "radial_band",
+              "outline_band",
+              "union_mask",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_chamfer_rect_ring_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/sh_chamfer-rect_ring_01.png",
+          "sha256": "f3c19be1e7d2d9196e9b9fc83cd76f490b9203a264d94f367536c789e5398a88",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_hollow_shape",
+          "hash_group": "freegameui.shapes_hollow",
+          "topology": "hollow",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "difference_mask",
+              "outline_band"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_diamond_ring_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/sh_diamond_ring_01.png",
+          "sha256": "d0945fd3b30161d5f33406a9e342838bb5925b2e2d0200098737dbd16019898f",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_hollow_shape",
+          "hash_group": "freegameui.shapes_hollow",
+          "topology": "hollow",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "difference_mask",
+              "outline_band"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_heart_ring_thick_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/sh_heart_ring-thick_01.png",
+          "sha256": "a7ba731b9f991835c52da4948a3893157d105e07c540a10c43c72be5e3815cb5",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_hollow_shape",
+          "hash_group": "freegameui.shapes_hollow",
+          "topology": "hollow",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "difference_mask",
+              "outline_band"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_heart_ring_thin_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/sh_heart_ring-thin_01.png",
+          "sha256": "5a72b387f62b2d4d38abbf11425aa1b1f6af7fa7fa006a1ec33f5a341938248c",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_hollow_shape",
+          "hash_group": "freegameui.shapes_hollow",
+          "topology": "hollow",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "difference_mask",
+              "outline_band"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_hexagon_ring_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/sh_hexagon_ring_01.png",
+          "sha256": "33666ebd97adc5f3164fde86502f04dd33e719b4d7c62c276f33407685bd0617",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_hollow_shape",
+          "hash_group": "freegameui.shapes_hollow",
+          "topology": "hollow",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "difference_mask",
+              "outline_band"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_octagon_ring_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/sh_octagon_ring_01.png",
+          "sha256": "13f601007aed88bec043d2708424a67ef3894f498c9a610b09403bc5486b970c",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_hollow_shape",
+          "hash_group": "freegameui.shapes_hollow",
+          "topology": "hollow",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "difference_mask",
+              "outline_band"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_rect_ring_rounded_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/sh_rect_ring-rounded_01.png",
+          "sha256": "96f8a764b22603f1a72270ad330b478e746c3f165173a9aa23d822fd5dd6faaf",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_hollow_shape",
+          "hash_group": "freegameui.shapes_hollow",
+          "topology": "hollow",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "difference_mask",
+              "outline_band"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_rect_ring_rounded_02",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/sh_rect_ring-rounded_02.png",
+          "sha256": "87d32a308292a01aed94f6b2e728f801261672559befd2d891a1b953708e2756",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_hollow_shape",
+          "hash_group": "freegameui.shapes_hollow",
+          "topology": "hollow",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "difference_mask",
+              "outline_band"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_rect_ring_sharp_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/sh_rect_ring-sharp_01.png",
+          "sha256": "469e582d9ae8407049e6fb6a269650f9effbcf0abdd8ccfb687756d74b6fc5b3",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_hollow_shape",
+          "hash_group": "freegameui.shapes_hollow",
+          "topology": "hollow",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "difference_mask",
+              "outline_band"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_star_5pt_ring_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_validation_v1",
+          "image": "png_to_shader_v2/images/validation/sh_star_5pt-ring_01.png",
+          "sha256": "2b70ca563ec01d6205c7203a4141ed9dacf2b6654175e12478af88c7edf389e4",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_hollow_shape",
+          "hash_group": "freegameui.shapes_hollow",
+          "topology": "hollow",
+          "instance_count": 1,
+          "hole_count": 1,
+          "required_layers": [
+            "base_fill",
+            "outline"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "difference_mask",
+              "outline_band"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_medium_circle_blue_gold_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_complex_validation_v1",
+          "image": "png_to_shader_v2/images/validation/btn_circle_blue-gold_01.png",
+          "sha256": "96f2ea12bbafd81d4f6a32ced053fbbf49606d26e3aaf4499f00492f94622deb",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_metallic_circle_button",
+          "hash_group": "freegameui.buttons_circle_metallic",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "circle_sdf",
+              "linear_gradient",
+              "rim_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_medium_circle_blue_gold_02",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_complex_validation_v1",
+          "image": "png_to_shader_v2/images/validation/btn_circle_blue-gold_02.png",
+          "sha256": "5769c1ff567386406473349a6a19eec5522612f350e100536abafeb701313fb4",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_metallic_circle_button",
+          "hash_group": "freegameui.buttons_circle_metallic",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "circle_sdf",
+              "linear_gradient",
+              "rim_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_medium_circle_blue_gold_03",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_complex_validation_v1",
+          "image": "png_to_shader_v2/images/validation/btn_circle_blue-gold_03.png",
+          "sha256": "c79a5a16d94698114886d4d9e5ef7807e1a71a22968818de80c7f18d392b39e3",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_metallic_circle_button",
+          "hash_group": "freegameui.buttons_circle_metallic",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "circle_sdf",
+              "linear_gradient",
+              "rim_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_medium_circle_blue_silver_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_complex_validation_v1",
+          "image": "png_to_shader_v2/images/validation/btn_circle_blue-silver_01.png",
+          "sha256": "c2d260bbcbb309371cc2a51af0db37ec5d44826237ed265fc220af8edb5c2e57",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_metallic_circle_button",
+          "hash_group": "freegameui.buttons_circle_metallic",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "circle_sdf",
+              "linear_gradient",
+              "rim_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_medium_circle_blue_silver_02",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_complex_validation_v1",
+          "image": "png_to_shader_v2/images/validation/btn_circle_blue-silver_02.png",
+          "sha256": "ccadccfd0874dbec8b0351918c3aca5c45acf8b8831a55be806a8da2e5b9802f",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_metallic_circle_button",
+          "hash_group": "freegameui.buttons_circle_metallic",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "circle_sdf",
+              "linear_gradient",
+              "rim_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "freegameui_medium_circle_green_gold_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "freegameui_cc0_complex_validation_v1",
+          "image": "png_to_shader_v2/images/validation/btn_circle_green-gold_01.png",
+          "sha256": "c37d842016c1781e8742aebb251d0aacf633aaf9f66482b96bd2d0e9e2649c92",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "freegameui_metallic_circle_button",
+          "hash_group": "freegameui.buttons_circle_metallic",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": [
+            "base_fill",
+            "rim",
+            "outline",
+            "highlight"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "circle_sdf",
+              "linear_gradient",
+              "rim_band",
+              "outline_band",
+              "arc_highlight"
+            ]
+          }
+        },
+        {
+          "case_id": "oga_explosion_atlas_grid_512",
+          "dataset_role": "evaluation",
+          "source_suite_id": "oga_cc0_complex_validation_v1",
+          "image": "png_to_shader_v2/images/validation/explosion_atlas_512x512.png",
+          "sha256": "0259db55b7320b3f0e92413189cc80939692722247b4ea6a14cba9b41232c42a",
+          "resolution": [
+            512,
+            512
+          ],
+          "visual_family": "oga_explosion_smoke_atlas",
+          "hash_group": "oga.explosion_atlas_512",
+          "topology": "solid",
+          "instance_count": 9,
+          "hole_count": 0,
+          "required_layers": [
+            "base_fill",
+            "color_lobe",
+            "haze",
+            "glow"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "gaussian_color_lobe",
+              "gaussian_glow",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "oga_explosion_cell_00",
+          "dataset_role": "evaluation",
+          "source_suite_id": "oga_cc0_complex_validation_v1",
+          "image": "png_to_shader_v2/images/validation/oga_explosion_cell_00.png",
+          "sha256": "83f317b9665f0d862e28ec53b00ca89005a577915a32fceb1833e8a9c5512ed6",
+          "resolution": [
+            171,
+            171
+          ],
+          "visual_family": "oga_explosion_smoke_atlas",
+          "hash_group": "oga.explosion_atlas_512",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": [
+            "base_fill",
+            "color_lobe",
+            "haze",
+            "glow"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "gaussian_color_lobe",
+              "gaussian_glow",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "oga_explosion_cell_01",
+          "dataset_role": "evaluation",
+          "source_suite_id": "oga_cc0_complex_validation_v1",
+          "image": "png_to_shader_v2/images/validation/oga_explosion_cell_01.png",
+          "sha256": "2a8923ce3c146ecf5738d1ad135474d1a630fd3bc192a7d4cba01aa70e2fd5f8",
+          "resolution": [
+            171,
+            171
+          ],
+          "visual_family": "oga_explosion_smoke_atlas",
+          "hash_group": "oga.explosion_atlas_512",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": [
+            "base_fill",
+            "color_lobe",
+            "haze",
+            "glow"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "gaussian_color_lobe",
+              "gaussian_glow",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "oga_explosion_cell_10",
+          "dataset_role": "evaluation",
+          "source_suite_id": "oga_cc0_complex_validation_v1",
+          "image": "png_to_shader_v2/images/validation/oga_explosion_cell_10.png",
+          "sha256": "f8cfe84391486ef8f7a8674afc34fe17fc2ae8586a7d1c3cf91d2ed958f3b044",
+          "resolution": [
+            171,
+            171
+          ],
+          "visual_family": "oga_explosion_smoke_atlas",
+          "hash_group": "oga.explosion_atlas_512",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": [
+            "base_fill",
+            "color_lobe",
+            "haze",
+            "glow"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "gaussian_color_lobe",
+              "gaussian_glow",
+              "over_blend"
+            ]
+          }
+        },
+        {
+          "case_id": "oga_explosion_cell_22",
+          "dataset_role": "evaluation",
+          "source_suite_id": "oga_cc0_complex_validation_v1",
+          "image": "png_to_shader_v2/images/validation/oga_explosion_cell_22.png",
+          "sha256": "5c17ebdd9d7fb43376d186528bf280bc9af16474c0becbd92f4c6deade76f89c",
+          "resolution": [
+            171,
+            171
+          ],
+          "visual_family": "oga_explosion_smoke_atlas",
+          "hash_group": "oga.explosion_atlas_512",
+          "topology": "solid",
+          "instance_count": 1,
+          "hole_count": 0,
+          "required_layers": [
+            "base_fill",
+            "color_lobe",
+            "haze",
+            "glow"
+          ],
+          "expected_primitives": {
+            "taxonomy_version": "png_to_shader_expected_primitives_v1",
+            "items": [
+              "gaussian_color_lobe",
+              "gaussian_glow",
+              "over_blend"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "release-held-out",
+      "status": "not_populated",
+      "access_policy": "sealed_release_test",
+      "purpose": "V2.3 代码、Prompt、模板和阈值冻结后才能登记和运行。",
+      "samples": []
+    }
+  ]
+}

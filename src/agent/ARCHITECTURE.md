@@ -36,7 +36,7 @@ Agent 只负责编排、LLM Gateway、Prompt 策略、运行时状态和公共�
 
 ## ShaderForge 依赖边界
 
-- 跨多个确定性能力的应用层组合优先使用 `shaderforge.public`；需要精确领域类型或聚焦依赖时，可以从有架构文档的 typed 子包公共根导入，例如 `shaderforge.analysis`、`contracts`、`evaluation`、`generation`、`rendering`、`store` 和 `validation`，不得依赖其私有实现文件。
+- 跨多个确定性能力的应用层组合优先使用 `shaderforge.public`；需要精确领域类型或聚焦依赖时，可以从有架构文档的 typed 子包公共根导入，例如 `shaderforge.analysis`、`compiler`、`contracts`、`evaluation`、`generation`、`genome`、`intent`、`rendering`、`seeding`、`store` 和 `validation`，不得依赖其私有实现文件。
 - 本文中的 ShaderForge Store 只指 `LocalArtifactStore`、run 级 `RunArtifactStore` 及其 `ArtifactRef`。Agent Memory 使用 LangGraph `BaseStore`，Node Lab 使用 `NodeLabStore` 管理实验索引和访问语义，二者都不是 ShaderForge Store。
 - 更完整的公共面与职责定义以 `src/shaderforge/ARCHITECTURE.md` 及对应 typed 子包的 `ARCHITECTURE.md` 为准。
 

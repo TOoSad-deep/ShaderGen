@@ -163,6 +163,7 @@ class TargetMeasurementsV2:
 
 ```text
 RenderContract
+> Deployment hard safety ceiling（只允许 budget/complexity）
 > 用户显式 hard constraint
 > 用户 region/color lock
 > 已确认 Project Memory

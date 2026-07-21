@@ -13,12 +13,14 @@ import pytest
 from scripts.run_png_to_shader_v1_benchmark import (
     INITIAL_SELECTION_POLICY,
     M5_OBJECTIVE_VERSION,
+    M5_QUALITY_PRESET_NAMES,
     _bit_identical_case_ids,
     _build_report,
     _build_summary,
     _candidate_generation,
     _CandidateGeneration,
     _evaluate_objective_candidate,
+    _m5_quality_preset,
     _objective_pair_fields,
     _report_markdown,
     _resume_model_call_charge,
@@ -47,6 +49,13 @@ ROOT = Path(__file__).resolve().parents[2]
 BENCHMARK_ROOT = ROOT / "benchmarks/png_to_shader_v1"
 MANIFEST = BENCHMARK_ROOT / "manifest.yaml"
 GATE_POLICY = BENCHMARK_ROOT / "m5_gate.yaml"
+
+
+def test_m5_quality_presets_remain_frozen_without_online_ultra() -> None:
+    assert M5_QUALITY_PRESET_NAMES == ("fast", "balanced", "high")
+    assert _m5_quality_preset("high") is QualityPreset.HIGH
+    with pytest.raises(ValueError, match="M5 quality preset"):
+        _m5_quality_preset("ultra")
 
 
 class _MemoryArtifactStore:

@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from shaderforge.contracts import AcceptancePolicy
+from shaderforge.evaluation.admission import (
+    AdmissionStatus,
+    GeneratorAdmissionEvidence,
+    MeasurementSeedAdmissionPolicy,
+    decide_generator_admission,
+)
 from shaderforge.evaluation.models import ScoreBreakdownV1
 from shaderforge.evaluation.oracle import max_protected_regression
+
+if TYPE_CHECKING:
+    from shaderforge.evaluation.runtime_admission import TrustedRuntimeSelectorInput
 
 SelectionReason = Literal[
     "first_valid_candidate",
@@ -18,6 +27,8 @@ SelectionReason = Literal[
     "insufficient_total_improvement",
     "protected_evidence_missing",
     "protected_region_regression",
+    "generator_capability_unsupported",
+    "generator_capability_unknown",
 ]
 CandidateOrigin = Literal["model", "deterministic"]
 
@@ -166,37 +177,134 @@ class CurrentBestDecision:
     reason: SelectionReason
     total_improvement: float | None
     max_protected_regression: float | None
+    admission_status: AdmissionStatus | None = None
+    admission_policy_version: str | None = None
+    admission_reason_codes: tuple[str, ...] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """返回可写入候选 manifest 的选择证据."""
-        return {
+        value: dict[str, Any] = {
             "accepted": self.accepted,
             "reason": self.reason,
             "total_improvement": self.total_improvement,
             "max_protected_regression": self.max_protected_regression,
         }
+        if self.admission_status is not None:
+            value.update(
+                {
+                    "admission_status": self.admission_status,
+                    "admission_policy_version": self.admission_policy_version,
+                    "admission_reason_codes": self.admission_reason_codes,
+                }
+            )
+        return value
 
 
 def select_current_best(
     current_best: CandidateRecord | None,
     candidate: CandidateRecord,
     policy: AcceptancePolicy,
+    *,
+    admission_policy: MeasurementSeedAdmissionPolicy | None = None,
+    admission_evidence: GeneratorAdmissionEvidence | None = None,
+    trusted_runtime_admission: TrustedRuntimeSelectorInput | None = None,
 ) -> CurrentBestDecision:
-    """按硬约束、总损失改善和保护区退化决定是否晋级."""
+    """按硬约束、可选 admission、总损失改善和保护区退化决定晋级.
+
+    ``admission_policy`` 缺省为 ``None``，因此现有生产调用保持原选择语义；
+    裸 runtime evidence 始终拒绝；只有 resolver-aware adapter 的密封输出可解锁。
+    """
+    if admission_evidence is not None and trusted_runtime_admission is not None:
+        raise ValueError(
+            "admission_evidence 与 trusted_runtime_admission 不得同时提供。"
+        )
+    if (
+        admission_evidence is not None or trusted_runtime_admission is not None
+    ) and admission_policy is None:
+        raise ValueError("admission_evidence 必须同时提供 admission_policy。")
     if not candidate.hard_constraints_passed:
         return CurrentBestDecision(False, "hard_constraints_failed", None, None)
     if candidate.score_summary is None:
         return CurrentBestDecision(False, "score_missing", None, None)
-    if current_best is None:
-        return CurrentBestDecision(True, "first_valid_candidate", None, 0.0)
-    if current_best.score_summary is None:
+    if current_best is not None and current_best.score_summary is None:
         return CurrentBestDecision(False, "current_best_score_missing", None, None)
+
+    admission = None
+    if admission_policy is not None:
+        if trusted_runtime_admission is None:
+            admission = decide_generator_admission(
+                candidate_id=candidate.candidate_id,
+                candidate_glsl_sha256=candidate.glsl_sha256,
+                candidate_render_sha256=candidate.render_sha256,
+                candidate_origin=candidate.origin,
+                candidate_generator_version=candidate.generator_version,
+                evidence=admission_evidence,
+                policy=admission_policy,
+            )
+        else:
+            from shaderforge.evaluation.runtime_admission import (
+                decide_trusted_runtime_admission,
+            )
+
+            admission = decide_trusted_runtime_admission(
+                candidate_id=candidate.candidate_id,
+                candidate_glsl_sha256=candidate.glsl_sha256,
+                candidate_glsl_ref=candidate.glsl_ref,
+                candidate_render_sha256=candidate.render_sha256,
+                candidate_render_ref=candidate.render_ref,
+                candidate_provenance_ref=candidate.provenance_ref,
+                candidate_origin=candidate.origin,
+                candidate_generator_version=candidate.generator_version,
+                trusted_input=trusted_runtime_admission,
+                policy=admission_policy,
+            )
+        if candidate.origin == "model":
+            admission = None
+        elif not admission.admitted:
+            reason: SelectionReason = (
+                "generator_capability_unsupported"
+                if admission.status == "unsupported"
+                else "generator_capability_unknown"
+            )
+            return CurrentBestDecision(
+                False,
+                reason,
+                None,
+                None,
+                admission_status=admission.status,
+                admission_policy_version=admission.policy_version,
+                admission_reason_codes=admission.reason_codes,
+            )
+
+    def decision(
+        accepted: bool,
+        reason: SelectionReason,
+        total_improvement: float | None,
+        max_protected_regression: float | None,
+    ) -> CurrentBestDecision:
+        return CurrentBestDecision(
+            accepted,
+            reason,
+            total_improvement,
+            max_protected_regression,
+            admission_status=None if admission is None else admission.status,
+            admission_policy_version=(
+                None if admission is None else admission.policy_version
+            ),
+            admission_reason_codes=(
+                None if admission is None else admission.reason_codes
+            ),
+        )
+
+    if current_best is None:
+        return decision(True, "first_valid_candidate", None, 0.0)
+    assert current_best.score_summary is not None
 
     improvement = (
         current_best.score_summary.total_loss - candidate.score_summary.total_loss
     )
     if improvement < policy.min_total_improvement:
-        return CurrentBestDecision(
+        return decision(
             False,
             "insufficient_total_improvement",
             improvement,
@@ -206,7 +314,7 @@ def select_current_best(
     previous_regions = set(current_best.score_summary.protected_region_loss_map)
     candidate_regions = set(candidate.score_summary.protected_region_loss_map)
     if not previous_regions.issubset(candidate_regions):
-        return CurrentBestDecision(
+        return decision(
             False,
             "protected_evidence_missing",
             improvement,
@@ -218,10 +326,10 @@ def select_current_best(
         candidate.score_summary,
     )
     if regression > policy.max_protected_regression:
-        return CurrentBestDecision(
+        return decision(
             False,
             "protected_region_regression",
             improvement,
             regression,
         )
-    return CurrentBestDecision(True, "improved", improvement, regression)
+    return decision(True, "improved", improvement, regression)

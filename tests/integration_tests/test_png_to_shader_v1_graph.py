@@ -13,7 +13,13 @@ from langgraph.store.memory import InMemoryStore
 from agent.app.contracts.llm import LLMInvocationError, LLMResponse
 from agent.app.graphs.png_to_shader_v1_graph import build_png_to_shader_v1_graph
 from agent.app.memory.store import list_project_memories
-from shaderforge.contracts import AcceptancePolicy, BudgetPolicy, StopReason
+from shaderforge.contracts import (
+    AcceptancePolicy,
+    BudgetPolicy,
+    QualityPreset,
+    StopReason,
+    budget_for_preset,
+)
 from shaderforge.evaluation import ScoreBreakdownV1
 from shaderforge.rendering import (
     CompileResult,
@@ -138,15 +144,25 @@ def budget(
     )
 
 
-def graph_input(run_id: str, policy: BudgetPolicy) -> dict:
+def graph_input(
+    run_id: str,
+    policy: BudgetPolicy,
+    *,
+    quality_preset: str = "balanced",
+    acceptance_policy: AcceptancePolicy | None = None,
+) -> dict:
     return {
         "project_id": "m3-tests",
         "run_id": run_id,
         "image": REFERENCE_IMAGE.read_bytes(),
         "content_type": "image/png",
-        "quality_preset": "balanced",
+        "quality_preset": quality_preset,
         "budget_policy": asdict(policy),
-        "acceptance_policy": asdict(AcceptancePolicy(quality_threshold=0.0)),
+        "acceptance_policy": asdict(
+            acceptance_policy or AcceptancePolicy(quality_threshold=0.0)
+        ),
+        "runtime_policy_schema_version": "test_runtime_policy_v1",
+        "runtime_policy_sha256": "a" * 64,
     }
 
 
@@ -159,6 +175,8 @@ async def run_scripted_graph(
     losses: Iterable[float],
     policy: BudgetPolicy,
     enable_measurement_seed: bool = False,
+    quality_preset: str = "balanced",
+    acceptance_policy: AcceptancePolicy | None = None,
 ):
     gateway = ScriptedGateway(gateway_script)
     renderer = FakeRenderer(render_outcomes)
@@ -171,7 +189,14 @@ async def run_scripted_graph(
         enable_measurement_seed=enable_measurement_seed,
         store=memory_store,
     )
-    result = await graph.ainvoke(graph_input(run_id, policy))
+    result = await graph.ainvoke(
+        graph_input(
+            run_id,
+            policy,
+            quality_preset=quality_preset,
+            acceptance_policy=acceptance_policy,
+        )
+    )
     return result, gateway, renderer, memory_store
 
 
@@ -313,6 +338,11 @@ async def test_first_candidate_success_finalizes_artifact_and_promotes_strategy(
     assert renderer.closed is True
     final_root = tmp_path / "artifacts/m3-tests/first-success/final"
     assert (final_root / "manifest.json").is_file()
+    manifest = json.loads((final_root / "manifest.json").read_text())
+    assert manifest["runtime_policy_schema_version"] == "test_runtime_policy_v1"
+    assert manifest["runtime_policy_sha256"] == "a" * 64
+    assert manifest["budget_policy"]["max_model_calls"] == 4
+    assert manifest["acceptance_policy"]["quality_threshold"] == 0.0
     metrics = json.loads((final_root / "metrics.json").read_text())
     assert metrics["roi_losses"] == {"highlight": 0.3}
     assert metrics["protected_region_losses"] == {"protected_center": 0.1}
@@ -436,6 +466,41 @@ async def test_two_non_improving_rounds_stop_with_stagnation_and_hard_bound(
     assert final["candidate_count"] <= 1 + 2 + 0
     assert gateway.calls == 6
     assert len(renderer.calls) == 3
+
+
+@pytest.mark.anyio
+async def test_ultra_ten_refinements_finish_below_recursion_limit(
+    tmp_path: Path,
+) -> None:
+    script = [response(analysis_payload()), response(author_payload())]
+    for round_index in range(10):
+        candidate_id = f"candidate-{round_index + 1:04d}"
+        refine = deepcopy(author_payload("visual_refine"))
+        refine["base_candidate_id"] = candidate_id
+        script.extend([response(review_payload(candidate_id)), response(refine)])
+
+    result, gateway, renderer, _memory_store = await run_scripted_graph(
+        tmp_path,
+        run_id="ultra-ten-refinements",
+        gateway_script=script,
+        render_outcomes=[True] * 11,
+        losses=[0.30 - index * 0.01 for index in range(11)],
+        policy=budget_for_preset(QualityPreset.ULTRA),
+        quality_preset="ultra",
+        acceptance_policy=AcceptancePolicy(
+            min_total_improvement=0.002,
+            quality_threshold=0.0,
+            stagnation_rounds=6,
+        ),
+    )
+
+    final = result["final_result"]
+    assert final["stop_reason"] == StopReason.VISUAL_ITERATION_BUDGET_EXHAUSTED.value
+    assert final["candidate_id"] == "candidate-0011"
+    assert final["visual_refinement_count"] == 10
+    assert final["model_call_count"] == 22
+    assert gateway.calls == 22
+    assert len(renderer.calls) == 11
 
 
 @pytest.mark.anyio

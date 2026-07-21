@@ -76,6 +76,57 @@ print(json.dumps({
     }
 
 
+def test_shaderforge_v2_typed_models_remain_renderer_free_and_lazy() -> None:
+    result = _run_probe(
+        """
+import json
+import sys
+import shaderforge
+from shaderforge.genome import EffectGenome
+from shaderforge.intent import RequestConstraintSet
+from shaderforge.store import ArtifactRefV2
+
+genome_identity = shaderforge.EffectGenome is EffectGenome
+constraint_identity = shaderforge.RequestConstraintSet is RequestConstraintSet
+artifact_identity = shaderforge.ArtifactRefV2 is ArtifactRefV2
+
+print(json.dumps({
+    "genome_identity": genome_identity,
+    "constraint_identity": constraint_identity,
+    "artifact_identity": artifact_identity,
+    "renderer": "shaderforge.rendering" in sys.modules,
+    "playwright": "playwright.async_api" in sys.modules,
+}))
+"""
+    )
+
+    assert result == {
+        "genome_identity": True,
+        "constraint_identity": True,
+        "artifact_identity": True,
+        "renderer": False,
+        "playwright": False,
+    }
+
+
+def test_v2_packages_and_pydantic_are_explicit_distribution_inputs() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    lock = (ROOT / "uv.lock").read_text(encoding="utf-8")
+
+    assert '    "shaderforge.genome",' in pyproject
+    assert '    "shaderforge.intent",' in pyproject
+    assert '    "pydantic>=2.12.5",' in pyproject
+    assert '{ name = "pydantic", specifier = ">=2.12.5" }' in lock
+
+
+def test_built_wheel_exposes_v2_benchmark_public_api_without_source_tree() -> None:
+    subprocess.run(
+        [sys.executable, "scripts/check_wheel_imports.py"],
+        cwd=ROOT,
+        check=True,
+    )
+
+
 def test_node_lab_model_import_does_not_construct_application_dependencies() -> None:
     result = _run_probe(
         """
@@ -125,6 +176,13 @@ def test_backend_sql_is_an_explicit_packaged_resource_boundary() -> None:
 
     schema = files(backend.sql).joinpath("001_agent_process.sql")
     assert schema.is_file()
-    assert "CREATE TABLE IF NOT EXISTS agent_runs" in schema.read_text(
-        encoding="utf-8"
-    )
+    assert "CREATE TABLE IF NOT EXISTS agent_runs" in schema.read_text(encoding="utf-8")
+
+
+def test_backend_runtime_policy_is_an_explicit_packaged_resource() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert '"backend.app.core" = ["*.yaml"]' in pyproject
+    assert (
+        ROOT / "backend/app/core/png_to_shader_runtime_policy.v2.yaml"
+    ).is_file()

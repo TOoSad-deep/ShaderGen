@@ -101,6 +101,13 @@ def test_quality_presets_are_bounded_and_balanced_is_default_shape() -> None:
     )
     assert budget_for_preset(QualityPreset.FAST).max_model_calls < balanced.max_model_calls
     assert budget_for_preset(QualityPreset.HIGH).max_model_calls > balanced.max_model_calls
+    assert budget_for_preset(QualityPreset.ULTRA) == BudgetPolicy(
+        max_visual_refinements=10,
+        max_compile_repairs=5,
+        max_model_calls=40,
+        max_wall_time_seconds=2_400,
+        renderer_replay_on_crash=2,
+    )
     assert DEFAULT_ACCEPTANCE_POLICY == AcceptancePolicy()
 
 
@@ -302,7 +309,7 @@ def test_gate_loader_rejects_unknown_v1_structure(
         load_quality_gate_policy(path)
 
 
-def test_f09_is_the_only_active_feature() -> None:
+def test_f03_is_the_only_active_feature() -> None:
     feature_lines = [
         line
         for line in (ROOT / "docs/FEATURES.md").read_text().splitlines()
@@ -310,4 +317,4 @@ def test_f09_is_the_only_active_feature() -> None:
     ]
 
     assert len(feature_lines) == 1
-    assert feature_lines[0].startswith("| F09 |")
+    assert feature_lines[0].startswith("| F03 |")

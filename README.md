@@ -92,6 +92,7 @@ OPENAI_API_KEY=
 OPENAI_BASE_URL=
 LOG_LEVEL=INFO
 SHADERGEN_CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
+SHADERGEN_RUNTIME_POLICY_PATH=backend/app/core/png_to_shader_runtime_policy.v2.yaml
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
 TEST_DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/SHADERGEN_TEST
 LANGGRAPH_STRICT_MSGPACK=true
@@ -102,6 +103,8 @@ SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=false
 ```
 
 `DATABASE_URL` 配置后，Backend 使用独立 psycopg pool 运行 LangGraph Checkpointer/Store，并使用现有 asyncpg pool 写 Agent 过程账本。首次部署或 persistence 包升级后先执行 `make setup-memory-postgres`。`make test-memory-postgres` 优先使用 `TEST_DATABASE_URL`；未配置时会基于 `DATABASE_URL` 创建随机临时数据库，测试结束后自动删除。
+
+Backend 在线 PNG-to-Shader V1 产品请求的 `fast`、`balanced`、`high`、`ultra` 调用数、迭代数、wall-time 和验收阈值集中在 `backend/app/core/png_to_shader_runtime_policy.v2.yaml`。Backend 启动时严格读取并冻结配置；部署时可用 `SHADERGEN_RUNTIME_POLICY_PATH` 指向自定义 YAML。自定义值不能突破代码内置 Ultra 硬上限，配置版本、SHA-256、最终预算与验收策略会进入 run 总账、`run-config.json` 和最终 manifest。Ultra 默认允许 10 次视觉优化、5 次编译修复、40 次模型调用和 2400 秒总时长，并把停滞窗口放宽到 6；它提高达到质量阈值的概率，但不承诺任意输入必然达标。直接 LangGraph 与 Node Lab 使用显式预算；冻结 M5 benchmark 继续只接受原三档，避免线上 Ultra 改变发布证据。
 
 当前发布状态、阻塞项和 gate 证据只以 `docs/FEATURES.md` 与 `PROGRESS.md` 为准。当前实现只保留 `png_to_shader_v1` Graph 和 `procedural_v1` 产品路径；旧基础对话 Graph、legacy 生成、独立 `/review` API 及其专属 Node 已删除。V1 服务端完成 WebGL1 render/evaluate/review/refine；正常结果返回 `current_best`、评分和 final Artifact，Evaluator 不可用时返回明确的 WebGL-valid `unscored_fallback`，不伪造评分。页面是否显示实验/no-go 必须跟随 F09 状态，唯一实现路径本身不代表已获准灰度。公开 Artifact API 只允许 final-render、metrics 和 manifest。
 

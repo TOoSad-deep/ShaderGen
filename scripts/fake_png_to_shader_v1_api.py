@@ -93,7 +93,7 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_body()
         required = (
             b'name="generation_mode"\r\n\r\nprocedural_v1',
-            b'name="quality_preset"\r\n\r\nhigh',
+            b'name="quality_preset"\r\n\r\nultra',
         )
         if any(item not in body for item in required):
             self._json({"detail": "前端未发送完整 procedural_v1 参数。"}, status=400)
@@ -127,7 +127,7 @@ class Handler(BaseHTTPRequestHandler):
                 "glsl": GLSL,
                 "memory_status": "ephemeral",
                 "generation_mode": "procedural_v1",
-                "quality_preset": "high",
+                "quality_preset": "ultra",
                 "iterations": 2,
                 "stop_reason": "stagnation",
                 "best_candidate_id": (

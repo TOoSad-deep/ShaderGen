@@ -5,6 +5,7 @@
 ## 当前服务
 
 - `png_to_shader_v1.py`：暴露服务端自动 render/evaluate/review/refine 用例、V1 Memory 清理和固定 Artifact 白名单读取。
+- `png_to_shader_v2/`：V2.3 development-only source-to-Graph 组合根；真实 Measurements 与 fixture/no-model 输入全部物化进 Catalog，支持本地 State/Catalog 恢复和 monotonic wall-time 记账。它未注册 Backend/`langgraph.json`，固定关闭 production admission。real 模式只接受注入的 durable `recover`/`invoke_once` adapter，且仍要求 config 双重显式授权；未注入 adapter 时 fail closed，不会退回 fixture。
 - `node_lab.py`：暴露 Node Lab 的 transport-free Application API，并仅把公共 `NodeProvider` 注入通用 Harness；不再导入具体 Node factory、routing、节点 ID 集合或模式分支。HTTP/CLI/测试必须复用此入口。
 - `agent.app.nodes.png_to_shader_v1.integrations.node_lab`：属于 V1 生产 Node 命名空间的对外集成包；维护 20 个 descriptor，分别描述 15 个非模型节点和五个模型节点。Provider 由 `DeterministicNodeExecutor` 为前者提供 deterministic binding，由 `ModelRoleExecutor` 为后者提供 fixture/mock/real binding；它同时声明 routing capability 和 benchmark 源文件。
 - `errors.py`：保存公共用例使用的安全 persistence 异常。
@@ -38,6 +39,10 @@
 - Service 可以 re-export 稳定 Parser 函数，但不要 import `nodes/` 中的内部 helper。
 - Agent 不直接持有数据库连接池；过程数据通过 service 结果返回给后端统一落库。
 - Graph Builder 创建并注入 run 级资源时，负责执行 Graph 的公共 Service 必须共享同一资源 registry，并为越过 Graph 终止路径的未知异常提供幂等清理；不得只依赖某个 finalize Node。
+- V2 development Service 的 Renderer factory 每次返回 run-scoped session；production Graph 的 render node 必须在成功、WebGL 编译/绘制失败和异常路径都幂等关闭。真实 Chromium 集成门禁从 source PNG bytes 开始，经真实 `TargetMeasurementsV2` 和 22 节点 Builder，核对 typed Candidate 闭包、浏览器/WebGL 元数据、PNG 内容身份、失败帧不复用与资源释放；测试仍固定 model calls=0、production admission=false。
+- V2 real Service 的 pre-State bootstrap 使用 `ServiceRunJournalV2` 逐步冻结 source、config、request metadata、measurement bundle、Intent context 与 preliminary constraint refs；State 初始化、model commit、final constraint、resume context 与 Graph finalization 各有单调 phase。恢复只能继续同一 real identity，不得调用 fixture interpretation，也不得重新生成第二个 provider operation。
+- State 建立后的 resume-context/final-constraint 写入使用两个固定 durable put slot。每个 slot 冻结 canonical payload SHA/size、Catalog 起点、State artifact budget 起点和 `prepared -> reserved -> put -> committed` 状态；在 reserve 前后、内容寻址 put 后及 commit 前后崩溃，首次 resume 均按 Catalog 实际去重 delta 闭合，后续 resume 不再增加 ref、budget revision 或用量。
+- real model materialization 在首次 Catalog 写入前用内存 preflight 计算 prompt snapshot、raw response、typed Interpretation 与 audit 的全部 canonical refs/payload，并先比较 `max_output_artifact_bytes`。真实写入按 operation 冻结的 Catalog 起点结算去重 delta；partial put 可恢复。oversize、parse failure、provider indeterminate、receipt identity/cost 无效和越权 evidence 都持久化 typed failure closure、释放 reservation 并终止，Service 不会自动重调。
 - V1 使用 `png-to-shader-v1:{project_id}` 隔离 checkpoint，同时继续用原 project_id 读取项目 Store Memory，并返回 `durable`、`ephemeral` 或 `degraded` memory status。
 - 后端只依赖 service 的公共函数和结果类型。
 - Node Lab Route 和 CLI 只能调用 `agent.app.services.node_lab`；不得复制 Registry、Fixture 解析、State diff、fingerprint 或 Artifact 规则。

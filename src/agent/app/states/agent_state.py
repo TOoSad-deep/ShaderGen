@@ -34,6 +34,8 @@ class PngToShaderV1State(TypedDict, total=False):
     render_contract: Annotated[dict[str, Any], UntrackedValue]
     budget_policy: Annotated[dict[str, Any], UntrackedValue]
     acceptance_policy: Annotated[dict[str, Any], UntrackedValue]
+    runtime_policy_schema_version: Annotated[str | None, UntrackedValue]
+    runtime_policy_sha256: Annotated[str | None, UntrackedValue]
     started_at: Annotated[float, UntrackedValue]
     reference_ref: Annotated[str, UntrackedValue]
     target_measurements: Annotated[Any, UntrackedValue]

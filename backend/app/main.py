@@ -17,6 +17,7 @@ from starlette.types import ExceptionHandler, Lifespan
 from agent.app.services.png_to_shader_v1 import create_png_to_shader_v1_service
 from backend.app.api.router import build_api_router
 from backend.app.core.logging import configure_logging
+from backend.app.core.runtime_policy import load_runtime_policy
 from backend.app.core.settings import BackendSettings
 from backend.app.database.agent_memory import close_agent_memory, open_agent_memory
 from backend.app.database.session import close_database_pool, open_database_pool
@@ -30,6 +31,7 @@ logger = logging.getLogger("backend.app")
 def _clear_runtime_state(app: FastAPI) -> None:
     """清空只在单次应用生命周期内有效的依赖."""
     app.state.png_to_shader_v1_service = None
+    app.state.png_to_shader_runtime_policy = None
     app.state.project_locks = None
     app.state.node_lab_service = None
 
@@ -42,12 +44,17 @@ def build_lifespan(settings: BackendSettings) -> Lifespan[FastAPI]:
         logger.info("backend.startup")
         app.state.project_locks = ProjectLockRegistry()
         app.state.png_to_shader_v1_service = None
+        app.state.png_to_shader_runtime_policy = None
         app.state.agent_memory = None
         app.state.db_pool = None
         app.state.node_lab_service = None
         try:
             async with AsyncExitStack() as cleanup:
                 cleanup.callback(_clear_runtime_state, app)
+
+                app.state.png_to_shader_runtime_policy = load_runtime_policy(
+                    settings.runtime_policy_path
+                )
 
                 await open_database_pool(app, settings.database_url)
                 cleanup.push_async_callback(close_database_pool, app)

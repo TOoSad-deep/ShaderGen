@@ -373,3 +373,109 @@
 - 决策：后续 PNG-to-Shader 演进采用 `human_doc/png-to-shader-v2-v5-plan/` 中已正式 Review 的总纲与四版本方案：V2 建立 TargetHypothesis、RequestConstraintSet、Intent IR、Effect Genome 和 Deterministic Compiler；V3 在固定拓扑上建立版本化 Oracle、SelectionKey、SearchJournal 和确定性参数搜索；V4 只在结构停滞后通过受限 GenomePatch、版本化 shortlist、Pairwise/HITL 和 staging SelectionSnapshot 改变结构或偏好；V5 再引入 Async Run、Ledger、Checkpoint/NodeCommit、RunJob/RendererJob 双 fencing、SSE、取消和恢复。Review 结论为 Conditional Go，仅允许先实施 V2.0 Schema、Hash、Artifact Adapter、golden fixture、数据 Manifest 和 State 恢复契约；不得跳过 V2.0 并行启动 Prompt、Compiler、Search 或新 Graph。
 - 原因：第一稿在多测量假设、ConstraintSet 集合级身份、跨版本 State、Search 恢复、evaluation revision 原子发布、Renderer 幂等与 durable 副作用等位置存在可编码性断层；把 V2–V5 合成一个大任务会迫使后续版本依赖仍在变化的根契约。正式 Review 已将事实、推断、约束、Genome、Evidence、选择语义和持久化边界拆成可独立冻结的版本层，并为质量、人工评测和恢复建立可重复判定协议。
 - 影响：当前 F09 仍是唯一 `active` 功能，F02–F05 及异步产品能力继续为 `not_started`；本决策和方案文档不改变现有 V1 Graph、API、RenderContract、`current_best`、checkpoint 或发布 gate。F09 M6.2 证据冻结后，首个实现 PR 只交付 V2.0 契约和测试资产；后续每个增量必须满足总纲的一次一个 active 功能、版本化 Manifest、V1 只读兼容和对应退出门槛。
+
+## D048 - V2.0 契约按领域冻结，数据 readiness 与功能状态解耦
+
+- 日期：2026-07-16
+- 决策：V2.0 模型不集中到单体 contracts 文件，而按后续所有权分别进入 Analysis、Intent、Genome、Evaluation、Store 和 Agent State；共享底层只保留 strict/frozen Pydantic 基类与 `canonical_json_v1`。Effect Genome 首期冻结 `effect_node_registry_v0` 的 16 个 snake-case kind、version `1`、SDF/mask/color port、负内正 SDF、0 外 1 内 coverage mask 和固定解析抗锯齿语义；V2.0 generic typed node 只服务 Schema/Hash，不能解释为 V2.2 Compiler union。Parameter 值域按 dtype sealed 为标量或固定 tuple，Graph 必须满足全 input 单入边、输出汇点和全节点可达。Constraint payload 按九种 kind 使用 sealed union，required-layer 与数据标签统一包含 glow；measurement 来源的 hard constraint 必须先独立成为 verified，confidence 不直接晋升；RegionLock identity 只绑定 mask 内容语义。Target/Constraint/Genome/Candidate/State/Budget 均以 golden schema/hash 锁定。数据 Manifest 固定 development、visible validation、sealed release 三种访问策略，visual family/hash group/图片内容不得跨 split；taxonomy 必须精确匹配 node registry kind/version；未填充 split 必须写 `not_populated` 并让 readiness fail。
+- 原因：领域类型若先塞入临时单体文件，V2.1/V2.2 搬迁会破坏公共面；Node registry、canonicalization 和 sealed payload 若不先版本化，后续 Compiler/Search cache 无法判断语义漂移。另一方面，当前只有 10 个 V1 回归样本，复制样本或把空 split 描述成 available 会制造虚假发布分母。
+- 影响：`pydantic>=2.12.5` 成为直接依赖，`shaderforge.intent` 与 `shaderforge.genome` 进入显式 package discovery 和惰性公共导出；V2 benchmark loader/readiness 从 typed 子包公共根导出，wheel 门禁从实际构建产物隔离导入。Local Catalog/legacy adapter 会按当前 run 和完整 Ref 元数据重算 artifact id；State/Budget transition 只做期望 revision 检查并返回新对象，不得表述为已实现持久化原子 CAS。初始 10 例只计 development/regression；后续 validation/release-held-out 的填充状态以 D053 为准。F09 保持唯一 active，F02/F03 保持 not_started，本次准备增量不解除 M6.2 和真实数据资产对 V2.0 完成/V2.1 的阻塞。
+
+## D049 - V1 运行预算由版本化 YAML 配置，代码保留不可突破硬上限
+
+- 日期：2026-07-17
+- 决策：Backend 在线 PNG-to-Shader V1 产品请求的 `fast`、`balanced`、`high` budget 与 acceptance profile 集中到随 `backend.app.core` wheel 打包的 `png_to_shader_runtime_policy.v1.yaml`。Backend lifespan 在打开数据库前严格加载一次并冻结；部署可用 `SHADERGEN_RUNTIME_POLICY_PATH` 指向自定义同版本文件。YAML 必须恰好包含三档，拒绝重复 key、未知字段、隐式类型、非有限数和缺档；所有预算都不得超过代码内置 High ceiling，Graph 初始化再次复核该上限。直接 LangGraph、Node Lab 与冻结 benchmark 不读取该运维配置，继续使用各自显式或冻结预算。
+- 原因：在线产品预算原先只能由代码 preset 提供，修改需要改代码，且总账和 Artifact 只记录 profile/生效值，无法证明某次运行使用了哪一份运维配置。完全把上限交给外部配置又可能误配出无限成本或超长阻塞请求；让 benchmark 读取在线配置还会破坏冻结证据的可比性。
+- 影响：公开 API 与前端继续只接受 `quality_preset=fast|balanced|high`，不新增任意 profile 名。每次运行把配置 Schema、原始文件 SHA-256、profile、完整 budget/acceptance 写入数据库 input/result、Agent State、`run-config.json` 和 final manifest；运行中不热加载，修改 YAML 后必须重启 Backend。配置路径不进入证据，保证跨机器复验不依赖本地目录。
+
+## D050 - 新增有界 Ultra 在线档并隔离冻结 benchmark
+
+- 日期：2026-07-17
+- 决策：公开 API 与前端新增 `quality_preset=ultra`。代码硬上限及默认 Ultra budget 为 10 次视觉优化、5 次编译修复、40 次模型调用、2400 秒 wall-time、30000 Shader chars 和 2 次 Renderer crash replay；acceptance 保持 `quality_threshold=0.12` 与保护区退化上限 `0.02`，把最小改善降为 `0.002`、停滞窗口增至 6。Graph recursion limit 从 96 提升为 256，覆盖估算约 133 step 的最坏合法 Ultra 路径。该决定更新 D027/D049 的 High ceiling、96 recursion 和公开三档边界。
+- 原因：High 的 4/2/12/600 在复杂输入上可能在编译修复、Critic/refine 或总时间耗尽前没有足够机会达到现有质量阈值；仅增加模型调用而不扩大停滞与 Graph recursion 边界仍会过早停止。Ultra 必须继续有界，不能把“更高命中概率”描述为任意输入的质量保证。
+- 影响：在线运行策略 Schema 升为 `png_to_shader_runtime_policy_v2`，默认文件改为 `png_to_shader_runtime_policy.v2.yaml` 并要求四档齐全；外部 v1 三档覆盖文件会 fail-fast，迁移时必须更新 Schema、补齐 Ultra 并重启 Backend。前端 Ultra 默认等待 42 分钟。M5 runner 显式冻结为 `fast|balanced|high`，新运行与 resume 都拒绝 Ultra，Node Lab 默认仍为 Balanced；因此在线最高成本档不会改变已有 benchmark 配置和发布证据。
+
+## D051 - M6.2 先冻结生成器能力错配诊断，再决定 Selector 策略
+
+- 日期：2026-07-17
+- 决策：M6.2 首个增量只生成只读、内容寻址的结构能力诊断，不立即修改 Selector、Prompt、Graph、冻结 M5 manifest 或 gate。诊断 Schema 与能力策略升级为 v2，复用发布门禁的匿名 A/B 解码函数，把旧正式 run 的 initial/final Candidate、suite/Artifact render、GLSL/provenance、run-evidence SHA-256、原始 `input/source.bin`、规范化 `input/reference.png`、人工偏好与 V2 development 的 topology、instance count、hole count、required layers 标签绑定；source bytes 必须等于样本 SHA，deterministic provenance 必须绑定 normalized reference。`measurement_affine_seed_v1` 只声明单实例、无孔、solid、`base_fill` 的能力范围；一阶 RGB affine 不能把 taxonomy 中的 Gaussian `color_lobe` 宣称为 supported。结果使用 `supported | unsupported | unknown`，其中 supported 仅表示标签落在生成器表达范围内，不证明渲染已经保持像素或语义；model 与未知 generator 一律 unknown。CLI 只能在旧 suite 和 run Artifact 根之外 exclusive-create 新文件，已存在 output 不得覆盖。
+- 原因：正式 run 的四个 initial-win 都由低频 affine final 替换，但直接基于同一失败 run 调权重或加入 case 特判会把诊断样本泄漏进生产策略。先绑定结构标签、候选身份和人工偏好，可以验证“自动 objective 改善与生成器能力越界同时发生”，又不把矩形 ROI 或未校准图像启发式包装成硬结构真相。复用 gate 解码避免诊断与发布门禁对 A/B 角色产生平行语义。
+- 影响：对 `m5-20260715T023445Z` 的 v2 只读重放得到 10 例中 5 个 capability unsupported，其中 4 个恰好覆盖全部 initial-win：`rimmed_disk`、`arc_highlight_orb`、`pink_gel` 由 required-layer 超出能力触发，`dual_disks` 由 instance count 超出能力触发；`color_lobes` 虽为人工 final-win，也因要求 Gaussian color lobe 而正确判为 unsupported，禁止用人工胜负倒推 generator 能力；`ellipse_gradient` 是唯一 supported deterministic final，其余 model final 为 unknown。早期 v1 诊断文件作为错误产物只读保留，不再作为当前证据。该结果只支持下一步设计通用 admission/Selector 策略，不构成修复通过、像素退化证明或新人工 gate；F09 继续 active/no-go，仍需离线策略回归、新 suite-run-id 真实模型 run 和独立盲评。
+
+## D052 - Measurement seed admission 先以通用纯契约和离线 opt-in replay 落地
+
+- 日期：2026-07-17
+- 决策：把 D051 的 capability-v2 能力表从 benchmark 特有逻辑抽到 `shaderforge.evaluation.admission`，冻结 `target_structure_facts_v1`、`measurement_seed_admission_evidence_v1` 和 `measurement_seed_admission_v1`。Evidence 区分 `offline_replay | runtime_verified`，携带 source/normalized reference、candidate id、GLSL/render hash、origin 与 generator version；结构事实拒绝 topology/hole 自相矛盾，`supported` 才能进入既有 score/protection 规则，deterministic 的 `unsupported | unknown` 在显式启用 policy 时 fail closed，model 不适用。当前没有 runtime verifier，任何 `runtime_verified` evidence 即使 scope 被 policy 允许也固定返回 `unknown/runtime_evidence_verifier_unavailable`；只有 offline CLI 复验真实 bytes 后才把其 SHA 字段视为内容锚点。`select_current_best()` 只增加 keyword-only 的 optional policy/evidence 参数；原三参数生产调用必须保持完全相同，只传 evidence 不传 policy 立即拒绝，事实层 `hard_constraints_failed`、`score_missing` 与 `current_best_score_missing` 优先于 admission。CandidateRecord、Prompt、Graph 节点/边、运行策略 YAML 和 M5 gate 均不改变。
+- 原因：V1 `TargetMeasurements` 只有 bbox/foreground/ROI，没有可验证的 topology、instance count、hole count 或 required-layer 事实；V2 `TargetHypothesis` 当前也只冻结 Schema，完整 runtime 测量算法属于尚未启动的 V2.1。此时默认拒绝所有缺证据 seed 会把 unknown 伪装成已完成的结构策略，把 development Manifest 或未验证 VisualAnalysis 接入生产又会造成数据泄漏。显式 opt-in 既能用同一个真实 Selector 验证策略，也不会把离线标签冒充在线证据。
+- 影响：replay v2 严格核对 source report/config bytes SHA、suite/run acceptance policy、旧 run-evidence、Candidate manifest、metrics/score、成功 compile 的封闭字段与静态校验语义、GLSL/render hash，并以 decision/case/report 交叉校验拒绝重算 hash 后的语义篡改；只 counterfactual 重放 `model initial → affine seed` 选择点。正式 run `m5-20260715T023445Z` 的 6 个 affine seed 在旧 Selector 下 6/6 accepted；离线 admission 拒绝 5 个 unsupported，覆盖全部 4 个 initial-win，唯一 supported 的 `ellipse_gradient` 仍 accepted。v1 replay 因缺少 strict compile/config 与完整交叉字段校验作为错误产物只读保留，不再作为当前证据；v2 报告固定 `production_enabled=false`。后续 Candidate 路径、人工偏好和 gate 不可由此推演。真实 validation/release-held-out readiness 继续阻塞 V2.1 启动；runtime verifier 是 V2.1 交付项，并阻塞 production admission 与 F09 新质量门禁。在此之前运行新 M5 只会重复原生产语义，F09 继续 active/no-go。
+
+## D053 - 可见 validation 采用可审计 CC0 实图，release 保持独立封存
+
+- 日期：2026-07-17
+- 决策：将从 FreeGameUI 下载的 30 张 CC0 PNG 作为 `freegameui_cc0_validation_v1` 登记到 visible validation，并追加 6 张 FreeGameUI 金属按钮和 5 张 OpenGameArt CC0 爆炸/烟雾样本；每项以本地内容 SHA-256 与原始尺寸固定，按五个完整 visual family/hash group 隔离。复杂空心外轮廓和有机烟雾边界不强行映射到当前 `effect_node_registry_v0` 未支持的几何节点，只标注可由现有 taxonomy 验证的 primitive。开发侧已见过并标注这批素材，因此不得复制到 release-held-out。
+- 原因：V2.1 前需要真实图像为 six critical classes 提供可复验的 validation 分母；将未知几何伪标为 circle/rounded-rect 会制造错误的 Compiler 目标，开发可见数据若被用作 release 则会破坏独立发布证据。
+- 影响：validation 的关键类分母为 multi-instance 11、ring 20、hollow 10、required-highlight 16、required-rim 26、required-outline 36，并可进行 V2.1 可见 gate/阈值校准。release-held-out 仍是 `not_populated`，必须在 V2.3 冻结后由独立数据保管人选取、下载、标注并封存；完整 data readiness 和 V2.0 completion 结论不因此解除。来源和审计边界见 `benchmarks/png_to_shader_v2/sources/`。
+
+## D054 - V2 数据准入按实施阶段冻结，F02 接替为唯一 active
+
+- 日期：2026-07-20
+- 决策：保留 `V2DatasetReadiness.ready` 作为 validation 与 release-held-out 同时就绪的完整审计结论，另新增必须显式选择阶段的 `V2DatasetStageGate`：V2.1 Intent 与 V2.2 Genome/Compiler 只要求 validation，V2.3 release candidate 才同时要求 validation 和 release-held-out。release-held-out 在 V2.3 代码、配置和阈值冻结前继续 `not_populated`，不得由开发侧候选池或 validation 代替。功能状态由 F09 `active` 转为 `blocked`，F02 由 `not_started` 转为唯一 `active`；V2.1 先交付独立 runtime Target structure evidence/verifier，再完成生产测量、Intent、持久化恢复与端到端门禁。
+- 原因：把完整 readiness 当作 V2.1 启动条件会要求开发阶段先暴露发布集，既形成循环依赖，也破坏 held-out 的独立性。当前 validation 六类真实分母已经满足 V2.1 校准需求，而 F09 的剩余质量门槛依赖尚未启用的 runtime structure admission，继续让两项同时 active 会违反功能状态机。
+- 影响：D048、D052 中“release-held-out readiness 阻塞 V2.1”的表述由本决策取代，D053 的独立封存边界继续有效。当前 V2.1/V2.2 数据阶段门禁为 ready，V2.3 release gate 仍 blocked；这不表示 F02 passing，也不启用 production admission。F09 的解除条件是 V2.1 持久化/恢复/端到端准入完成后，用新 suite-run-id 执行真实 M5 并完成新一轮独立匿名盲评。
+
+## D055 - V2.1 Intent 采用重建式 receipt 与单一约束合并策略
+
+- 日期：2026-07-20
+- 决策：`build_request_constraint_set()`/`merge_request_constraint_set()` 是 RequestConstraintSet 的规范写入口；旧 `compare_and_swap_constraint_set()` 仅保留底层 revision/兼容用途，任何集合进入 Intent 前都必须由 `validate_request_constraint_set_policy()` 独立重建冲突与来源策略。hard 与 soft 分层裁决，soft preference 不得淘汰 hard constraint，`rejected` 不参与 Intent。来源优先级中的 `deployment` 表示平台安全或运营硬上限，位于 RenderContract 与用户输入之间；普通产品偏好不得冒用该来源。Intent 校验不信任可重算 id，而从 Measurements、VisualInterpretation、ConstraintSet 与 Context 四个冻结输入精确重建 variant/result，并比较完整 receipt 与 hypothesis partition。
+- 原因：仅校验 canonical hash 无法证明集合使用了正确 conflict winner，也无法阻止旧 CAS 注入 model hard；仅重算 `intent_id` 同样无法发现调用方同时篡改画布、约束闭包或 relation。hard/soft 混合冲突还会让高优先级 soft 错误解除结构事实。部署来源的排序需要明确语义，否则会与正式方案中的用户 hard 优先级产生歧义。
+- 影响：VisualInterpretation 的 Prompt/模型/raw response/Parser/输出使用独立内容寻址 audit；模型只允许正式 V2.1 九类推断层，扩展的 `glow` 仍可作为共享 required-layer constraint，但不能静默进入模型 Schema。`TargetHypothesis` hash 在 F02 passing 前修正为绑定有序 instance index→mask 内容，relation 同时要求 endpoint 闭包、唯一 business key 与规范排序；对应 golden hash 已更新。此次收紧仍不表示 V2.1 validation gate 已通过，也不启用 V1 production admission。
+
+## D056 - V2.1 测量保留多假设并纠正可见 validation 错标
+
+- 日期：2026-07-20
+- 决策：MeasurementsV2 同时保留白底 normalized reference 与按同尺寸重放的 source alpha 证据；透明分段环先保存 literal open/components，再以较低 confidence 保存 radial-closure ring 假设，禁止覆盖原始观测。region/palette/gradient 只使用明确 hypothesis-neutral 的统计区域。visible validation 中 `freegameui_ring_segmented_blue_gold_02` 与 `freegameui_ring_segmented_cyber_cyan_02` 经像素连通证据确认均为 18 段，原 12 段标签属于标注错误，因此 dataset version 升为 `v2.0-initial-r2` 并只修正这两个 instance count；不按标签修改测量算法。
+- 原因：alpha 被白底 normalization 消隐会让透明 ring 无法测量；把分段环直接伪装成单连通 ring 又会丢失 literal component/instance 事实。严格门禁还必须区分模型错误与标签错误，不能为了 100% 指标把客观 18 段硬编码为 12 段。
+- 影响：stage-scoped visible validation 现在 producer、instance/full structure exact 均为 41/41，multi-instance 11/11、ring 20/20、hollow 10/10、hole-positive 30/30；这些是开发可见校准结果，不构成 release-held-out 或 production admission 证据。一般 overlap/contains/subtracts 仍需独立 instance evidence；D057 只为满足严格色模态分离条件的连通 subject 增加可复验 `touches` 替代分区。
+
+## D057 - V2.1 conformance 冻结输入并把 RGB 分割歧义保留为竞争假设
+
+- 日期：2026-07-20
+- 决策：V2.1 AI-off runner 在 StageGate 通过后、写入任何 config/Artifact 前一次性读取 development 10 + validation 41 的全部 source bytes，并逐一复验 Manifest SHA-256；后续 case 只消费这份冻结 bytes。runner 固定 `fixture/no-model`、模型预算 0、输出目录 exclusive-create，成功与失败都进入内容寻址 Artifact 和同一聚合分母。对于无 meaningful alpha 的 opaque RGB 图，border-distance mask 出现内部孔时同时保留原 topology 与 filled-solid 低置信假设；单连通 subject 只有在两大色模态各占足够面积、RGB 距离、质心分离、各分区连通且 union 精确回到 subject 时，才增加 `component_count=1`、`instance_count=2`、`relation=touches` 的替代假设。原观测不得被替代假设覆盖，Intent 仍由 verified hard constraints 选择可行分支或结构化拒绝。
+- 原因：StageGate 后再次按路径读图而不核对内容会产生 TOCTOU，使报告绑定旧 Manifest、测量却使用新图片。另一方面，白色高光接近白底会被误切成孔洞，重叠双色圆的 union 又只有一个 connected component；把标签硬编码进测量或直接覆盖 primary 都会破坏事实/推断边界。可审计的竞争假设既保留 literal evidence，也允许严格 Intent 在证据支持的歧义空间中闭合。
+- 影响：真实 conformance run 为 51/51 Intent 合法，current 10 为 10/10，validation Intent 与 instance exact 为 41/41，六类 recall/F1 与 macro 均为 1.0；模型调用数为 0。该 runner 使用冻结标签约束与 taxonomy fixture，只证明 Measurements/ConstraintSet/Parser/Intent 合并契约，不证明真实 VLM 视觉质量，不读取 release-held-out，也不启用 production admission。required-layer 独立 verifier、runtime/Candidate/provenance 完整恢复和 Selector 端到端 admission 仍是 F02 未完成项。
+
+## D058 - Required layer 使用逐 taxonomy 闭集，runtime verification 只信任可重放 v2 receipt
+
+- 日期：2026-07-20
+- 决策：`visual_interpretation_v2_1` 在九类 layer hypothesis 之外，对共享十项 required-layer taxonomy 逐项输出 `required | not_required | unknown`、confidence、model provenance 与内容寻址 evidence；`glow` 不借此进入九类 hypothesis Schema。Intent 的 required 集固定为 assessment required、verified hard required constraints 与 policy `base_fill` 的并集；unknown 和 hard-required/not-required 冲突 fail closed。runtime Evidence/Verification/Verifier 升为 v2，绑定 Interpretation audit、ConstraintSet、Context、选定 Intent/hypothesis 与全部 masks；只有重放四输入 Intent、几何和 required-layer 闭集全部一致才返回 `structure_verified`/`TargetStructureFacts`。v2 persistence envelope 恢复时复验 run/ref/size/SHA/JSON 与交叉身份，并重新运行 verifier，禁止信任缓存结论。
+- 原因：正向 layer 列表无法区分“确认不存在”与“模型漏看/调用方省略”，只比对调用方提供的 masks 会让三方一起漏层仍通过。旧 `geometry_verified/target=None` 也不能用于 admission；breaking evidence refs 和成功状态不得静默塞回 v1。持久化 verification 如果不在恢复时重跑，同样会让合法旧结论掩盖后续 Artifact 缺失或篡改。
+- 影响：required-layer 完整性现在是相对冻结 Interpretation/Constraint 的可审计闭集，仍不等于客观视觉真值；真实模型质量必须另行验证。51 例 fixture/no-model conformance 在闭集升级后仍为 10/10 + 41/41，runtime/recovery 定向门禁通过。Candidate/provenance 与 Selector 输入尚未形成完整 typed Artifact 恢复闭包，`runtime_verified` admission 继续固定 fail closed，production 默认行为不变。
+
+## D059 - V2.1 以 fail-closed adapter 收口，typed Candidate 语义归属 V2.2
+
+- 日期：2026-07-20
+- 决策：F02/V2.1 负责完成 Measurements、ConstraintSet、Interpretation/Intent、runtime structure verifier、Candidate/provenance 内容寻址恢复，以及只接受 resolver 重放结果的 sealed Selector adapter。CompilationBundle、IntentConstraintEvaluation 和 BasicEvaluation 的 typed 语义属于 F03/V2.2；在这些 Schema 落地前，Candidate loader 的唯一状态固定为 `not_admissible_v2_2_typed_schemas_unavailable`，adapter 必须结构化拒绝。F02 可以在 production admission 仍关闭的条件下 passing，F03 随即成为唯一 active。
+- 原因：要求 V2.1 对尚未实现的 V2.2 编译和评估语义作真值验证，会形成 F02 依赖 F03、F03 又必须等待 F02 的功能环。另一方面，仅验证 payload 哈希就授予 runtime admission 会把内容完整性偷换为语义正确。以明确的不可准入状态切开两层，既能验收 V2.1 的安全边界，又不会提前放行生产。
+- 影响：裸 `runtime_verified` evidence、手工 capability、缺失/篡改/跨 run Artifact 和 opaque 下游结果都不能解锁 Selector；默认三参数选择和 model 候选路径不变。V2.2 必须用 typed loader 重算 compilation/evaluation 语义后才能产生唯一正向状态；V2.3 还需在只保存 ArtifactRefV2 的 State/Graph 中显式启用，之后才允许真实 M5 和独立盲评。该 capability 是 Python API 边界，不宣称抵抗同进程恶意反射。
+
+## D060 - V2.2 编译闭包与 topology receipt 分层
+
+- 日期：2026-07-20
+- 决策：V2.2 使用 16 类 sealed Effect Node、显式 SDF→mask AA、三个确定性 Seed 和全 NodeKind Compiler；typed Candidate loader 必须恢复 AST、SourceMap、parameter table、GLSL 和 evaluation refs，重新编译并逐字段比较。只有可由 Genome 本身保守证明的 solid/single-instance/no-hole 结构可以在 `IntentConstraintEvaluationV2` 内通过；ring、hollow 或 multi-instance 在没有独立 typed topology receipt 时返回 unsupported，不能由 schema 合法或 hash 完整推断为结构正确。V2.3 runtime structure envelope 仍是目标事实来源，Graph 必须从 ArtifactRefV2 组合两类证据。
+- 原因：Compiler 可证明“这个 typed 图确定性生成了这些 GLSL bytes”，不能仅凭图中存在 DifferenceMask 或多个几何节点证明渲染与目标实例/孔洞一一对应。把内容完整、编译语义和目标结构真值拆开，避免 153/153 编译成功被误写成 153 个视觉结构全部正确。
+- 影响：V2.2 静态门禁 51/51 Intent、153/153 Genome/compile/static 全通过；真实 Chromium 门禁另以三个代表 seed、每 seed 五次 capture 验证 compile/link/draw 与 RGB MAE。typed solid candidate 可形成 sealed runtime input，但 production admission 仍需 V2.3 Graph/State 显式启用；opaque Candidate 和缺 topology receipt 的复杂结构继续 fail closed。
+
+## D061 - V2.3 正式门禁只接受 State 到 actual Chromium 的独立重放闭包
+
+- 日期：2026-07-21
+- 决策：V2.3 正式可见门禁只接受由确认持久化的 State v4 恢复全部 Candidate/Attempt 后，经独立 actual Chromium 重放生成并封装的 `V2_3VerifiedRenderedCaseCapability`；所有预期且可行的 seed attempt 均进入分母，失败或缺失不得由 objective-best 替代。Graph 升为 2.4，Candidate 与 `IntentConstraintEvaluation` 升为 V3，Rendered Structure metric 升为 `rendered_structure_metric_v3_1`。Evaluation 必须同时绑定并重放 Measurements、Intent、Genome、Compilation、Rendered Evidence/Verification 以及逐实例、关系和 required-layer 可见性；旧版本、opaque receipt 或仅哈希自洽的输入继续 fail closed。
+- 原因：静态编译成功、Graph 内 renderer 成功和最终 objective-best 都不能证明每个冻结 seed 的实际结构满足目标，也不能证明持久化恢复后的 Artifact 与最初判定一致。正式 runner 必须把 Service→State→Graph renderer→独立 replay→sealed gate 串成单一可审计闭包，并冻结 source、可行/拒绝 hypothesis 数、renderer 环境、预算和输出哈希。
+- 证据：正式 AI-off run `v2-3-actual-visible-20260721-strict-v3` 完成 51/51，development 为 8/10、validation 为 11/41，Graph 实际渲染调用 2016 次、独立 replay item 669 个、模型/token/cost 均为 0；config SHA-256 为 `2b6666c209fc9e12895ad69ac0e315240539e4ea41f71e84d69b7fa91cdbddd6`，outcomes SHA-256 为 `a8a5433ce98b34baf314d56dcee075b2b989eb80d14d39f0727f7e48fd01ab92`。strict-v1 因使用 raw hypothesis 数作为 attempt 期望值而作废保留，strict-v2 因执行中断只作不完整证据保留。
+- 影响：当前阻塞是本地可见结构质量，而不是 release-held-out 数量。union IoU 继续保持 0.90，禁止删检查或降阈值；下一增量必须用升版的 deterministic ownership partition 唯一分配 overlap pixels，并同步 diagnostic pass、Evidence/Verification 和 relation 语义。segmented-ring 还必须增加 segment/ownership geometry 或 raw-instance evidence，不能靠局部阈值修补。只有可见门禁通过并冻结 RC 后，才由独立数据保管人封存 release-held-out、在用户显式授权预算后运行真实模型 M5，并交由独立人员完成匿名 A/B 盲评。
+
+## D062 - Ownership 与 segmented-ring 先完成证据闭包，效果质量后置优化
+
+- 日期：2026-07-21
+- 决策：instance diagnostic 使用版本化 `stable_instance_ordinal_first_match_v1`，从同一 subject final-output delta 按稳定 instance ordinal 将 overlap pixel 唯一分配给首个命中实例；owner masks 必须互斥，union 仍与 subject 以 0.90 IoU 比较。Diagnostic source/product/bundle/GLSL、RenderPlan/render receipt 升 V3，RenderedStructure Evidence/Verification/hash 升 V4，metric 升 `rendered_structure_metric_v3_2`；Candidate/Evaluation 保持 V3 名义版本但 strict loader 只接受 V4 receipt。segmented radial ring 另以 `RadialSegmentStructureEvidenceV1` 绑定 source alpha、raw/semantic subject、raw segment/ownership masks、radial frame、内外径、角范围、raw topology 和完整 pair relation；TargetHypothesis/hash、Measurements/producer/bundle、Intent/Builder 同步 breaking 升版，runtime verifier、Candidate loader 与 Service resume 必须读取正文重建，不能只信 ArtifactRef。
+- 原因：旧 visible-delta 在 union overlap 区无人归属，会让 instance union 小于 subject；语义 radial ring 又只把闭合 ownership bbox/PCA 交给 Compiler，丢失原始段的角范围与拓扑。降低 IoU 或按数据标签补值会掩盖证据缺口。用户本阶段要求先确保要素齐全、链路能运行，允许视觉效果后续优化，因此本增量冻结 typed 接入点和 fail-closed 行为，但不伪报 51 例质量达标。
+- 影响：State v4、checkpoint v4、Graph 2.4 和 namespace 不变；单例 production Graph actual Chromium 可形成 Candidate，12/18 段 Service invoke/restart 可 finalized，但 Compiler 暂以 ownership bbox fallback 运行，复杂 ring 可能合法结束为 `no_valid_candidate`。下一步是由 `ObjectIntent.radial_segment_evidence_ref` 驱动 segment primitive/Genome lowering，再运行新 exclusive 51 例 strict gate。旧 strict-v3 使用 metric v3.1/Evidence V3，只保留为历史诊断；production admission、release-held-out 和真实模型仍保持关闭。

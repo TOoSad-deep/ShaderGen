@@ -54,16 +54,17 @@ def make_initialize_png_to_shader_v1_node(
             if raw_budget is not None
             else budget_for_preset(preset)
         )
-        high_ceiling = budget_for_preset(QualityPreset.HIGH)
+        ultra_ceiling = budget_for_preset(QualityPreset.ULTRA)
         if (
-            budget.max_visual_refinements > high_ceiling.max_visual_refinements
-            or budget.max_compile_repairs > high_ceiling.max_compile_repairs
-            or budget.max_model_calls > high_ceiling.max_model_calls
-            or budget.max_wall_time_seconds > high_ceiling.max_wall_time_seconds
-            or budget.max_shader_chars > high_ceiling.max_shader_chars
-            or budget.renderer_replay_on_crash > high_ceiling.renderer_replay_on_crash
+            budget.max_visual_refinements > ultra_ceiling.max_visual_refinements
+            or budget.max_compile_repairs > ultra_ceiling.max_compile_repairs
+            or budget.max_model_calls > ultra_ceiling.max_model_calls
+            or budget.max_wall_time_seconds > ultra_ceiling.max_wall_time_seconds
+            or budget.max_shader_chars > ultra_ceiling.max_shader_chars
+            or budget.renderer_replay_on_crash
+            > ultra_ceiling.renderer_replay_on_crash
         ):
-            raise ValueError("自定义 budget_policy 不得超过 V1 high 档硬上限。")
+            raise ValueError("自定义 budget_policy 不得超过 V1 ultra 档硬上限。")
         raw_acceptance = state.get("acceptance_policy")
         acceptance = (
             raw_acceptance
@@ -95,6 +96,11 @@ def make_initialize_png_to_shader_v1_node(
                 "render_contract": WEBGL1_STATIC_NO_TEXTURE_V1.to_dict(),
                 "budget_policy": asdict(budget),
                 "acceptance_policy": asdict(acceptance),
+                "runtime_policy": {
+                    "schema_version": state.get("runtime_policy_schema_version"),
+                    "config_sha256": state.get("runtime_policy_sha256"),
+                    "profile": preset.value,
+                },
             },
         )
         logger.info(
@@ -131,6 +137,10 @@ def make_initialize_png_to_shader_v1_node(
             "render_contract": WEBGL1_STATIC_NO_TEXTURE_V1.to_dict(),
             "budget_policy": asdict(budget),
             "acceptance_policy": asdict(acceptance),
+            "runtime_policy_schema_version": state.get(
+                "runtime_policy_schema_version"
+            ),
+            "runtime_policy_sha256": state.get("runtime_policy_sha256"),
             "started_at": started_at,
             "reference_ref": reference_ref.relative_path,
             "candidate_records": (),

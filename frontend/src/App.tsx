@@ -41,6 +41,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS: Record<QualityPreset, number> = {
   fast: 4 * 60 * 1000,
   balanced: 7 * 60 * 1000,
   high: 12 * 60 * 1000,
+  ultra: 42 * 60 * 1000,
 };
 
 function generationRequestTimeoutMs(qualityPreset: QualityPreset): number {
@@ -341,6 +342,7 @@ export function App() {
               <option value="fast">Fast</option>
               <option value="balanced">Balanced</option>
               <option value="high">High</option>
+              <option value="ultra">Ultra</option>
             </select>
           </label>
           <label className="instruction-field">

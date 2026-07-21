@@ -61,5 +61,5 @@ backend 诊断 Route（仅显式开启）/ CLI / benchmark / tests
 - `parsers/` 只保存纯解析逻辑，不调用模型或决定流程。
 - `states/` 不保存长期数据、数据库连接、对象存储客户端或 Gateway 实例。
 - `memory/` 只依赖 `BaseStore` 接口；Backend 创建/关闭具体 saver、store 和 psycopg pool。
-- 跨多个 ShaderForge 能力的组合优先使用 `shaderforge.public`；需要精确类型或聚焦依赖时，只从 `shaderforge.analysis`、`contracts`、`evaluation`、`generation`、`rendering`、`store`、`validation` 等 typed 子包公共根导入，不越过其 `__init__.py` 依赖私有实现文件。
+- 跨多个 ShaderForge 能力的组合优先使用 `shaderforge.public`；需要精确类型或聚焦依赖时，只从 `shaderforge.analysis`、`compiler`、`contracts`、`evaluation`、`generation`、`genome`、`intent`、`rendering`、`seeding`、`store`、`validation` 等 typed 子包公共根导入，不越过其 `__init__.py` 依赖私有实现文件。
 - `ShaderForge Store` 在本层专指 `LocalArtifactStore` 和 run 级 `RunArtifactStore`；它不包含 Memory 使用的 LangGraph `BaseStore`，也不包含管理 LabRun/步骤/Artifact 索引和访问策略的 `NodeLabStore`。

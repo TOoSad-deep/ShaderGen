@@ -385,6 +385,13 @@ async def test_process_store_records_v1_request_stages_and_current_best() -> Non
         generation_mode="procedural_v1",
         quality_preset="high",
         instruction="保留左上高光",
+        runtime_policy={
+            "schema_version": "png_to_shader_runtime_policy_v2",
+            "config_sha256": "a" * 64,
+            "profile": "high",
+            "budget": {"max_model_calls": 12},
+            "acceptance": {"quality_threshold": 0.12},
+        },
     )
     await record_shader_generation_success(
         pool,
@@ -418,4 +425,6 @@ async def test_process_store_records_v1_request_stages_and_current_best() -> Non
     assert "target_measured" in serialized
     assert "current_best_updated" in serialized
     assert "candidate-0002" in serialized
+    assert "png_to_shader_runtime_policy_v2" in serialized
+    assert '"max_model_calls":12' in serialized
     assert "run_finalized" in serialized

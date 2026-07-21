@@ -39,12 +39,19 @@ def _feature_row(feature_id: str) -> str:
     raise AssertionError(f"docs/FEATURES.md 缺少 {feature_id} 行。")
 
 
-def test_feature_list_keeps_v1_as_the_only_active_pipeline() -> None:
+def test_feature_list_keeps_f03_as_the_only_active_pipeline() -> None:
+    f02 = _feature_row("F02")
+    f03 = _feature_row("F03")
     f09 = _feature_row("F09")
 
+    assert "Intent IR" in f02
+    assert "| passing |" in f02
+    assert "DSL" in f03 and "Renderer" in f03
+    assert "| active |" in f03
     assert "PNG" in f09
     assert "current_best" in f09
-    assert "| active |" in f09
+    assert "| blocked |" in f09
+    assert "解除条件" in f09
 
 
 def test_progress_is_bounded_current_handoff() -> None:
@@ -352,6 +359,45 @@ flowchart TD
 
     assert any(
         "Mermaid 节点与代码不一致" in error and "多余=rogue" in error
+        for error in docs_check.ERRORS
+    )
+
+
+def test_docs_check_detects_development_builder_edge_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    docs_check = _load_docs_check("docs_check_development_builder")
+    graph_root = tmp_path / "src/agent/app/graphs"
+    graph_root.mkdir(parents=True)
+    (graph_root / "sample_builder.py").write_text(
+        "\n".join(
+            (
+                "# 图（故意与 Mermaid 漂移）",
+                'graph.add_node("alpha", fn)',
+                'graph.add_node("beta", fn)',
+                'graph.add_edge("alpha", "beta")',
+            )
+        ),
+        encoding="utf-8",
+    )
+    (graph_root / "ARCHITECTURE.md").write_text(
+        """<!-- graph-diagram:sample_builder:start -->
+```mermaid
+flowchart TD
+alpha[alpha]
+beta[beta]
+```
+<!-- graph-diagram:sample_builder:end -->
+""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(docs_check, "ROOT", tmp_path)
+    docs_check.ERRORS.clear()
+
+    docs_check._check_graph_visualizations()
+
+    assert any(
+        "sample_builder Mermaid 直接边与代码不一致" in error
         for error in docs_check.ERRORS
     )
 

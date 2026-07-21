@@ -39,10 +39,14 @@ SHADERFORGE_PUBLIC_IMPORT_ROOTS = frozenset(
         "shaderforge.public",
         "shaderforge.analysis",
         "shaderforge.benchmark",
+        "shaderforge.compiler",
         "shaderforge.contracts",
         "shaderforge.evaluation",
         "shaderforge.generation",
+        "shaderforge.genome",
+        "shaderforge.intent",
         "shaderforge.rendering",
+        "shaderforge.seeding",
         "shaderforge.store",
         "shaderforge.validation",
     }
@@ -168,9 +172,21 @@ def _check_feature_state_machine() -> None:
     _require("| passing |" in h02, "H02 三项 Harness 门禁通过后必须保持 passing。")
     _require("未调用真实模型" in h02, "H02 evidence 必须明确未调用真实模型。")
 
+    f02 = _feature_row("F02")
+    _require("Intent IR" in f02, "F02 需要描述 V2.1 Intent 主链路。")
+    _require("| passing |" in f02, "V2.1 门禁完成后 F02 必须保持 passing。")
+
+    f03 = _feature_row("F03")
+    _require("DSL" in f03 and "Renderer" in f03, "F03 需要描述 V2.2 生成主链路。")
+    _require("| active |" in f03, "V2.2 实施期间 F03 必须保持唯一 active。")
+
     f09 = _feature_row("F09")
     _require("PNG" in f09 and "current_best" in f09, "F09 需要描述 V1 主链路。")
-    _require("| active |" in f09, "F09 在质量门禁通过前必须保持 active。")
+    _require("| blocked |" in f09, "F09 在新质量门禁前必须保持 blocked。")
+    _require(
+        "解除条件" in f09 and "独立" in f09,
+        "F09 blocked evidence 必须记录解除条件和独立盲评。",
+    )
 
 
 def _check_progress_handoff() -> None:
@@ -454,7 +470,10 @@ def _check_graph_visualizations() -> None:
     architecture = _read("src/agent/app/graphs/ARCHITECTURE.md")
     graph_root = ROOT / "src/agent/app/graphs"
 
-    for path in sorted(graph_root.glob("*_graph.py")):
+    graph_sources = sorted(
+        {*graph_root.glob("*_graph.py"), *graph_root.glob("*_builder.py")}
+    )
+    for path in graph_sources:
         relative_path = str(path.relative_to(ROOT))
         source = _read(relative_path)
         _require("# 图（" in source, f"{relative_path} 缺少 Builder 上方的 ASCII 图。")

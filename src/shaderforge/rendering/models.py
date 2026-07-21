@@ -46,8 +46,16 @@ class RendererMetadata:
     glsl_version: str
     gl_vendor: str
     gl_renderer: str
+    webgl_context_kind: str
+    canvas_alpha: bool
+    canvas_antialias: bool
+    canvas_depth: bool
+    canvas_stencil: bool
+    premultiplied_alpha: bool
+    preserve_drawing_buffer: bool
+    canvas_clear_color_rgba: tuple[float, float, float, float]
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         """返回普通字典."""
         return asdict(self)
 

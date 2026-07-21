@@ -8,6 +8,10 @@
 - `png_to_shader_v1/model/`：VisualAnalysis、三模式 ShaderAuthor、VisualCritic、结构化输出和有界模型预算包装器。它只依赖 Gateway/业务契约，不运行 Renderer、Evaluator、Selector 或 Artifact Store。
 - `png_to_shader_v1/deterministic/`：Context、运行准备、候选物化、证据校验、真实 WebGL1 渲染、确定性评分、current_best 选择/复核、finalize 和策略晋升。
 - `png_to_shader_v1/integrations/node_lab/`：V1 Node 向通用 Node Lab 暴露的 Provider；`registry.py` 维护 descriptor，`deterministic.py` / `model.py` 只做 Lab JSON/Artifact 与生产 callable 的边界适配。Node Lab 内核不导入具体 Node。
+- `png_to_shader_v2/runtime.py`：V2.3 Graph 与 Node Lab 共用的 production node factory、22 个稳定 node id 及显式 run-scoped 依赖组合根；默认不调用模型、Renderer、production admission 或 Memory promotion。
+- V2 runtime 在 candidate-attempt 开始时冻结 `attempt_id + target_hypothesis_hash + semantic_genome_hash`；compile/render/evaluate/materialize 任一失败都物化正式 `CandidateAttemptRecord` 和至少一项 typed 阶段错误 evidence，不再写临时 JSON payload。Renderer 的 request receipt、每次 call ordinal/outcome evidence 与最终 Candidate provenance 形成从 Candidate root 可恢复的闭包。
+- V2 promotion 唯一路径先恢复 typed Candidate 与 sealed runtime structure input，再执行 `decide_trusted_runtime_admission()`；只有 `status=admitted` 才调用注入的 sink。development/Node Lab 默认关闭该开关。
+- `png_to_shader_v2/integrations/node_lab/`：V2 Provider 精确覆盖上述 22 个 production node；fixture/mock/real 只改变 VisualInterpretation 注入边界，所有模式最终调用同一 production callable。V2 Artifact adapter 只接受完整 `ArtifactRefV2` 或本步骤新登记 ref，不从路径/payload 猜 schema。
 
 根目录 `nodes/__init__.py` 不导出 V1 实现，也不保留“看起来通用、实际绑定 V1 契约”的兼容模块。详细模块职责见 `png_to_shader_v1/ARCHITECTURE.md`。
 
@@ -30,6 +34,7 @@
 - Node factory 返回的 callable 同时是 Graph 与 Node Lab 的单节点调用 API。输入证据不变量（Author/provenance/GLSL、Candidate/hash、reference/measurements、best Artifact）必须由 Node 校验；Node Lab 只能适配 JSON/Artifact 形状，不能维护更严格或更宽松的平行业务规则。
 - V1 Graph 通过 `nodes/png_to_shader_v1/__init__.py` 使用稳定工厂；`model/` 和 `deterministic/` 的内部阶段 helper 不是 Graph Node。新增内部模块时必须纳入 Node Lab 递归源码指纹和架构边界扫描，不保留旧根级兼容入口。
 - 新增生产 Graph Node 时，同步在同一功能命名空间的 `integrations/node_lab` 登记 descriptor 和 binding，但禁止修改 `agent.app.lab` 或 Node Lab Service。只消费/返回 JSON-safe State 的 Node 优先用 `DirectNodeExecutor`；只有需要大对象 Artifact 化、依赖注入或输出安全投影时才写专用 Adapter。Graph 节点集合与 Provider descriptor 的一致性属于必跑测试。
+- V2 Node Lab 固定关闭 `production_admission_enabled`、真实 State committer 和项目 Memory promotion；Artifact 写入只落入当前 LabRun，Renderer 每个 render step 由 production node 在 `finally` 中关闭。`real` Interpretation 只有服务端 `real_model_enabled` 与步骤 `allow_model_call` 同时显式开启且注入真实 provider 才可执行；fixture/mock 永不复用真实 provider。
 - 策略晋升同时暴露无副作用的生产 preview Node；真实 Graph 晋升与 Node Lab preview 共用同一份已验证计划构造，不允许在 Lab 内重写摘要或门禁。
 - 两个以上 Node 复用的消息 helper 放入 `app/messages/`；reasoning 日志策略放入 `app/observability/`。
 - 不新增把分析、生成、测试和优化混在一起的 `mega_agent_node`。

@@ -1,0 +1,1244 @@
+<head>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #canvas {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            position: fixed;
+            position: relative;
+        }
+        
+        .error {
+            font-family: Consolas;
+            font-size: 1.2em;
+            color: black;
+            box-sizing: border-box;
+            background-color: lightcoral;
+            border-radius: 2px;
+            border-color: lightblue;
+            border-width: thin;
+            border-style: solid;
+            line-height: 1.4em;
+            cursor:pointer;
+        }
+        .error:hover {
+            color: black;
+            background-color: brown;
+            border-color: blue;
+        }
+        #message {
+            font-family: Consolas;
+            font-size: 1.2em;
+            color: #ccc;
+            background-color: black;
+            font-weight: bold;
+            z-index: 2;
+            position: absolute;
+        }
+
+        #dat_gui_container {
+            position: absolute;
+            left: 0px;   /* position inside relatively positioned parent */
+            top: 0px;
+            z-index: 3;   /* adjust as needed */
+        }
+
+        /* Pause Button Style */
+
+        .rec_base {
+            position: absolute;
+            border: none;
+            right: 0px;
+            padding: 26px;
+            text-align: center;
+            text-decoration: none;
+            font-size: 26px;
+            border-radius: 8px;
+            margin: 8px;
+            transform: translateX(0%);
+            z-index: 1;
+        }
+        .rec_base:nth-of-type(2) {
+            top: 60px;
+        }
+        
+        /* Screenshot Button Style */
+        
+        /* Record Button Style */
+
+        /* Reload Button Style */
+    </style>
+</head>
+<body>
+    <div id="message"></div>
+    <div id="dat_gui_container"></div>
+    <div id="container">
+        <!-- Pause Element -->
+    </div>
+    <!-- Screenshot Element -->
+    <!-- Record Element -->
+    <!-- Reload Element -->
+</body>
+<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.4.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/110/three.min.js"></script>
+<!-- Stats.js -->
+<script src='https://cdnjs.cloudflare.com/ajax/libs/stats.js/r16/Stats.min.js' onload="
+let stats = new Stats();
+compileTimePanel = stats.addPanel(new Stats.Panel('CT MS', '#ff8', '#221'));
+stats.showPanel(1);
+stats.domElement.style.removeProperty('top');
+stats.domElement.style.bottom = '0px';
+document.body.appendChild(stats.domElement);
+requestAnimationFrame(function loop() {
+    stats.update();
+    requestAnimationFrame(loop);
+});
+"></script>
+<!-- dat.gui -->
+<!-- CCapture.js -->
+
+<canvas id="canvas"></canvas>
+
+<!-- Shaders -->
+
+<script id='/Users/douwen/Documents/HUAWEl/Shader-Agent/ShaderGen/human_doc/1.glsl' type='x-shader/x-fragment'>
+uniform vec3        iResolution;
+uniform float       iTime;
+uniform float       iTimeDelta;
+uniform int         iFrame;
+uniform vec4        iDate;
+uniform vec3        iChannelResolution[10];
+uniform vec4        iMouse;
+uniform vec4        iMouseButton;
+uniform mat4        iViewMatrix;
+uniform sampler2D   iChannel0;
+uniform sampler2D   iChannel1;
+uniform sampler2D   iChannel2;
+uniform sampler2D   iChannel3;
+uniform sampler2D   iChannel4;
+uniform sampler2D   iChannel5;
+uniform sampler2D   iChannel6;
+uniform sampler2D   iChannel7;
+uniform sampler2D   iChannel8;
+uniform sampler2D   iChannel9;
+uniform sampler2D   iKeyboard;
+uniform float       iSampleRate;
+
+#define iGlobalTime iTime
+#define iGlobalFrame iFrame
+
+#define SHADER_TOY
+
+
+#line 1 0
+// 粉色圆形按钮 —— 纯程序化 GLSL，无贴图。可直接粘贴到 shadertoy.com 运行
+
+float gauss(float x, float s) { return exp(-x * x / (2.0 * s * s)); }
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord)
+{
+    // 圆的几何参数（取自原图）
+    vec2  center = vec2(0.5149, 0.4981) * iResolution.xy;  // y-up
+    float radius = 0.4213 * iResolution.y;
+
+    // uv 以圆半径为单位，y 向上
+    vec2 uv = (fragCoord - center) / radius;
+    float d = length(uv);
+    vec2 n = d > 1e-4 ? uv / d : vec2(0.0, 1.0);
+
+    // ---------- 背景：白色 + 柔和投影 ----------
+    vec3 col = vec3(1.0);
+    vec2 sq = (uv - vec2(0.05, -0.09)) * vec2(1.0, 1.08);
+    float sh = 1.0 - smoothstep(0.60, 1.10, length(sq));
+    col = mix(col, vec3(0.940, 0.884, 0.910), sh * 0.55);
+
+    // ---------- 基础竖向渐变（顶部深粉 → 底部浅粉）----------
+    float t = clamp(0.5 - 0.5 * uv.y, 0.0, 1.0);
+    float f = t * t * (3.0 - 2.0 * t);         // smoothstep 形衰减
+    vec3 topCol = vec3(0.984, 0.235, 0.424);   // #FB3C6C
+    vec3 botCol = vec3(0.996, 0.925, 0.960);   // #FEECF5
+    vec3 circle = mix(topCol, botCol, f);
+    circle *= 1.0 + 0.040 * uv.x;              // 光源略偏右
+
+    // ---------- 边缘：内圈细环 + 外侧深色包边 ----------
+    float ring  = gauss(d - 0.930, 0.024);
+    circle = mix(circle, circle * vec3(0.90, 0.60, 0.71), ring * 0.22);
+    float bevel = smoothstep(0.968, 0.998, d);
+    circle = mix(circle, circle * vec3(0.84, 0.50, 0.62), bevel * 0.60);
+
+    // ---------- 左上方弧形高光（约 11 点钟方向）----------
+    vec2 hdir = normalize(vec2(-0.57, 0.82));
+    float angH = acos(clamp(dot(n, hdir), -1.0, 1.0));
+    float c1 = gauss(d - 0.872, 0.055) * gauss(angH, 0.40);
+    float c2 = gauss(d - 0.890, 0.024) * gauss(angH, 0.20);
+    circle += vec3(1.0) * (c1 * 0.45 + c2 * 0.95);
+
+    // ---------- 右下方反光（细长弧形）----------
+    vec2 rdir = normalize(vec2(0.77, -0.64));
+    float angR = acos(clamp(dot(n, rdir), -1.0, 1.0));
+    float r1 = gauss(d - 0.800, 0.042) * gauss(angR, 0.26);
+    float r2 = gauss(d - 0.815, 0.020) * gauss(angR, 0.13);
+    circle += vec3(1.0, 0.99, 1.0) * (r1 * 0.42 + r2 * 0.75);
+
+    // ---------- 抗锯齿边缘合成 ----------
+    float aa = 2.2 / radius;
+    float alpha = 1.0 - smoothstep(1.0 - aa, 1.0, d);
+    col = mix(col, clamp(circle, 0.0, 1.0), alpha);
+
+    fragColor = vec4(col, 1.0);
+}
+void main() {
+    vec2 fragCoord = gl_FragCoord.xy;
+    mainImage(GLSL_FRAGCOLOR, fragCoord);
+}
+</script>
+
+<!-- FlyControls -->
+
+<script type="text/javascript">
+    window.ShaderToy = window.ShaderToy || {};
+    window.ShaderToy.SELF_SOURCE_ID = 65535;
+</script>
+
+<!-- Webview Modules -->
+<script type="text/javascript">
+(function (global) {
+    'use strict';
+
+    const root = global.ShaderToy = global.ShaderToy || {};
+
+    if (!root.env) {
+        root.env = {};
+    }
+
+    root.env.getVscodeApi = function () {
+        try {
+            if (typeof global.acquireVsCodeApi === 'function') {
+                return global.acquireVsCodeApi();
+            }
+        } catch {
+            // ignore
+        }
+        return undefined;
+    };
+
+    // Show fatal JS errors in the WebView to avoid a silent blank screen.
+    {
+        const showWebviewError = (title, err) => {
+            try {
+                const messageElement = global.document && global.document.getElementById
+                    ? global.document.getElementById('message')
+                    : undefined;
+                if (!messageElement) return;
+                const detail = (err && (err.stack || err.message))
+                    ? (err.stack || err.message)
+                    : String(err);
+                messageElement.innerText = `${title}\n${detail}`;
+            } catch {
+                // ignore
+            }
+        };
+
+        global.addEventListener('error', (event) => {
+            showWebviewError('WebView error', event && (event.error || event.message) ? (event.error || event.message) : event);
+        });
+
+        global.addEventListener('unhandledrejection', (event) => {
+            showWebviewError('Unhandled promise rejection', event && event.reason ? event.reason : event);
+        });
+    }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script type="text/javascript">
+(function (global) {
+    'use strict';
+
+    const root = global.ShaderToy = global.ShaderToy || {};
+
+    if (!root.glslError) {
+        const rewriters = [];
+
+        root.glslError = {
+            registerRewriter: function (fn) {
+                if (typeof fn === 'function') {
+                    rewriters.push(fn);
+                }
+            },
+            rewrite: function (info) {
+                for (const fn of rewriters) {
+                    try {
+                        const result = fn(info);
+                        if (result && typeof result === 'object') {
+                            return result;
+                        }
+                    } catch {
+                        // ignore
+                    }
+                }
+                return undefined;
+            }
+        };
+    }
+
+    // Back-compat: keep the historical name as the pipeline entry point.
+    // If something else defines it later, that's fine.
+    if (!global.shaderToyRewriteGlslError) {
+        global.shaderToyRewriteGlslError = function (info) {
+            try {
+                return root.glslError && root.glslError.rewrite
+                    ? root.glslError.rewrite(info)
+                    : undefined;
+            } catch {
+                return undefined;
+            }
+        };
+    }
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script type="text/javascript">
+(function (global) {
+    'use strict';
+
+    const root = global.ShaderToy = global.ShaderToy || {};
+    const SELF_SOURCE_ID = Number(root.SELF_SOURCE_ID);
+
+    if (!root.shaderCompile) {
+        root.shaderCompile = {};
+    }
+
+    // Central place for any #line / sentinel normalization.
+    root.shaderCompile.normalizeLineDirectives = function (source) {
+        if (!Number.isFinite(SELF_SOURCE_ID)) {
+            console.warn('ShaderToy: SELF_SOURCE_ID is not set; skipping #line normalization');
+            return source || '';
+        }
+
+        // Normalize our "self" sentinel source-id for compiles.
+        return (source || '').replace(new RegExp(`#line\\s+(\\d+)\\s+${SELF_SOURCE_ID}`, 'g'), '#line $1 0');
+    };
+
+    root.shaderCompile.prepareFragmentShader = function (source, glslUseVersion3) {
+        if (glslUseVersion3) {
+            return (
+                '#ifdef gl_FragColor\n' +
+                '#define GLSL_FRAGCOLOR gl_FragColor\n' +
+                '#else\n' +
+                'layout(location = 0) out highp vec4 layoutFragColor;\n' +
+                '#define gl_FragColor layoutFragColor\n' +
+                '#define GLSL_FRAGCOLOR layoutFragColor\n' +
+                '#endif\n' +
+                '#define texture2D texture\n' +
+                '#define textureCube texture\n' +
+                '\n' + (source || '')
+            );
+        }
+        return (
+            '#define GLSL_FRAGCOLOR gl_FragColor\n' +
+            '\n' + (source || '')
+        );
+    };
+
+    root.shaderCompile.prepareVertexShader = function (source, glslUseVersion3) {
+        if (!glslUseVersion3) {
+            throw new Error('Custom vertex shaders (#iVertex) require shader-toy.webglVersion = "WebGL2".');
+        }
+
+        return (
+            '#define texture2D texture\n' +
+            '#define textureCube texture\n' +
+            '\n' + (source || '')
+        );
+    };
+
+    const getCompileHeader = (glslUseVersion3) => {
+        // Keep header line count stable (2 lines) for easier line-offset mapping.
+        return glslUseVersion3
+            ? '#version 300 es\nprecision highp float;\n'
+            : '// shader-toy\nprecision highp float;\n';
+    };
+
+    root.shaderCompile.compileFragShader = function (gl, fsSource) {
+        const fs = gl.createShader(gl.FRAGMENT_SHADER);
+        const normalized = root.shaderCompile.normalizeLineDirectives(fsSource);
+        gl.shaderSource(fs, normalized);
+        gl.compileShader(fs);
+        if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+            const fragmentLog = gl.getShaderInfoLog(fs);
+            console.error('THREE.WebGLProgram: shader error: ', gl.getError(), 'gl.COMPILE_STATUS', null, null, null, null, fragmentLog);
+            return false;
+        }
+        return true;
+    };
+
+    root.shaderCompile.compileIncludeFragment = function (gl, fsSource, glslUseVersion3) {
+        const fs = gl.createShader(gl.FRAGMENT_SHADER);
+        const normalized = root.shaderCompile.normalizeLineDirectives(fsSource);
+        const header = getCompileHeader(glslUseVersion3);
+        const wrapped = `${header}${normalized || ''}\nvoid main() {}\n`;
+        gl.shaderSource(fs, wrapped);
+        gl.compileShader(fs);
+        if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+            const fragmentLog = gl.getShaderInfoLog(fs);
+            console.error('THREE.WebGLProgram: shader error: ', gl.getError(), 'gl.COMPILE_STATUS', null, null, null, null, fragmentLog);
+            return false;
+        }
+        return true;
+    };
+
+    root.shaderCompile.compileVertexShader = function (gl, vsSource, glslUseVersion3) {
+        const vs = gl.createShader(gl.VERTEX_SHADER);
+        const normalized = root.shaderCompile.normalizeLineDirectives(vsSource);
+        const header = getCompileHeader(glslUseVersion3);
+        const wrapped = `${header}${normalized || ''}`;
+        gl.shaderSource(vs, wrapped);
+        gl.compileShader(vs);
+        if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+            const vertexLog = gl.getShaderInfoLog(vs);
+            console.error('THREE.WebGLProgram: shader error: ', gl.getError(), 'gl.COMPILE_STATUS', null, null, null, null, vertexLog);
+            return false;
+        }
+        return true;
+    };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script type="text/javascript">
+(function (global) {
+    'use strict';
+
+    const root = global.ShaderToy = global.ShaderToy || {};
+    root.ui = root.ui || {};
+
+    // Intentionally empty for now.
+    // Future home for pause/screenshot/record/reload wiring.
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script type="text/javascript">
+(function (global) {
+    'use strict';
+
+    const root = global.ShaderToy = global.ShaderToy || {};
+    root.gl = root.gl || {};
+
+    root.gl.getContext = function (canvas, glslUseVersion3) {
+        let gl = null;
+        if (glslUseVersion3) {
+            gl = canvas.getContext('webgl2');
+        }
+        else {
+            gl = canvas.getContext('webgl2');
+            if (gl == null) {
+                gl = canvas.getContext('webgl', { antialias: true, preserveDrawingBuffer: true });
+            }
+        }
+
+        const isWebGL2 = gl != null && (typeof global.WebGL2RenderingContext !== 'undefined') && (gl instanceof global.WebGL2RenderingContext);
+        if (gl == null) {
+            const msg = glslUseVersion3
+                ? 'WebGL2 is required for shader-toy.webglVersion = "WebGL2", but it is not available in this WebView.'
+                : 'WebGL is not available in this WebView (cannot create webgl2/webgl context).';
+            try {
+                const messageElement = global.document && global.document.getElementById
+                    ? global.document.getElementById('message')
+                    : undefined;
+                if (messageElement) {
+                    messageElement.innerText = msg;
+                }
+            } catch {
+                // ignore
+            }
+            throw new Error(msg);
+        }
+
+        return { gl, isWebGL2 };
+    };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script type="text/javascript">
+(function (global) {
+    'use strict';
+
+    const root = global.ShaderToy = global.ShaderToy || {};
+    root.timeInput = root.timeInput || {};
+
+    // Intentionally empty for now.
+    // Future home for clock/date/mouse/resize handling.
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script type="text/javascript">
+(function (global) {
+    'use strict';
+
+    const root = global.ShaderToy = global.ShaderToy || {};
+    root.renderLoop = root.renderLoop || {};
+
+    // Intentionally empty for now.
+    // Future home for requestAnimationFrame render loop.
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+
+<script type="text/javascript">
+    let vscode = undefined;
+    if (typeof acquireVsCodeApi === 'function') {
+        vscode = acquireVsCodeApi();
+    }
+    var compileTimePanel;
+
+    let revealError = function(line, file) {
+        if (vscode) {
+            vscode.postMessage({
+                command: 'showGlslsError',
+                line: line,
+                file: file
+            });
+        }
+    };
+
+    let currentShader = {};
+    // Error Callback
+    (() => {
+        // Optional hook for feature extensions (e.g. WebGL2/iVertex) to rewrite
+        // compiler errors without forking the core error display logic.
+        // Expected signature:
+        //   window.shaderToyRewriteGlslError({ sid, lineNumber, file, error, currentShader })
+        // and return: { lineNumber?: number, file?: string, error?: string } | undefined
+        const rewriteGlslError = (typeof window !== 'undefined' && window.shaderToyRewriteGlslError)
+            ? window.shaderToyRewriteGlslError
+            : undefined;
+    
+        const consoleError = console.error ? console.error.bind(console) : undefined;
+        console.error = function () {
+            try {
+                // The shader info log can appear in different argument positions.
+                let rawErrors = undefined;
+                for (let i = arguments.length - 1; i >= 0; i--) {
+                    const v = arguments[i];
+                    if (typeof v === 'string' && v.indexOf('ERROR:') >= 0) {
+                        rawErrors = v;
+                        break;
+                    }
+                }
+    
+                if (rawErrors !== undefined && currentShader) {
+                    let errorRegex = /ERROR:\s*(\d+):(\d+):\W(.*?)(?:\n|$)/g;
+                    let match;
+    
+                    let message = '';
+                    const diagnosticsByFile = {};
+    
+                    while (match = errorRegex.exec(rawErrors)) {
+                        const sid = Number(match[1]);
+                        const rawLine = Number(match[2]);
+                        let error = match[3];
+                        let file = (sid === 0)
+                            ? currentShader.File
+                            : ((Array.isArray(commonIncludes) && commonIncludes[sid - 1] && commonIncludes[sid - 1].File) ? commonIncludes[sid - 1].File : currentShader.File);
+                        let lineNumber = rawLine;
+    
+                        if (typeof rewriteGlslError === 'function') {
+                            const rewritten = rewriteGlslError({ sid, lineNumber, file, error, currentShader });
+                            if (rewritten && typeof rewritten === 'object') {
+                                if (rewritten.lineNumber !== undefined) lineNumber = rewritten.lineNumber;
+                                if (rewritten.file !== undefined) file = rewritten.file;
+                                if (rewritten.error !== undefined) error = rewritten.error;
+                            }
+                        }
+    
+                        if (typeof lineNumber === 'number' && lineNumber >= 1) {
+                            if (diagnosticsByFile[file] === undefined) {
+                                diagnosticsByFile[file] = [];
+                            }
+                            diagnosticsByFile[file].push({ line: lineNumber, message: error });
+    
+                            let lineHighlight = "<a class='error' unselectable onclick='revealError(" + lineNumber + ", " + JSON.stringify(file) + ")'>Line " + lineNumber + "</a>";
+                            message += '<li>' + lineHighlight + ': ' + error + ' <span>(' + file + ')</span></li>';
+                        }
+                        else {
+                            message += '<li>' + error + ' <span>(' + file + ')</span></li>';
+                        }
+                    }
+    
+                    if (vscode !== undefined) {
+                        for (const filename in diagnosticsByFile) {
+                            vscode.postMessage({
+                                command: 'showGlslDiagnostic',
+                                type: 'error',
+                                diagnosticBatch: {
+                                    filename: filename,
+                                    diagnostics: diagnosticsByFile[filename]
+                                }
+                            });
+                        }
+                    }
+    
+                    $('#message').append('<h3>Shader failed to compile - ' + currentShader.Name + ' </h3>');
+                    $('#message').append('<ul>');
+                    $('#message').append(message);
+                    $('#message').append('</ul>');
+                }
+            } catch (e) {
+                // Ignore and fall through.
+            }
+    
+            if (consoleError) {
+                consoleError.apply(console, arguments);
+            }
+        };
+    })();
+
+    // Development feature: Output warnings from third-party libraries
+    // console.warn = function (message) {
+    //     $("#message").append(message + '<br>');
+    // };
+
+    let clock = new THREE.Clock();
+    let pausedTime = 0.0;
+    let deltaTime = 0.0;
+    let startingTime = 0;
+    let time = startingTime;
+
+    let date = new THREE.Vector4();
+
+    let updateDate = function() {
+        let today = new Date();
+        date.x = today.getFullYear();
+        date.y = today.getMonth();
+        date.z = today.getDate();
+        date.w = today.getHours() * 60 * 60 
+            + today.getMinutes() * 60
+            + today.getSeconds()
+            + today.getMilliseconds() * 0.001;
+    };
+    updateDate();
+
+    let paused = false;
+    let forceRenderOneFrame = paused;
+    let pauseButton = document.getElementById('pause-button');
+    if (pauseButton) {
+        pauseButton.checked = paused;
+        pauseButton.onclick = function(){
+            paused = pauseButton.checked;
+            if (!paused) {
+                // Audio Resume
+                pausedTime += clock.getDelta();
+            }
+            else {
+                // Audio Pause
+            }
+
+            if (vscode !== undefined) {
+                vscode.postMessage({
+                    command: 'setPause',
+                    paused: paused
+                });
+            }
+        };
+    }
+    
+    {
+        let screenshotButton = document.getElementById("screenshot");
+        if (screenshotButton) {
+            screenshotButton.addEventListener('click', saveScreenshot);
+        }
+    }
+    
+    {
+        let recordButton = document.getElementById("record");
+        if (recordButton) {
+            recordButton.addEventListener('click', recordAction);
+        }
+    }
+    
+    {
+        let reloadButton = document.getElementById("reload");
+        if (reloadButton) {
+            reloadButton.addEventListener('click', reloadWebview);
+        }
+    }
+    
+    window.addEventListener('message', event => {
+        const message = event.data; // The JSON data our extension sent
+        switch (message.command) {
+            case 'pause':
+                if (pauseButton) {
+                    pauseButton.checked = !pauseButton.checked;
+                }
+                paused = !paused;
+                if (!paused) {
+                    // Audio Resume
+                    pausedTime += clock.getDelta();
+                }
+                else {
+                    // Audio Pause
+                }
+
+                if (vscode !== undefined) {
+                    vscode.postMessage({
+                        command: 'setPause',
+                        paused: paused
+                    });
+                }
+                break;
+            case 'screenshot':
+                saveScreenshot();
+                break;
+        }
+    });
+
+    // GLSL version selection
+    // Values: 'Default' | 'WebGL2'
+    let glslVersionSetting = 'Default';
+    if (glslVersionSetting !== 'Default' && glslVersionSetting !== 'WebGL2') {
+        glslVersionSetting = 'Default';
+    }
+    let glslUseVersion3 = (glslVersionSetting === 'WebGL2');
+
+    function prepareFragmentShader(source) {
+        if (window.ShaderToy && window.ShaderToy.shaderCompile && window.ShaderToy.shaderCompile.prepareFragmentShader) {
+            return window.ShaderToy.shaderCompile.prepareFragmentShader(source, glslUseVersion3);
+        }
+        return source;
+    }
+
+    function prepareVertexShader(source) {
+        if (window.ShaderToy && window.ShaderToy.shaderCompile && window.ShaderToy.shaderCompile.prepareVertexShader) {
+            return window.ShaderToy.shaderCompile.prepareVertexShader(source, glslUseVersion3);
+        }
+        return source;
+    }
+
+    let canvas = document.getElementById('canvas');
+    let glContextInfo = (window.ShaderToy && window.ShaderToy.gl && window.ShaderToy.gl.getContext)
+        ? window.ShaderToy.gl.getContext(canvas, glslUseVersion3)
+        : { gl: canvas.getContext('webgl2') || canvas.getContext('webgl'), isWebGL2: false };
+    let gl = glContextInfo.gl;
+    let isWebGL2 = glContextInfo.isWebGL2;
+    const WEBGL2_EXTRA_SHADER_LINES = 16;
+    let supportsFloatFramebuffer = (gl.getExtension('EXT_color_buffer_float') != null) || (gl.getExtension('WEBGL_color_buffer_float') != null);
+    let supportsHalfFloatFramebuffer = (gl.getExtension('EXT_color_buffer_half_float') != null);
+    let framebufferType = THREE.UnsignedByteType;
+    if (supportsFloatFramebuffer) framebufferType = THREE.FloatType;
+    else if (supportsHalfFloatFramebuffer) framebufferType = THREE.HalfFloatType;
+
+    let renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, context: gl, preserveDrawingBuffer: true });
+    let resolution = forceAspectRatio(window.innerWidth, window.innerHeight);
+    let mouse = new THREE.Vector4(-1, -1, -1, -1);
+    let mouseButton = new THREE.Vector4(0, 0, 0, 0);
+    let normalizedMouse = new THREE.Vector2(0, 0);
+    let frameCounter = 0;
+    let recorder = null;
+    let recordingTimeout = null;
+    let offlineRecording = false;
+
+    // Audio Init
+    const audioContext = {
+        sampleRate: 0
+    };
+    // Audio Resume
+
+    let buffers = [];
+    // Buffers
+    buffers.push({
+        Name: "/Users/douwen/Documents/HUAWEl/Shader-Agent/ShaderGen/human_doc/1.glsl",
+        File: "/Users/douwen/Documents/HUAWEl/Shader-Agent/ShaderGen/human_doc/1.glsl",
+        LineOffset: 134,
+        VertexFile: undefined,
+        VertexLineOffset: undefined,
+        VertexShaderElementId: undefined,
+        Target: null,
+        ChannelResolution: Array(10).fill(new THREE.Vector3(0,0,0)),
+        PingPongTarget: null,
+        PingPongChannel: 0,
+        Dependents: [],
+        Shader: new THREE.ShaderMaterial({
+            glslVersion: glslUseVersion3 ? THREE.GLSL3 : THREE.GLSL1,
+            vertexShader: undefined,
+            fragmentShader: prepareFragmentShader(document.getElementById("/Users/douwen/Documents/HUAWEl/Shader-Agent/ShaderGen/human_doc/1.glsl").textContent),
+            depthWrite: false,
+            depthTest: false,
+            uniforms: {
+                iResolution: { type: 'v3', value: resolution },
+                iTime: { type: 'f', value: 0.0 },
+                iTimeDelta: { type: 'f', value: 0.0 },
+                iFrame: { type: 'i', value: 0 },
+                iMouse: { type: 'v4', value: mouse },
+                iMouseButton: { type: 'v2', value: mouseButton },
+                iViewMatrix: {type: 'm44', value: new THREE.Matrix4() },
+                iChannelResolution: { type: 'v3v', value: Array(10).fill(new THREE.Vector3(0,0,0)) },
+    
+                iDate: { type: 'v4', value: date },
+                iSampleRate: { type: 'f', value: audioContext.sampleRate },
+    
+                iChannel0: { type: 't' },
+                iChannel1: { type: 't' },
+                iChannel2: { type: 't' },
+                iChannel3: { type: 't' },
+                iChannel4: { type: 't' },
+                iChannel5: { type: 't' },
+                iChannel6: { type: 't' },
+                iChannel7: { type: 't' },
+                iChannel8: { type: 't' },
+                iChannel9: { type: 't' },
+    
+                resolution: { type: 'v2', value: resolution },
+                time: { type: 'f', value: 0.0 },
+                mouse: { type: 'v2', value: normalizedMouse },
+            }
+        })
+    });
+    let commonIncludes = [];
+    // Includes
+    
+
+    // WebGL2 inserts more lines into the shader
+    if (isWebGL2) {
+        for (let buffer of buffers) {
+            buffer.LineOffset += WEBGL2_EXTRA_SHADER_LINES;
+            if (buffer.VertexLineOffset !== undefined) {
+                buffer.VertexLineOffset += WEBGL2_EXTRA_SHADER_LINES;
+            }
+        }
+    }
+
+    // Keyboard Init
+    
+    // Uniforms Init
+    // Uniforms Update
+
+    let texLoader = new THREE.TextureLoader();
+    // Texture Init
+    
+
+    let scene = new THREE.Scene();
+    let quad = new THREE.Mesh(
+        new THREE.PlaneGeometry(resolution.x, resolution.y),
+        null
+    );
+    scene.add(quad);
+
+    let controlState = new THREE.Camera();
+    controlState.position.set(0,0,0);
+    controlState.quaternion.set(0,0,0,1);
+    scene.add(controlState);
+
+    let flyControls = undefined;
+    if (typeof FlyControls === 'function') {
+        flyControls = new FlyControls(controlState, renderer.domElement, vscode);
+        flyControls.movementSpeed = 1;
+        flyControls.domElement = renderer.domElement;
+        flyControls.rollSpeed = Math.PI / 24;
+        flyControls.autoForward = false;
+        flyControls.dragToLook = true;
+    }
+
+    let camera = new THREE.OrthographicCamera(-resolution.x / 2.0, resolution.x / 2.0, resolution.y / 2.0, -resolution.y / 2.0, 1, 1000);
+    camera.position.set(0, 0, 10);
+
+    // Run every shader once to check for compile errors
+    let compileTimeStart = performance.now();
+    let failed=0;
+    const failedBufferNames = new Set();
+    for (let include of commonIncludes) {
+        currentShader = {
+            Name: include.Name,
+            File: include.File,
+            // add for wrapper lines inserted by compileFragShader
+            LineOffset: 27 + 2 + (isWebGL2 ? WEBGL2_EXTRA_SHADER_LINES : 0)
+        };
+        // Test Compile Included Files
+        // bail if there is an error found in the include script
+        if(compileFragShader(gl, document.getElementById(include.Name).textContent) == false) {
+            throw Error(`Failed to compile ${include.Name}`);
+        }
+    }
+
+    for (let buffer of buffers) {
+        if (buffer.VertexShaderElementId !== undefined) {
+            currentShader = {
+                Name: buffer.Name + ' (vertex)',
+                File: buffer.VertexFile,
+                LineOffset: buffer.VertexLineOffset
+            };
+
+            const vertexSource = prepareVertexShader(document.getElementById(buffer.VertexShaderElementId).textContent);
+            if (!compileVertShader(gl, vertexSource)) {
+                failed++;
+                failedBufferNames.add(buffer.Name);
+                continue;
+            }
+        }
+        currentShader = {
+            Name: buffer.Name,
+            File: buffer.File,
+            LineOffset: buffer.LineOffset
+        };
+        quad.material = buffer.Shader;
+        renderer.setRenderTarget(buffer.Target);
+        renderer.render(scene, camera);
+    }
+    currentShader = {};
+    let compileTimeEnd = performance.now();
+    let compileTime = compileTimeEnd - compileTimeStart;
+    if (compileTimePanel !== undefined) {
+        for (let i = 0; i < 200; i++) {
+            compileTimePanel.update(compileTime, 200);
+        }
+    }
+
+    computeSize();
+    render();
+
+    function addLineNumbers( string ) {
+        let lines = string.split( '\\n' );
+        for ( let i = 0; i < lines.length; i ++ ) {
+            lines[ i ] = ( i + 1 ) + ': ' + lines[ i ];
+        }
+        return lines.join( '\\n' );
+    }
+
+    function compileFragShader(gl, fsSource) {
+        if (window.ShaderToy && window.ShaderToy.shaderCompile && window.ShaderToy.shaderCompile.compileIncludeFragment) {
+            return window.ShaderToy.shaderCompile.compileIncludeFragment(gl, fsSource, glslUseVersion3);
+        }
+        return false;
+    }
+
+    function compileVertShader(gl, vsSource) {
+        if (window.ShaderToy && window.ShaderToy.shaderCompile && window.ShaderToy.shaderCompile.compileVertexShader) {
+            return window.ShaderToy.shaderCompile.compileVertexShader(gl, vsSource, glslUseVersion3);
+        }
+        return false;
+    }
+
+    function render() {
+        requestAnimationFrame(render);
+        if (!forceRenderOneFrame) {
+            // Pause Whole Render
+            if (paused) return;
+        }
+        forceRenderOneFrame = false;
+
+        // Advance Time
+        deltaTime = clock.getDelta();
+        time = startingTime + clock.getElapsedTime() - pausedTime;
+        if (vscode !== undefined) {
+            vscode.postMessage({
+                command: 'updateTime',
+                time: time
+            });
+        }
+        updateDate();
+        
+        if(flyControls)
+        {
+            flyControls.update(0.1);
+        }
+
+        // Audio Update
+
+        for (let buffer of buffers) {
+            if (failedBufferNames.has(buffer.Name)) {
+                continue;
+            }
+            buffer.Shader.uniforms['iResolution'].value = resolution;
+            buffer.Shader.uniforms['iTimeDelta'].value = deltaTime;
+            buffer.Shader.uniforms['iTime'].value = time;
+            buffer.Shader.uniforms['iFrame'].value = frameCounter;
+            buffer.Shader.uniforms['iMouse'].value = mouse;
+            buffer.Shader.uniforms['iMouseButton'].value = mouseButton;
+
+            buffer.Shader.uniforms['iViewMatrix'].value = controlState.matrixWorld;
+
+            buffer.Shader.uniforms['resolution'].value = resolution;
+            buffer.Shader.uniforms['time'].value = time;
+            buffer.Shader.uniforms['mouse'].value = normalizedMouse;
+
+            quad.material = buffer.Shader;
+            renderer.setRenderTarget(buffer.Target);
+            renderer.render(scene, camera);
+        }
+        
+        // Uniforms Update
+
+        // Keyboard Update
+
+        if (mouse.w > 0.0) {
+            mouse.w = -mouse.w;
+            updateMouse();
+        }
+
+        for (let buffer of buffers) {
+            if (buffer.PingPongTarget) {
+                [buffer.PingPongTarget, buffer.Target] = [buffer.Target, buffer.PingPongTarget];
+                buffer.Shader.uniforms[`iChannel${buffer.PingPongChannel}`].value = buffer.PingPongTarget.texture;
+                for (let dependent of buffer.Dependents) {
+                    const dependentBuffer = buffers[dependent.Index];
+                    dependentBuffer.Shader.uniforms[`iChannel${dependent.Channel}`].value = buffer.Target.texture;
+                }
+            }
+        }
+
+        if (offlineRecording) {
+            recorder.capture(canvas);
+        }
+
+        frameCounter++;
+    }
+    function forceAspectRatio(width, height) {
+        // Forced aspect ratio
+        let forcedAspects = [0,0];
+        let forcedAspectRatio = forcedAspects[0] / forcedAspects[1];
+        let aspectRatio = width / height;
+
+        if (forcedAspectRatio <= 0 || !isFinite(forcedAspectRatio)) {
+            let resolution = new THREE.Vector3(width, height, 1.0);
+            return resolution;
+        }
+        else if (aspectRatio < forcedAspectRatio) {
+            let resolution = new THREE.Vector3(width, Math.floor(width / forcedAspectRatio), 1);
+            return resolution;
+        }
+        else {
+            let resolution = new THREE.Vector3(Math.floor(height * forcedAspectRatio), height, 1);
+            return resolution;
+        }
+    }
+    function computeSize() {
+        
+        let forcedResolutions = [0,0];
+        let zoom = forcedResolutions[0] > 0 ? 1.0/window.devicePixelRatio : 1.0;
+        canvas.style.zoom = zoom;
+
+        // Compute forced aspect ratio and align canvas
+        resolution = forceAspectRatio(window.innerWidth, window.innerHeight);
+        canvas.style.left = `${(window.innerWidth - resolution.x*zoom) / 2}px`;
+        canvas.style.top = `${(window.innerHeight - resolution.y*zoom) / 2}px`;
+
+        for (let buffer of buffers) {
+            if (buffer.Target) {
+                buffer.Target.setSize(resolution.x, resolution.y);
+            }
+            if (buffer.PingPongTarget) {
+                buffer.PingPongTarget.setSize(resolution.x, resolution.y);
+            }
+        }
+        renderer.setSize(resolution.x, resolution.y, false);
+        
+        // Update Camera and Mesh
+        quad.geometry = new THREE.PlaneGeometry(resolution.x, resolution.y);
+        camera.left = -resolution.x / 2.0;
+        camera.right = resolution.x / 2.0;
+        camera.top = resolution.y / 2.0;
+        camera.bottom = -resolution.y / 2.0;
+        camera.updateProjectionMatrix();
+
+        // Reset iFrame on resize for shaders that rely on first-frame setups
+        frameCounter = 0;
+    }
+    function saveScreenshot() {
+        let doSaveScreenshot = () => {
+            renderer.domElement.toBlob(function(blob){
+                let a = document.createElement('a');
+                let url = URL.createObjectURL(blob);
+                a.href = url;
+                a.download = 'shadertoy.png';
+                a.click();
+            }, 'image/png', 1.0);
+        };
+
+        let forcedScreenshotResolution = [0,0];
+        if (forcedScreenshotResolution[0] <= 0 || forcedScreenshotResolution[1] <= 0) {
+            renderer.render(scene, camera);
+            doSaveScreenshot();
+        }
+        else {
+            renderer.setSize(forcedScreenshotResolution[0], forcedScreenshotResolution[1], false);
+            
+            for (let buffer of buffers) {
+                buffer.Shader.uniforms['iResolution'].value = new THREE.Vector3(forcedScreenshotResolution[0], forcedScreenshotResolution[1], 1);
+                buffer.Shader.uniforms['resolution'].value = new THREE.Vector3(forcedScreenshotResolution[0], forcedScreenshotResolution[1], 1);
+
+                quad.material = buffer.Shader;
+                renderer.setRenderTarget(buffer.Target);
+                renderer.render(scene, camera);
+            }
+
+            doSaveScreenshot();
+            renderer.setSize(resolution.x, resolution.y, false);
+        }
+    }
+    function recordAction() {
+        if (typeof CCapture !== 'undefined') {
+            recordCCapture();
+        } else {
+            recordMediaRecorder();
+        }
+    }
+    function recordCCapture() {
+        let maxDuration = 0;
+        let targetFrameRate = 30;
+        let format = "webm";
+        let quality = 80;
+        let extension = format == "png" || format == "jpg" ? "tar" : format;
+
+        let recordButton = document.getElementById("record");
+        if (recorder == null) {
+            recordButton.classList.add('recording');
+
+            offlineRecording = true;
+            recorder = new CCapture( {
+                format: format,
+                quality: quality,
+                timeLimit: maxDuration,
+                framerate: targetFrameRate,
+            } );
+            recorder.start();
+        }
+        else {
+            recordButton.classList.remove('recording');
+
+            recorder.stop();
+            recorder.save((blob) => {
+                let a = document.createElement('a');
+                let url = URL.createObjectURL(blob);
+                a.href = url;
+                a.download = `shadertoy.${extension}`;
+                a.click();
+            } );
+            recorder = null;
+            offlineRecording = false;
+        }
+    }
+    function recordMediaRecorder() {
+        let recordButton = document.getElementById("record");
+        if (recordingTimeout != null) {
+            clearTimeout(recordingTimeout);
+            recordingTimeout = null;
+        }
+        if (recorder == null) {
+            recordButton.classList.add('recording');
+
+            let videoContainer = "webm";
+            let videoCodec = "vp8";
+            let maxDuration = 0;
+            let targetFrameRate = 30;
+
+            let stream = canvas.captureStream(targetFrameRate);
+            let recorderOptions = {
+                videoBitsPerSecond: 2500000,
+                mimeType: `video/${videoContainer};codecs=${videoCodec}`
+            };
+            recorder = new MediaRecorder(stream, recorderOptions);
+            recorder.start();
+            recorder.ondataavailable = function(evt) {
+                let a = document.createElement('a');
+                let url = URL.createObjectURL(evt.data);
+                a.href = url;
+                a.download = `shadertoy.${videoContainer}`;
+                a.click();
+            };
+
+            if (maxDuration > 0) {
+                recordingTimeout = setTimeout(() => {
+                    recordButton.classList.remove('recording');
+                    recorder.stop();
+                    recorder = null;
+                    recordingTimeout = null;
+                }, maxDuration*1000);
+            }
+        }
+        else {
+            recordButton.classList.remove('recording');
+
+            recorder.stop();
+            recorder = null;
+        }
+    }
+    function reloadWebview() {
+        if (vscode !== undefined) {
+            vscode.postMessage({ command: 'reloadWebview' });
+        }
+    }
+    function updateMouse() {
+        if (vscode !== undefined) {
+            vscode.postMessage({
+                command: 'updateMouse',
+                mouse: {
+                    x: mouse.x,
+                    y: mouse.y,
+                    z: mouse.z,
+                    w: mouse.w
+                },
+                normalizedMouse: {
+                    x: normalizedMouse.x,
+                    y: normalizedMouse.y
+                }
+            });
+        }
+    }
+    let dragging = false;
+    function updateNormalizedMouseCoordinates(clientX, clientY) {
+        let rect = canvas.getBoundingClientRect();
+        let mouseX = clientX - rect.left;
+        let mouseY = resolution.y - clientY - rect.top;
+
+        if (mouseButton.x + mouseButton.y != 0) {
+            mouse.x = mouseX;
+            mouse.y = mouseY;
+        }
+
+        normalizedMouse.x = mouseX / resolution.x;
+        normalizedMouse.y = mouseY / resolution.y;
+    }
+    canvas.addEventListener('mousemove', function(evt) {
+        updateNormalizedMouseCoordinates(evt.clientX, evt.clientY);
+        updateMouse();
+    }, false);
+    canvas.addEventListener('mousedown', function(evt) {
+        if (evt.button == 0)
+            mouseButton.x = 1;
+        if (evt.button == 2)
+            mouseButton.y = 1;
+
+        if (!dragging) {
+            updateNormalizedMouseCoordinates(evt.clientX, evt.clientY);
+            mouse.z = mouse.x;
+            mouse.w = mouse.y;
+            dragging = true
+        }
+
+        updateMouse();
+    }, false);
+    canvas.addEventListener('mouseup', function(evt) {
+        if (evt.button == 0)
+            mouseButton.x = 0;
+        if (evt.button == 2)
+            mouseButton.y = 0;
+
+        dragging = false;
+        mouse.z = -mouse.z;
+        mouse.w = -mouse.w;
+
+        updateMouse();
+    }, false);
+    window.addEventListener('resize', function() {
+        computeSize();
+    });
+
+    // Keyboard Callbacks
+</script>

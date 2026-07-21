@@ -28,6 +28,17 @@ def score() -> dict:
     }
 
 
+def policy_evidence(state: dict) -> dict:
+    return {
+        "runtime_policy_schema_version": state[
+            "runtime_policy_schema_version"
+        ],
+        "runtime_policy_sha256": state["runtime_policy_sha256"],
+        "budget_policy": state["budget_policy"],
+        "acceptance_policy": state["acceptance_policy"],
+    }
+
+
 class ArtifactGraph:
     def __init__(self, artifacts: LocalArtifactStore) -> None:
         self.artifacts = artifacts
@@ -39,7 +50,11 @@ class ArtifactGraph:
         run.write_json("final/metrics.json", score())
         run.write_json(
             "final/manifest.json",
-            {"project_id": state["project_id"], "run_id": state["run_id"]},
+            {
+                "project_id": state["project_id"],
+                "run_id": state["run_id"],
+                **policy_evidence(state),
+            },
         )
         return {
             "memory_status": "ephemeral",
@@ -52,6 +67,7 @@ class ArtifactGraph:
                 "visual_refinement_count": 0,
                 "render_width": 32,
                 "render_height": 24,
+                **policy_evidence(state),
             },
             "events": (
                 {
@@ -81,6 +97,7 @@ class UnscoredArtifactGraph:
                 "run_id": state["run_id"],
                 "score_breakdown": None,
                 "metrics_ref": None,
+                **policy_evidence(state),
             },
         )
         return {
@@ -96,6 +113,7 @@ class UnscoredArtifactGraph:
                 "visual_refinement_count": 0,
                 "render_width": 32,
                 "render_height": 24,
+                **policy_evidence(state),
             },
             "events": (
                 {
@@ -129,7 +147,7 @@ def test_api_runs_agent_service_and_serves_only_final_artifact(tmp_path: Path) -
             data={
                 "project_id": str(project_id),
                 "generation_mode": "procedural_v1",
-                "quality_preset": "fast",
+                "quality_preset": "ultra",
             },
         )
         render = client.get(generated.json()["final_render_url"])
@@ -142,6 +160,7 @@ def test_api_runs_agent_service_and_serves_only_final_artifact(tmp_path: Path) -
     assert generated.status_code == 200
     assert generated.json()["project_id"] == str(project_id)
     assert generated.json()["stop_reason"] == "quality_threshold_met"
+    assert generated.json()["quality_preset"] == "ultra"
     assert generated.json()["unscored_fallback"] is False
     assert render.status_code == 200
     assert render.content == b"server-png"

@@ -1,0 +1,31 @@
+{
+  "candidate_record_hash": "accf04137e9debaf9d8db5a6b16d42494bb8e9f26db61dab821b8fec2ec75e55",
+  "constraint_ids": [
+    "constraint_5ff943a45bd0f134c6ce8ddf98f09b2fe38528ac82251ce380762a667ae6416b",
+    "constraint_57a0e31703669e07b2f49f180eb80271cd692375dda0a8b93f3ad891c956f890"
+  ],
+  "constraint_set_hash": "0f60975281401b9da7e3d75f9c59189f2c4a01688172f015b319e1abde50c4fd",
+  "fixture_version": "png_to_shader_v2_golden_hashes_v3",
+  "genome_hashes": {
+    "hash_version": "genome_hash_v1",
+    "parameter_layout_hash": "e910b9ea7e742d12c6f879a54e88cbed92bb895039c79fb597e679d14d6edb6a",
+    "record_hash": "fd4378f18faff37b771cd3093bc7a5664e7d16c5a075d808153c61b2e587fe1f",
+    "semantic_genome_hash": "0f73f365b163615949a6e780238f74ae5daf4cfc0039016d1557f3dddaac857a",
+    "topology_hash": "63847a063a9fa87e2f49ce7b6c57f2f3bb3d1f097d558d52e579498757fe70c1"
+  },
+  "schema_sha256": {
+    "ArtifactRefV2": "4392c32fff679dc1ed9c267ae447d00c103fbb4bdb923e025d3cab3d07df0160",
+    "BudgetStateV2": "59da6fedb23bad1a703f45cf236cbd3e9aea59b0f6863b6d91bed5824d279457",
+    "CandidateAttemptRecord": "0439ae520d6fef21c2f0e6db3cecd43c86fc54bcfc3caf125de928b7c6b6fbe8",
+    "CandidateRecordV2": "4070ba5dca035a6997384c7db7b2c74f1ad5af183e83ae0eeae73e5f5c441f7c",
+    "Constraint": "79a1f553808e66a75a08d86062a7809699abfeb4741a93faeeea71b33eb68013",
+    "EffectGenome": "6358f8dab88b7715bbcb34bea848649828b2c82f5667be8e4239f7bdb57cc2ad",
+    "ParameterSpec": "667b99e927e4fea18e85d3464ee0b5829bd46867e2802dec606f55e8cd7a9353",
+    "PngToShaderV2State": "952045001b349162a75833008080a1e07739496aa3eaf9dfcb9f394787fde4c4",
+    "RequestConstraintSet": "86547b20a37ee6bea563d0963c97f95eaa248cf8c4a1f81f167e1f56b78485c5",
+    "TargetHypothesis": "f0e07e6cd0684606792554c560901fe7648a7757fc8e96db3ca04b9b531c6323",
+    "TargetMeasurementsV2": "f1c7e6230b486d4b299ae37aedeae7062414466bee3dc4c38fd070b3a5de0564"
+  },
+  "state_sha256": "42604913d89dd1b5a974e824eedb281575477cf1b53dede43acd3021f18fe2b7",
+  "target_hypothesis_hash": "8abea742c7b274380b885eb9c0878ec08d7a22b2e3c091a32adabea2ad8b7e1e"
+}

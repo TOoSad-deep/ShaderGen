@@ -41,6 +41,7 @@ class QualityPreset(str, Enum):
     FAST = "fast"
     BALANCED = "balanced"
     HIGH = "high"
+    ULTRA = "ultra"
 
 
 @dataclass(frozen=True)
@@ -182,6 +183,13 @@ QUALITY_PRESETS = MappingProxyType(
             max_compile_repairs=2,
             max_model_calls=12,
             max_wall_time_seconds=600,
+        ),
+        QualityPreset.ULTRA: BudgetPolicy(
+            max_visual_refinements=10,
+            max_compile_repairs=5,
+            max_model_calls=40,
+            max_wall_time_seconds=2_400,
+            renderer_replay_on_crash=2,
         ),
     }
 )

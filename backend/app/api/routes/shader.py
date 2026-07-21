@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 
+from backend.app.core.runtime_policy import RuntimePolicyRegistry, load_runtime_policy
 from backend.app.schemas.shader import (
     GenerationMode,
     QualityPresetName,
@@ -74,7 +75,9 @@ async def read_image_upload(file: UploadFile) -> bytes:
     return image
 
 
-def _runtime(request: Request) -> tuple[Any, ProjectLockRegistry]:
+def _runtime(
+    request: Request,
+) -> tuple[Any, ProjectLockRegistry, RuntimePolicyRegistry]:
     service = getattr(
         request.app.state,
         "png_to_shader_v1_service",
@@ -86,7 +89,16 @@ def _runtime(request: Request) -> tuple[Any, ProjectLockRegistry]:
     if locks is None:
         locks = ProjectLockRegistry()
         request.app.state.project_locks = locks
-    return service, locks
+    runtime_policy = getattr(
+        request.app.state,
+        "png_to_shader_runtime_policy",
+        None,
+    )
+    if runtime_policy is None:
+        settings = request.app.state.settings
+        runtime_policy = load_runtime_policy(settings.runtime_policy_path)
+        request.app.state.png_to_shader_runtime_policy = runtime_policy
+    return service, locks, runtime_policy
 
 
 @router.post(
@@ -140,7 +152,7 @@ async def generate_shader(
             stop_reason="client_validation",
         ) from exc
 
-    service, locks = _runtime(request)
+    service, locks, runtime_policy = _runtime(request)
     command = ShaderGenerationCommand(
         image=image,
         filename=file.filename,
@@ -156,6 +168,7 @@ async def generate_shader(
         pool=getattr(request.app.state, "db_pool", None),
         procedural_service=service,
         locks=locks,
+        runtime_policy=runtime_policy,
     )
     try:
         return await execute_shader_generation(command, dependencies)
@@ -178,7 +191,7 @@ async def get_shader_run_artifact(
     artifact_name: str,
 ) -> Response:
     """下载 final-render、metrics 或 manifest 三种白名单产物."""
-    service, _locks = _runtime(request)
+    service, _locks, _runtime_policy = _runtime(request)
     try:
         artifact = read_shader_run_artifact(
             str(run_id),
@@ -201,7 +214,7 @@ async def get_shader_run_artifact(
 @router.delete("/projects/{project_id}/memory", status_code=204)
 async def clear_project_memory(request: Request, project_id: UUID) -> Response:
     """清除当前项目 V1 checkpoint 和长期 Memory，不删除过程账本."""
-    service, locks = _runtime(request)
+    service, locks, _runtime_policy = _runtime(request)
     try:
         async with locks.hold(str(project_id)):
             await clear_png_to_shader_project_memory(

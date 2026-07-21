@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Protocol, cast
 
 from agent.app.config.model_config import SHADER_GEN_MODEL_NAME
@@ -21,7 +21,7 @@ from agent.app.graphs.png_to_shader_v1_graph import (
 from agent.app.memory.models import MemoryStatus
 from agent.app.memory.store import clear_project_memories
 from agent.app.services.errors import MemoryUnavailableError
-from shaderforge.contracts import QualityPreset
+from shaderforge.contracts import AcceptancePolicy, BudgetPolicy, QualityPreset
 from shaderforge.store import LocalArtifactStore
 
 logger = logging.getLogger("agent.png_to_shader")
@@ -283,6 +283,10 @@ class PngToShaderV1Result:
     model_calls: tuple[dict[str, Any], ...] = ()
     events: tuple[dict[str, Any], ...] = ()
     logs: tuple[dict[str, Any], ...] = ()
+    runtime_policy_schema_version: str | None = None
+    runtime_policy_sha256: str | None = None
+    budget_policy: dict[str, Any] | None = None
+    acceptance_policy: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -437,6 +441,10 @@ async def generate_png_to_shader_v1(
     run_id: str,
     quality_preset: QualityPreset | str,
     instruction: str,
+    budget_policy: BudgetPolicy | None = None,
+    acceptance_policy: AcceptancePolicy | None = None,
+    runtime_policy_schema_version: str | None = None,
+    runtime_policy_sha256: str | None = None,
     service: PngToShaderV1Service = default_png_to_shader_v1_service,
 ) -> PngToShaderV1Result:
     """执行自动 render-evaluate-review-refine 闭环并返回历史最佳结果."""
@@ -454,6 +462,14 @@ async def generate_png_to_shader_v1(
             "content_type": content_type,
             "quality_preset": preset.value,
             "instruction": instruction,
+            "budget_policy": (
+                asdict(budget_policy) if budget_policy is not None else None
+            ),
+            "acceptance_policy": (
+                asdict(acceptance_policy) if acceptance_policy is not None else None
+            ),
+            "runtime_policy_schema_version": runtime_policy_schema_version,
+            "runtime_policy_sha256": runtime_policy_sha256,
             "memory_status": service.memory_status,
             "model_calls": (),
             "events": (),
@@ -504,4 +520,24 @@ async def generate_png_to_shader_v1(
         model_calls=tuple(state.get("model_calls", ())),
         events=tuple(state.get("events", ())),
         logs=tuple(state.get("logs", ())),
+        runtime_policy_schema_version=(
+            str(final["runtime_policy_schema_version"])
+            if final.get("runtime_policy_schema_version") is not None
+            else None
+        ),
+        runtime_policy_sha256=(
+            str(final["runtime_policy_sha256"])
+            if final.get("runtime_policy_sha256") is not None
+            else None
+        ),
+        budget_policy=(
+            dict(final["budget_policy"])
+            if isinstance(final.get("budget_policy"), dict)
+            else None
+        ),
+        acceptance_policy=(
+            dict(final["acceptance_policy"])
+            if isinstance(final.get("acceptance_policy"), dict)
+            else None
+        ),
     )

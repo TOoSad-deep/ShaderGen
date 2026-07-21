@@ -38,7 +38,7 @@ ShaderGen/ShaderForge 将用户意图、参考图、约束和验收标准转成�
 
 Node Lab 以 transport-free Application API 和通用 `NodeProvider` 协议复用生产 Node。Harness 内核不导入任何具体 Node/Graph，pipeline id、descriptor、执行模式、routing capability 与 Adapter 均由生产侧 `agent.app.nodes.png_to_shader_v1.integrations.node_lab` Provider 提供。当前 PNG-to-Shader Provider 暴露 20 个图节点、机器可读示例和离线成功/拒绝路径；15 个非模型节点通过 Artifact facade 直接调用生产 Node factory/routing，五个模型节点调用生产角色 Node factory 与 bounded wrapper。新 Node 只在所属功能命名空间的 Provider 登记 descriptor/binding，不修改 Node Lab 内核或 Service；Lab 只负责输入投影、私有 Artifact 和副作用门禁，不维护 initialize/materialize/render/select/finalize/promotion 的平行语义。完整 ContextPack、GLSL、图片、模型原始内容只存 Lab Artifact，策略 Memory 只 preview。八个确定性 capability、不可变步骤、真实 node target、scenario/pipeline、Renderer cold/warm、transport AI-off 和独立模型角色 benchmark 共用同一 Harness；失败/中断证据不可覆盖。可选 `/api/lab/v1/*` 仅在显式环境开关下注册，不进入产品 API；HTTP batch 只接受仓库内三个固定 AI-off suite id。`scripts/run_node_lab_cli.py`、Swagger 和 `/lab` 工作台分别提供自动化、HTTP 与人工入口，只消费公共 Application API/descriptor。
 
-M5 以固定 10 例 manifest、AI-off smoke、成本受控 AI-on runner、运行前冻结 gate 和匿名 A/B 页面独立于产品请求执行；新 run 对 model initial 与 final 使用同一 manifest ROI objective，并严格区分 model/deterministic provenance。Node Lab benchmark 与 M5 证据互不覆盖。Intent IR、DSL、Search Engine 和完整 VLM/HITL 仍是后续工作。
+M5 以固定 10 例 manifest、AI-off smoke、成本受控 AI-on runner、运行前冻结 gate 和匿名 A/B 页面独立于产品请求执行；新 run 对 model initial 与 final 使用同一 manifest ROI objective，并严格区分 model/deterministic provenance。Node Lab benchmark 与 M5 证据互不覆盖。V2.0 已增加 Target/Constraint/Genome/Candidate/Artifact/State/Budget 的纯契约、canonical hash、golden 和数据 Manifest；F02/V2.1 现为唯一 active，并已增加 stage-scoped validation 门禁与 runtime Target geometry verifier 核心。required-layer 完整性、生产 MeasurementsV2、Intent Builder/Parser、Compiler、V2 Graph 和 production admission 仍未实现；release-held-out 只在 V2.3 release-candidate 冻结后参与门禁。
 
 ### 3. 工具知识层
 
@@ -91,6 +91,7 @@ ShaderGen/
 │   └── shaderforge/          # 领域核心流水线，按真实功能逐步创建
 │       ├── routing/          # 任务拆解、路由策略、阶段选择
 │       ├── intent/           # Intent IR 类型、解析、约束结构化
+│       ├── genome/           # Effect Genome、typed port/parameter 与 canonical hash
 │       ├── dsl/              # Shader DSL 节点、图结构、变异操作
 │       ├── rendering/        # WebGL1 编译、渲染适配、渲染一致性检查
 │       ├── evaluation/       # Oracle、全局评分、局部损失、图像指标
@@ -134,6 +135,7 @@ ShaderGen/
 ```text
 frontend 用户输入
   -> backend HTTP 校验
+  -> Backend 按 quality_preset 解析启动时冻结的 YAML budget/acceptance
   -> backend service 调用 PNG-to-Shader V1 用例
   -> agent.app.services.png_to_shader_v1 公共用例
   -> src/agent LangGraph 节点进行模型分析和策略选择
@@ -148,8 +150,9 @@ frontend 用户输入
 
 - M5 人工质量门禁未通过期间，Frontend/HTTP 仍只提供 `procedural_v1`，但必须明确显示实验/no-go 状态；“唯一实现路径”不等于“已获准灰度发布”。
 - V1 的 wall-time 预算按阶段分配，模型不得占用留给确定性修复、Renderer、Evaluator 和 finalize 的保留时间。
+- V1 的 `fast|balanced|high|ultra` budget/acceptance 由 Backend 启动时从版本化 YAML 严格解析并冻结；YAML 只能在代码 Ultra 硬上限内收紧或调整。Ultra 放大 refine/repair/model/wall/stagnation 窗口但仍受确定性停止条件约束。配置 Schema、内容 SHA-256 和最终生效值沿 Backend 总账、Agent State、`run-config.json` 与 final manifest 贯通，避免只记录 profile 名而无法复验。冻结 M5 benchmark 显式拒绝 Ultra，不消费在线 YAML。
 - Renderer registry 的正常释放属于 Graph `finalize`，越过 Graph 的未知异常由 Agent Service `finally` 使用同一 registry 再次幂等释放；清理故障不得遮蔽原始生成结果或异常。
-- Backend 只在应用组合根读取环境变量；数据库、日志、CORS 和 Node Lab 开关冻结后注入依赖。数据库与 Memory 的 open 函数负责回收自身半初始化资源，lifespan 再按逆序执行全部已登记 close；关闭前先从 `app.state` 脱离对象，避免失败资源继续被请求借用。
+- Backend 只在应用组合根读取环境变量；数据库、日志、CORS、Node Lab 开关和运行策略路径冻结后注入依赖。运行策略先于数据库资源加载，非法配置直接阻止启动；数据库与 Memory 的 open 函数负责回收自身半初始化资源，lifespan 再按逆序执行全部已登记 close；关闭前先从 `app.state` 脱离对象，避免失败资源继续被请求借用。
 - `current_best` 只能来自 Selector。只有当 Evaluator 不可用且候选已经通过静态检查和真实 WebGL 时，才允许返回明确标记的 `unscored_fallback`；它没有评分、metrics、Critic 绑定或长期 Memory 晋升资格。
 - API 错误必须区分请求校验、Shader validation、模型供应商/配置/响应、Renderer、persistence、timeout 和内部 pipeline 错误。未知内部异常不得伪装成用户可修复的 422。
 - 过程终态在单个数据库事务中提交事件、日志和 run 状态；普通日志/事件禁止完整 GLSL、图片、reasoning、供应商原文或编译器原文。原始编译证据只进入私有 Artifact。

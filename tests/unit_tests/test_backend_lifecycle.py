@@ -23,6 +23,10 @@ def test_backend_settings_freeze_boot_environment(monkeypatch) -> None:
     monkeypatch.setenv("SHADERGEN_NODE_LAB_ROOT", "/tmp/node-lab")
     monkeypatch.setenv("SHADERGEN_NODE_LAB_BATCH_ROOT", "/tmp/node-lab-batches")
     monkeypatch.setenv("SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED", "yes")
+    monkeypatch.setenv(
+        "SHADERGEN_RUNTIME_POLICY_PATH",
+        "/tmp/png-to-shader-runtime-policy.yaml",
+    )
 
     settings = BackendSettings.from_env(load_environment=False)
 
@@ -36,6 +40,10 @@ def test_backend_settings_freeze_boot_environment(monkeypatch) -> None:
     assert settings.node_lab_root == "/tmp/node-lab"
     assert settings.node_lab_batch_root == "/tmp/node-lab-batches"
     assert settings.node_lab_real_model_enabled is True
+    assert (
+        settings.runtime_policy_path
+        == "/tmp/png-to-shader-runtime-policy.yaml"
+    )
 
 
 def test_backend_settings_reject_wildcard_cors(monkeypatch) -> None:

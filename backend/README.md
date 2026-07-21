@@ -14,6 +14,7 @@
 - `app/database/agent_memory.py`：LangGraph psycopg saver/store 生命周期、健康检查和独立 setup；只返回中立的 Memory 资源，不反向创建 Agent service。
 - `app/middleware/`：FastAPI 中间件，例如请求日志。
 - `app/core/settings.py`：不可变 Backend 配置模型；只在应用组合根读取根目录 `.env` 和环境变量。
+- `app/core/png_to_shader_runtime_policy.v2.yaml`：随 wheel 打包的 V1 在线运行预算与验收 profile；可由 `SHADERGEN_RUNTIME_POLICY_PATH` 指向外部同版本 YAML。
 - `app/core/`：其余应用级基础设施，例如日志配置；底层模块不得自行重复读取环境变量。
 - `sql/`：手写 SQL schema 资源包。`backend.sql` 在 wheel 中显式登记，`__init__.py` 只声明包边界；当前只存建表脚本，不放 Python 迁移或业务编排。
 
@@ -25,9 +26,10 @@
 - Agent 过程数据落业务表；运行内需要查询的安全诊断摘要可写入 `agent_logs`。
 - LangGraph Checkpointer/Store 使用独立 psycopg pool，并在每次借出连接前执行 `AsyncConnectionPool.check_connection`；远端关闭的陈旧连接必须在进入 Graph 前淘汰，不能通过重试整个 Graph 恢复，以免重复模型调用或候选写入。
 - FastAPI lifespan 在每项资源初始化前登记对应补偿清理：启动任一步失败也会逆序回滚，关闭 Agent Memory 失败不得跳过 asyncpg 过程账本连接池关闭。关闭函数先从 `app.state` 脱离资源再等待底层 pool，以免关闭异常留下可继续借用的失效对象。
-- `BackendSettings` 在应用组合根一次性读取根目录 `.env`，并把数据库、日志、CORS 与 Node Lab 开关作为不可变配置注入 lifespan、Router 和 Service；底层数据库或 Node Lab 模块不得再次读取环境变量。`SHADERGEN_CORS_ORIGINS` 使用逗号分隔的显式 Origin，禁止通配符 `*`。
+- `BackendSettings` 在应用组合根一次性读取根目录 `.env`，并把数据库、日志、CORS、Node Lab 开关与运行策略路径作为不可变配置注入 lifespan、Router 和 Service；底层数据库或 Node Lab 模块不得再次读取环境变量。`SHADERGEN_CORS_ORIGINS` 使用逗号分隔的显式 Origin，禁止通配符 `*`。
+- Backend 启动必须成功读取 `png_to_shader_runtime_policy_v2` YAML，并恰好得到 `fast`、`balanced`、`high`、`ultra` 四个 profile；未知字段、重复 key、错误类型、缺档或突破代码 Ultra 硬上限均 fail-fast。生命周期内不热加载；修改后重启进程。外部 v1 三档文件必须迁移 Schema 并补齐 Ultra 后才能用于新版本。解析后的配置 SHA-256、profile、完整 budget/acceptance 写入生成 run input/result，Graph 的 `run-config.json` 与最终 manifest 也保存同一份身份和生效值。
 - `POST /api/shader/generate` 在数据库连接池可用时，会写入 `agent_runs`、`agent_events` 和 `agent_logs`。
-- `procedural_v1` 把模式、质量档位和补充约束写入 run input，把停止原因、current_best、评分和公开 Artifact URL 写入 run result；Graph 返回的每个阶段事件与 `current_best_updated` 逐项写入 `agent_events`。
+- `procedural_v1` 把模式、质量档位、补充约束和已解析运行策略证据写入 run input，把停止原因、current_best、评分、公开 Artifact URL 和同一策略证据写入 run result；Graph 返回的每个阶段事件与 `current_best_updated` 逐项写入 `agent_events`。
 - 生成终态的模型调用、阶段事件、Agent 日志和 `agent_runs` 更新使用同一个 asyncpg 显式事务；任一步失败必须整体回滚。事务先 `FOR UPDATE` 锁定 run：相同终态重放直接 no-op，不同终态重放显式报冲突，禁止静默覆盖。
 - `agent_events.reasoning_content` 只允许保存节点显式 opt-in 捕获的思维链；V1 默认不捕获、不打印 reasoning，对外 API 永不返回该字段。
 - `agent_runs.project_id` 关联一次运行与 Shader 项目；清除 Memory 不删除过程账本。
@@ -51,7 +53,7 @@
 - `POST /api/shader/generate` route 只把校验后的输入和应用生命周期依赖组装为 command/dependencies，调用 `execute_shader_generation()`，再把稳定用例错误映射为现有 FastAPI error envelope；不得重新承载锁、Agent 分流、账本或响应契约编排。
 - route 不写 Prompt、不直接调用模型、不实现搜索/评分/渲染算法。
 - route 捕获外部调用异常时，应返回明确的 HTTP 错误；日志记录内部细节，响应给用户的信息保持可理解。
-- `POST /api/shader/generate` 只执行 PNG-to-Shader V1，接收可选 `project_id`、可选且只能为 `procedural_v1` 的 `generation_mode`、`quality_preset=fast|balanced|high` 和最长 2,000 字的 `instruction`；未提供 project 时创建 UUID，未提供 mode 时默认 V1。
+- `POST /api/shader/generate` 只执行 PNG-to-Shader V1，接收可选 `project_id`、可选且只能为 `procedural_v1` 的 `generation_mode`、`quality_preset=fast|balanced|high|ultra` 和最长 2,000 字的 `instruction`；未提供 project 时创建 UUID，未提供 mode 时默认 V1。Ultra 是最高成本的有界在线档位，默认上限为 10 次视觉优化、5 次编译修复、40 次模型调用和 2400 秒，不等于质量必然达标。
 - V1 generate 响应包含 `run_id`、质量档位、视觉修订次数、停止原因、候选 id、`unscored_fallback`、规范化 render 尺寸、评分及 final-render/metrics/manifest URL。WebGL 有效但 evaluator 不可用的降级结果仍返回 GLSL 与 final-render，同时明确 `unscored_fallback=true`、`score=null`、`metrics_url=null`，禁止伪造评分。请求边界错误返回类型化 400/413/422；Renderer、模型供应商或运行账本不可用返回 503；全局或模型阶段超时返回 504；模型响应错误返回 502；内部 pipeline 不变量错误返回 500；编译修复耗尽仍返回类型化 422。任何失败响应都不返回 reasoning 或原始异常。
 - 成功 run 必须先通过完整 `ShaderResponse` 契约构造，再写入 `status=succeeded`；响应契约失败使用 `shader.generate.response_contract_failed`，并把过程账本标记为 failed，禁止出现“账本成功但 HTTP 500”。
 - `GET /api/shader/runs/{run_id}/artifacts/{artifact_name}` 只接受 `final-render`、`metrics`、`manifest` 三个固定名字；未知名字和不存在的 run 统一返回 404，不接受 filesystem path。

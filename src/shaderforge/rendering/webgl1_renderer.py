@@ -6,6 +6,7 @@ import base64
 import json
 import time
 from collections.abc import Mapping
+from math import isfinite
 from typing import Any
 
 from playwright.async_api import (
@@ -85,6 +86,8 @@ void main() {
 
   function metadata(gl) {
     const debugInfo = gl.getExtension("WEBGL_debug_renderer_info");
+    const contextAttributes = gl.getContextAttributes();
+    const clearColor = Array.from(gl.getParameter(gl.COLOR_CLEAR_VALUE), Number);
     return {
       glVersion: String(gl.getParameter(gl.VERSION) || ""),
       glslVersion: String(gl.getParameter(gl.SHADING_LANGUAGE_VERSION) || ""),
@@ -94,6 +97,18 @@ void main() {
       glRenderer: String(
         debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER)
       ),
+      webglContextKind: "webgl1",
+      canvasAlpha: Boolean(contextAttributes && contextAttributes.alpha),
+      canvasAntialias: Boolean(contextAttributes && contextAttributes.antialias),
+      canvasDepth: Boolean(contextAttributes && contextAttributes.depth),
+      canvasStencil: Boolean(contextAttributes && contextAttributes.stencil),
+      premultipliedAlpha: Boolean(
+        contextAttributes && contextAttributes.premultipliedAlpha
+      ),
+      preserveDrawingBuffer: Boolean(
+        contextAttributes && contextAttributes.preserveDrawingBuffer
+      ),
+      clearColorRgba: clearColor,
     };
   }
 
@@ -134,6 +149,8 @@ void main() {
       };
     }
 
+    gl.clearColor(1.0, 1.0, 1.0, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     const environment = metadata(gl);
     const vertex = compileShader(gl, gl.VERTEX_SHADER, vertexSource);
     const fragment = compileShader(gl, gl.FRAGMENT_SHADER, payload.fragmentSource);
@@ -183,8 +200,6 @@ void main() {
           if (time !== null) gl.uniform1f(time, 0.0);
 
           gl.viewport(0, 0, payload.width, payload.height);
-          gl.clearColor(1.0, 1.0, 1.0, 1.0);
-          gl.clear(gl.COLOR_BUFFER_BIT);
           gl.getError();
           gl.drawArrays(gl.TRIANGLES, 0, 3);
           gl.finish();
@@ -226,6 +241,34 @@ def _decode_png_data_url(value: Any) -> bytes:
         return base64.b64decode(value[len(PNG_DATA_URL_PREFIX) :], validate=True)
     except ValueError as exc:
         raise RendererUnavailableError("浏览器返回的 PNG base64 无法解码。") from exc
+
+
+def _parse_environment_bool(value: Any, *, field: str) -> bool:
+    if not isinstance(value, bool):
+        raise RendererUnavailableError(f"浏览器 Renderer metadata 缺少 {field} bool。")
+    return value
+
+
+def _parse_context_kind(value: Any) -> str:
+    if value != "webgl1":
+        raise RendererUnavailableError("浏览器 Renderer metadata 不是 WebGL1 context。")
+    return "webgl1"
+
+
+def _parse_clear_color(value: Any) -> tuple[float, float, float, float]:
+    if (
+        not isinstance(value, list)
+        or len(value) != 4
+        or any(
+            isinstance(item, bool) or not isinstance(item, (int, float))
+            for item in value
+        )
+    ):
+        raise RendererUnavailableError("浏览器 Renderer metadata clearColorRgba 无效。")
+    parsed = tuple(float(item) for item in value)
+    if any(not isfinite(item) or item < 0.0 or item > 1.0 for item in parsed):
+        raise RendererUnavailableError("浏览器 Renderer metadata clearColorRgba 越界。")
+    return parsed[0], parsed[1], parsed[2], parsed[3]
 
 
 class PlaywrightWebGL1Renderer:
@@ -415,6 +458,32 @@ class PlaywrightWebGL1Renderer:
                 glsl_version=str(environment.get("glslVersion", "")),
                 gl_vendor=str(environment.get("glVendor", "")),
                 gl_renderer=str(environment.get("glRenderer", "")),
+                webgl_context_kind=_parse_context_kind(
+                    environment.get("webglContextKind")
+                ),
+                canvas_alpha=_parse_environment_bool(
+                    environment.get("canvasAlpha"), field="canvasAlpha"
+                ),
+                canvas_antialias=_parse_environment_bool(
+                    environment.get("canvasAntialias"), field="canvasAntialias"
+                ),
+                canvas_depth=_parse_environment_bool(
+                    environment.get("canvasDepth"), field="canvasDepth"
+                ),
+                canvas_stencil=_parse_environment_bool(
+                    environment.get("canvasStencil"), field="canvasStencil"
+                ),
+                premultiplied_alpha=_parse_environment_bool(
+                    environment.get("premultipliedAlpha"),
+                    field="premultipliedAlpha",
+                ),
+                preserve_drawing_buffer=_parse_environment_bool(
+                    environment.get("preserveDrawingBuffer"),
+                    field="preserveDrawingBuffer",
+                ),
+                canvas_clear_color_rgba=_parse_clear_color(
+                    environment.get("clearColorRgba")
+                ),
             )
         success = bool(payload.get("success"))
         image_bytes = _decode_png_data_url(payload.get("dataUrl")) if success else None

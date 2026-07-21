@@ -1,0 +1,58 @@
+schema_version: png_to_shader_runtime_policy_v2
+
+profiles:
+  fast:
+    budget:
+      max_visual_refinements: 1
+      max_compile_repairs: 1
+      max_model_calls: 5
+      max_wall_time_seconds: 180
+      max_shader_chars: 30000
+      renderer_replay_on_crash: 1
+    acceptance:
+      min_total_improvement: 0.005
+      max_protected_regression: 0.02
+      quality_threshold: 0.12
+      stagnation_rounds: 2
+
+  balanced:
+    budget:
+      max_visual_refinements: 2
+      max_compile_repairs: 2
+      max_model_calls: 8
+      max_wall_time_seconds: 300
+      max_shader_chars: 30000
+      renderer_replay_on_crash: 1
+    acceptance:
+      min_total_improvement: 0.005
+      max_protected_regression: 0.02
+      quality_threshold: 0.12
+      stagnation_rounds: 2
+
+  high:
+    budget:
+      max_visual_refinements: 4
+      max_compile_repairs: 2
+      max_model_calls: 12
+      max_wall_time_seconds: 600
+      max_shader_chars: 30000
+      renderer_replay_on_crash: 1
+    acceptance:
+      min_total_improvement: 0.005
+      max_protected_regression: 0.02
+      quality_threshold: 0.12
+      stagnation_rounds: 2
+
+  ultra:
+    budget:
+      max_visual_refinements: 10
+      max_compile_repairs: 5
+      max_model_calls: 40
+      max_wall_time_seconds: 2400
+      max_shader_chars: 30000
+      renderer_replay_on_crash: 2
+    acceptance:
+      min_total_improvement: 0.002
+      max_protected_regression: 0.02
+      quality_threshold: 0.12
+      stagnation_rounds: 6

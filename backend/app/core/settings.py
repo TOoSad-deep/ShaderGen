@@ -7,6 +7,8 @@ from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+from backend.app.core.runtime_policy import DEFAULT_RUNTIME_POLICY_PATH
+
 DEFAULT_CORS_ORIGINS = (
     "http://127.0.0.1:5173",
     "http://localhost:5173",
@@ -44,6 +46,7 @@ class BackendSettings:
     node_lab_root: str | None = None
     node_lab_batch_root: str | None = None
     node_lab_real_model_enabled: bool = False
+    runtime_policy_path: str = DEFAULT_RUNTIME_POLICY_PATH
 
     @classmethod
     def from_env(cls, *, load_environment: bool = True) -> BackendSettings:
@@ -60,4 +63,8 @@ class BackendSettings:
             node_lab_real_model_enabled=_enabled(
                 os.getenv("SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED")
             ),
+            runtime_policy_path=(
+                os.getenv("SHADERGEN_RUNTIME_POLICY_PATH")
+                or DEFAULT_RUNTIME_POLICY_PATH
+            ).strip(),
         )

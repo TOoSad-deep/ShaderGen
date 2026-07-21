@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from agent.app.services import png_to_shader_v1
+from shaderforge.contracts import AcceptancePolicy, BudgetPolicy
 
 MemoryUnavailableError = png_to_shader_v1.MemoryUnavailableError
 NoValidatedShaderError = png_to_shader_v1.NoValidatedShaderError
@@ -53,6 +54,10 @@ async def generate_procedural_shader_from_image(
     run_id: str,
     quality_preset: str,
     instruction: str,
+    budget_policy: BudgetPolicy,
+    acceptance_policy: AcceptancePolicy,
+    runtime_policy_schema_version: str,
+    runtime_policy_sha256: str,
     service: png_to_shader_v1.PngToShaderV1Service,
 ) -> png_to_shader_v1.PngToShaderV1Result:
     """通过 Agent 公共接口执行 V1 自动闭环."""
@@ -63,6 +68,10 @@ async def generate_procedural_shader_from_image(
         run_id=run_id,
         quality_preset=quality_preset,
         instruction=instruction,
+        budget_policy=budget_policy,
+        acceptance_policy=acceptance_policy,
+        runtime_policy_schema_version=runtime_policy_schema_version,
+        runtime_policy_sha256=runtime_policy_sha256,
         service=service,
     )
 

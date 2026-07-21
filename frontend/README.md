@@ -30,7 +30,7 @@
 - 生成失败兼容旧版 `detail: string` 和类型化 `detail: {message, code, run_id, stage, retryable, stop_reason}`；页面必须展示可用于后端检索的 Run ID 和失败阶段，不把服务端超时误报为客户端输入错误。
 - Generate 使用 `AbortController` 支持“停止等待”和浏览器端兜底超时。它只中止客户端 HTTP 等待，不等价于服务端取消；自动等待上限可通过 `VITE_GENERATION_REQUEST_TIMEOUT_MS`（毫秒，最小 10000）覆盖。
 - Generate 传递 `project_id` 并读取 `memory_status` 和自动闭环 Review；清除项目记忆只通过 `clearProjectMemory()`。
-- `quality_preset` 和 `instruction` 始终属于当前 V1 路径；除请求执行期间外，两个输入都必须可编辑。
+- `quality_preset` 和 `instruction` 始终属于当前 V1 路径；除请求执行期间外，两个输入都必须可编辑。`ultra` 的默认浏览器等待上限为 42 分钟，用于覆盖服务端 2400 秒预算和响应余量；用户仍可主动停止等待，但这不等于服务端取消。
 
 ## 组件规则
 

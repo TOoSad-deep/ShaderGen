@@ -1,0 +1,35 @@
+{
+  "candidate_record_hash": "1b4cbe2605a6081a7148622aa378c9fecf4c79d61268f1c8db49c1c7bb7d477e",
+  "canonical_examples": {
+    "negative_zero": "{\"value\":\"0x0.0p+0\"}",
+    "unicode": "{\"é\":\"é\"}"
+  },
+  "constraint_ids": [
+    "constraint_5ff943a45bd0f134c6ce8ddf98f09b2fe38528ac82251ce380762a667ae6416b",
+    "constraint_57a0e31703669e07b2f49f180eb80271cd692375dda0a8b93f3ad891c956f890"
+  ],
+  "constraint_set_hash": "0f60975281401b9da7e3d75f9c59189f2c4a01688172f015b319e1abde50c4fd",
+  "fixture_version": "png_to_shader_v2_golden_hashes_v1",
+  "genome_hashes": {
+    "hash_version": "genome_hash_v1",
+    "parameter_layout_hash": "e910b9ea7e742d12c6f879a54e88cbed92bb895039c79fb597e679d14d6edb6a",
+    "record_hash": "3d35e6839868ed9a988861f3b695275b6be7f12d056b951668ee2ddc61fabf2f",
+    "semantic_genome_hash": "0f73f365b163615949a6e780238f74ae5daf4cfc0039016d1557f3dddaac857a",
+    "topology_hash": "63847a063a9fa87e2f49ce7b6c57f2f3bb3d1f097d558d52e579498757fe70c1"
+  },
+  "schema_sha256": {
+    "ArtifactRefV2": "4392c32fff679dc1ed9c267ae447d00c103fbb4bdb923e025d3cab3d07df0160",
+    "BudgetStateV2": "59da6fedb23bad1a703f45cf236cbd3e9aea59b0f6863b6d91bed5824d279457",
+    "CandidateAttemptRecord": "0439ae520d6fef21c2f0e6db3cecd43c86fc54bcfc3caf125de928b7c6b6fbe8",
+    "CandidateRecordV2": "8f43b789b0ded1b5172bb9e88d446755b302ba3116d5c48a60c6101d29c7990c",
+    "Constraint": "79a1f553808e66a75a08d86062a7809699abfeb4741a93faeeea71b33eb68013",
+    "EffectGenome": "6358f8dab88b7715bbcb34bea848649828b2c82f5667be8e4239f7bdb57cc2ad",
+    "ParameterSpec": "667b99e927e4fea18e85d3464ee0b5829bd46867e2802dec606f55e8cd7a9353",
+    "PngToShaderV2State": "19dec0b00be1d8e95df717c33e1a0991246ea5677b24f102b7a3e04aef8c9743",
+    "RequestConstraintSet": "86547b20a37ee6bea563d0963c97f95eaa248cf8c4a1f81f167e1f56b78485c5",
+    "TargetHypothesis": "ea42a355403d2c73d08bc00f1267b0cc29aa4a6e2f87cddb170ad8d93729dda1",
+    "TargetMeasurementsV2": "15069b2ffffdfe0d0c91a811e000bfe8eb350bf071387d125d19fe81c9edd1d8"
+  },
+  "state_sha256": "66686fbe900aeb437377b4b23d21586c233628345134134dbc8411254f9d841e",
+  "target_hypothesis_hash": "ad3898479b57fad2d8a7963f7dd1705b5fba1ea7c06fa54747d8cbef1703ae04"
+}

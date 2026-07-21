@@ -39,6 +39,12 @@ DEFAULT_OUTPUT_ROOT = ROOT / "output/benchmarks/png-to-shader-v1"
 BENCHMARK_ACCEPTANCE_POLICY = AcceptancePolicy(quality_threshold=0.0)
 M5_OBJECTIVE_VERSION = "manifest_key_rois_v1"
 INITIAL_SELECTION_POLICY = "first_successful_model_origin_v1"
+M5_QUALITY_PRESETS = (
+    QualityPreset.FAST,
+    QualityPreset.BALANCED,
+    QualityPreset.HIGH,
+)
+M5_QUALITY_PRESET_NAMES = tuple(item.value for item in M5_QUALITY_PRESETS)
 
 
 @dataclass(frozen=True)
@@ -76,7 +82,7 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--quality-preset",
-        choices=tuple(item.value for item in QualityPreset),
+        choices=M5_QUALITY_PRESET_NAMES,
         default=QualityPreset.BALANCED.value,
     )
     parser.add_argument("--cases", help="逗号分隔的 case id；默认完整 10 例。")
@@ -109,6 +115,15 @@ def _parse_args() -> argparse.Namespace:
 
 def _utc_run_id() -> str:
     return "m5-" + datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _m5_quality_preset(value: str) -> QualityPreset:
+    """只接受冻结 M5 协议中的原三档，拒绝在线 Ultra 扩展."""
+    preset = QualityPreset(value)
+    if preset not in M5_QUALITY_PRESETS:
+        allowed = ", ".join(M5_QUALITY_PRESET_NAMES)
+        raise ValueError(f"M5 quality preset 必须是 {allowed}。")
+    return preset
 
 
 def _write_text(path: Path, text: str) -> None:
@@ -1787,12 +1802,12 @@ async def _run(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
         ):
             raise ValueError("原运行 config.json 的 case_ids 非法。")
         cases = _selected_cases(suite, ",".join(raw_case_ids))
-        preset = QualityPreset(str(config["quality_preset"]))
+        preset = _m5_quality_preset(str(config["quality_preset"]))
         effective_model_call_budget = int(config["model_call_budget"])
     else:
         cases = _selected_cases(suite, args.cases)
         suite_run_id = requested_run_id
-        preset = QualityPreset(args.quality_preset)
+        preset = _m5_quality_preset(args.quality_preset)
         effective_model_call_budget = args.model_call_budget
         model_routing = (
             _structured_model_routing_snapshot()

@@ -72,6 +72,8 @@ def test_standalone_html_uses_same_host_and_escapes_script_terminator():
     assert "window.__renderShader" in html
     assert 'canvas.getContext("webgl"' in html
     assert 'antialias: false' in html
+    assert 'alpha: false' in html
+    assert 'premultipliedAlpha: false' in html
     assert 'preserveDrawingBuffer: true' in html
     assert "createTexture" not in html
     assert "bindTexture" not in html

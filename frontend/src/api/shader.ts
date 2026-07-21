@@ -1,7 +1,7 @@
 import { apiFetch, parseApiError, resolveApiUrl } from "./client";
 
 export type MemoryStatus = "durable" | "ephemeral" | "degraded";
-export type QualityPreset = "fast" | "balanced" | "high";
+export type QualityPreset = "fast" | "balanced" | "high" | "ultra";
 
 export interface ShaderScore {
   metric_version: string;

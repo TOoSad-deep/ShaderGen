@@ -1,0 +1,36 @@
+schema_version: ultra_dataset_manifest_v1
+suite_id: shadergen-ultra-dataset-v1
+quality_preset: ultra
+cases:
+  - case_id: buffer-bloom
+    image: ../../dataset/buffer-bloom.png
+  - case_id: color-gradient
+    image: ../../dataset/color-gradient.png
+  - case_id: cool-s-distance
+    image: ../../dataset/cool-s-distance.png
+  - case_id: flat-water-effects2
+    image: ../../dataset/flat-water-effects2.png
+  - case_id: heart-2d
+    image: ../../dataset/heart-2d.png
+  - case_id: hypnotic-ripples
+    image: ../../dataset/hypnotic-ripples.png
+  - case_id: moon-distance-2d
+    image: ../../dataset/moon-distance-2d.png
+  - case_id: reactive-radial-ripples
+    image: ../../dataset/reactive-radial-ripples.png
+  - case_id: shiny-rectancle
+    image: ../../dataset/shiny-rectancle.png
+  - case_id: supah-frosted-glass
+    image: ../../dataset/supah-frosted-glass.png
+  - case_id: total-noob
+    image: ../../dataset/total-noob.png
+  - case_id: twitter-blue-check
+    image: ../../dataset/twitter-blue-check.png
+  - case_id: warp-speed2
+    image: ../../dataset/warp-speed2.png
+  - case_id: water-dropplet
+    image: ../../dataset/water-dropplet.png
+  - case_id: waves-remix
+    image: ../../dataset/waves-remix.png
+  - case_id: windows-95
+    image: ../../dataset/windows-95.png

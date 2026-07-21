@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from pydantic import Field, field_validator, model_validator
 from typing_extensions import Self
 

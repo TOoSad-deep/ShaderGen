@@ -22,9 +22,11 @@
 - `suites.py`：只解析三个仓库内固定 AI-off suite id，不接受客户端 manifest 路径；
 - `runner.py`：在同一 Application API 上同时执行 capability、节点步骤和 suite，并显式管理可复用 Renderer session。
 
-PNG-to-Shader V1 的 20 个 descriptor、执行模式和具体 Adapter 位于生产侧 `agent.app.nodes.png_to_shader_v1.integrations.node_lab` Provider。Harness 创建时只读取 Provider 的 descriptor，并自动安装 `(node_id, execution_mode)` binding；`pipeline_id` 由 Provider 决定并与 LabRun 绑定。普通 JSON-safe Node 可直接使用 `DirectNodeExecutor`，有 Artifact、Renderer、Memory 或模型依赖的 Node 在生产 Provider 内提供专用 Adapter。新增 Node 不得修改 `agent.app.lab` 或 Node Lab Service；只在所属功能命名空间的 Provider 登记 descriptor/binding，而 Graph 一致性测试会防止漏登记。
+PNG-to-Shader V1 的 20 个 descriptor、执行模式和具体 Adapter 位于生产侧 `agent.app.nodes.png_to_shader_v1.integrations.node_lab` Provider；V2 的 22 个正式节点由 `agent.app.nodes.png_to_shader_v2.integrations.node_lab` 独立暴露。Harness 创建时只读取显式 Provider 的 descriptor，并自动安装 `(node_id, execution_mode)` binding；`pipeline_id` 由 Provider 决定并与 LabRun 绑定，V1/V2 步骤不可混用。普通 JSON-safe Node 可直接使用 `DirectNodeExecutor`，有 Artifact、Renderer、Memory 或模型依赖的 Node 在生产 Provider 内提供专用 Adapter。新增 Node 不得修改 `agent.app.lab` 或 Node Lab Service；只在所属功能命名空间的 Provider 登记 descriptor/binding，而 Graph 一致性测试会防止漏登记。
 
 PNG-to-Shader Provider 内的 `DeterministicNodeExecutor` 仍只做 JSON-safe State/不透明 Artifact 映射，然后直接调用与 Graph 相同的 Node factory/routing；初始化、测量、候选物化、render/evaluate、selection、best 重载、Review 持久化、finalize 和策略晋升预览没有 Lab 平行实现。`prepare_measurement_seed` 的 Author/GLSL/provenance 仍只写私有 Artifact，独立 root、origin、generator version 和 hash 绑定由生产 `materialize_candidate` 校验。
+
+V2 Provider 同样只装配 `build_png_to_shader_v2_node_callables()` 返回的 production callable。V2 Catalog adapter 从 State 完整 ref 恢复 schema/identity，所有新 bytes 只写当前 LabRun；fixture/mock/real 只选择 Interpretation provider，不复制模型后的领域节点。V2 Harness 固定关闭 production admission、State Store commit 和项目 promotion；真实模型默认关闭并要求服务端开关、步骤开关与真实 provider 同时存在。
 
 普通 Renderer capability 与单步生产 `render_and_evaluate` 每次创建并关闭独立浏览器生命周期；单步 Node 只改变依赖生命周期，不复制渲染或评分语义。独立 `renderer_warm` suite 在一次 suite 内复用 capability Renderer，并把 warmup 与 measured attempt 分开记录。`agent.app.benchmarks.model_roles` 的独立模型 runner 默认以 fixture 离线执行五个角色，real 模式要求三重门禁和 semantic/repair/token/wall/cost 硬预算；provider 输出 token cap 在调用前下推，报告按角色分离 Parser/Schema/binding/timeout、latency、用量和模型身份。逐节点 CLI、HTTP/Swagger 与 `/lab` 页面只消费同一 Application API/descriptor；仍不允许 `project_commit` 或真实 Memory 写入。
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-16",
+  "updated_at": "2026-07-20",
   "entries": [
     {
       "evidence_id": "png-to-shader-v1-m5-20260715T023445Z",
@@ -83,6 +83,68 @@
       "limitations": [
         "完整 real-model report 尚未进入持久存储",
         "Initial Author 依赖一次受限 fixed-binding 修复，不能表述为模型原始输出直接合法"
+      ]
+    },
+    {
+      "evidence_id": "png-to-shader-v2-3-strict-v2-20260720-final",
+      "kind": "png_to_shader_v2_3_graph_conformance",
+      "suite_run_id": "v2-3-strict-v2-20260720-final",
+      "durability_status": "partial",
+      "gate_status": "passed",
+      "summary": {
+        "execution_mode": "fixture/no-model",
+        "development_cases_passed": 10,
+        "development_cases_total": 10,
+        "validation_cases_passed": 41,
+        "validation_cases_total": 41,
+        "seed_attempts_closed": 162,
+        "seed_attempts_total": 162,
+        "objective_best_cases": 18,
+        "expected_unsupported_cases": 33,
+        "unsupported_attempts": 102,
+        "restart_phases_passed": 16,
+        "restart_phases_total": 16,
+        "model_calls": 0,
+        "production_admission_enabled": false,
+        "release_held_out_accessed": false,
+        "config_sha256": "ab02eee3316f43199282da7c690ada369950407d177aef5f98222c72ece0864d",
+        "outcomes_semantic_sha256": "3b9fa32033e9cea1b0cb258d129801b65d38f32450d1c42190165c1d02e6aad2"
+      },
+      "artifacts": [
+        {
+          "role": "config",
+          "path": "output/benchmarks/v2-3-strict-v2-20260720-final/config.json",
+          "availability": "local_ignored",
+          "size_bytes": 1834,
+          "sha256": "9ec861a43b788ed3b4f5edcfb68b51bd1e97eac97c69a0d3be012843a47ccbfc"
+        },
+        {
+          "role": "gate_report",
+          "path": "output/benchmarks/v2-3-strict-v2-20260720-final/report.json",
+          "availability": "local_ignored",
+          "size_bytes": 7399,
+          "sha256": "7ca6fd513292ec39f3604c2730a51e4483e48835e6d84017537207be80266b40"
+        },
+        {
+          "role": "summary",
+          "path": "output/benchmarks/v2-3-strict-v2-20260720-final/summary.json",
+          "availability": "local_ignored",
+          "size_bytes": 1752,
+          "sha256": "cb6a8fc222fd8540633a7eda409caf08acbe778969f11130f8de3a817cbbc840"
+        },
+        {
+          "role": "outcomes",
+          "path": "output/benchmarks/v2-3-strict-v2-20260720-final/outcomes.json",
+          "availability": "local_ignored",
+          "size_bytes": 121857,
+          "sha256": "1ef8b995fdeca0c5b9742ba0971ec35d57f5e170b1ed014dffa443231e0c0429"
+        }
+      ],
+      "limitations": [
+        "完整 conformance 目录仍位于被忽略的本地 output/benchmarks，尚未进入不可变持久存储",
+        "fixture renderer 只提供确定性参考 PNG，不是 Chromium；真实 WebGL 由独立集成门禁覆盖",
+        "该证据未调用真实模型、未读取 release-held-out、未启用产品 production admission",
+        "该 run 允许 33 个复杂结构 case 以 expected unsupported 完成，且早于 state_v3/promotion outbox/Renderer unknown-slot 修复；现仅保留为受限能力历史证据，已被后续严格门禁工作取代"
       ]
     }
   ]

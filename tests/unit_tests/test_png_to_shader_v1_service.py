@@ -13,6 +13,7 @@ from agent.app.services.png_to_shader_v1 import (
     PublicArtifactNotFoundError,
     generate_png_to_shader_v1,
 )
+from shaderforge.contracts import AcceptancePolicy, BudgetPolicy
 from shaderforge.store import LocalArtifactStore
 
 
@@ -178,6 +179,15 @@ async def test_service_maps_success_and_uses_isolated_checkpoint_thread(
         run_id="run-1",
         quality_preset="high",
         instruction="保留白底",
+        budget_policy=BudgetPolicy(
+            max_visual_refinements=3,
+            max_compile_repairs=2,
+            max_model_calls=10,
+            max_wall_time_seconds=500,
+        ),
+        acceptance_policy=AcceptancePolicy(quality_threshold=0.09),
+        runtime_policy_schema_version="test_runtime_policy_v1",
+        runtime_policy_sha256="a" * 64,
         service=service,
     )
 
@@ -191,6 +201,10 @@ async def test_service_maps_success_and_uses_isolated_checkpoint_thread(
     state, config = graph.calls[0]
     assert state["quality_preset"] == "high"
     assert state["instruction"] == "保留白底"
+    assert state["budget_policy"]["max_model_calls"] == 10
+    assert state["acceptance_policy"]["quality_threshold"] == 0.09
+    assert state["runtime_policy_schema_version"] == "test_runtime_policy_v1"
+    assert state["runtime_policy_sha256"] == "a" * 64
     assert config["configurable"]["thread_id"] == "png-to-shader-v1:project-1"
 
 

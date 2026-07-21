@@ -5,7 +5,7 @@ from __future__ import annotations
 import statistics
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal
 
 from shaderforge.benchmark.models import (
     GateCheck,
@@ -54,22 +54,14 @@ def _failed_ids(
     )
 
 
-def _review_summary(
-    human_review: Mapping[str, Any] | None,
-    assignments: Mapping[str, Any] | None,
+def decode_human_preferences(
+    human_review: Mapping[str, Any],
+    assignments: Mapping[str, Any],
     *,
     case_results: Sequence[Mapping[str, Any]],
     expected_suite_run_id: str | None,
-) -> _HumanReviewSummary:
-    """严格校验盲评证据，并返回不会静默吞错的聚合结果."""
-    empty_summary = _HumanReviewSummary(0, None, 0, 0, 0)
-    if assignments is None:
-        if human_review is not None:
-            raise ValueError("人工盲评存在，但 assignments 证据缺失。")
-        return empty_summary
-    if human_review is None:
-        return empty_summary
-
+) -> dict[str, Literal["initial", "final", "tie"]]:
+    """严格复用发布门禁语义，把匿名 A/B 选择解码为候选角色."""
     expected_case_ids = tuple(str(case.get("case_id", "")) for case in case_results)
     if any(not case_id for case_id in expected_case_ids):
         raise ValueError("benchmark case_id 不能为空。")
@@ -178,19 +170,43 @@ def _review_summary(
             f"human review case 集合不一致：missing={missing}, extra={extra}"
         )
 
-    final_win_count = 0
-    initial_win_count = 0
-    tie_count = 0
+    preferences: dict[str, Literal["initial", "final", "tie"]] = {}
     for case_id in expected_case_ids:
         choice = choices_by_case[case_id]
         if choice == "TIE":
-            tie_count += 1
-            continue
-        if choice in {"A", "B"} and role_by_case[case_id].get(choice) == "final":
-            final_win_count += 1
+            preferences[case_id] = "tie"
+        elif role_by_case[case_id].get(choice) == "final":
+            preferences[case_id] = "final"
         else:
-            initial_win_count += 1
-    review_count = len(choices_by_case)
+            preferences[case_id] = "initial"
+    return preferences
+
+
+def _review_summary(
+    human_review: Mapping[str, Any] | None,
+    assignments: Mapping[str, Any] | None,
+    *,
+    case_results: Sequence[Mapping[str, Any]],
+    expected_suite_run_id: str | None,
+) -> _HumanReviewSummary:
+    """严格校验盲评证据，并返回不会静默吞错的聚合结果."""
+    empty_summary = _HumanReviewSummary(0, None, 0, 0, 0)
+    if assignments is None:
+        if human_review is not None:
+            raise ValueError("人工盲评存在，但 assignments 证据缺失。")
+        return empty_summary
+    if human_review is None:
+        return empty_summary
+    preferences = decode_human_preferences(
+        human_review,
+        assignments,
+        case_results=case_results,
+        expected_suite_run_id=expected_suite_run_id,
+    )
+    final_win_count = sum(value == "final" for value in preferences.values())
+    initial_win_count = sum(value == "initial" for value in preferences.values())
+    tie_count = sum(value == "tie" for value in preferences.values())
+    review_count = len(preferences)
     return _HumanReviewSummary(
         review_count=review_count,
         final_preference_rate=final_win_count / review_count,

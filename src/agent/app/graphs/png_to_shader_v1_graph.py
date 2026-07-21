@@ -51,7 +51,7 @@ from shaderforge.store import LocalArtifactStore
 
 ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_ARTIFACT_ROOT = ROOT / "output/png-to-shader"
-PNG_TO_SHADER_V1_RECURSION_LIMIT = 96
+PNG_TO_SHADER_V1_RECURSION_LIMIT = 256
 
 
 def _default_renderer_factory(

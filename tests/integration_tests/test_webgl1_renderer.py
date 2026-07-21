@@ -33,6 +33,14 @@ async def test_m1_webgl1_golden_smoke_is_stable_and_never_returns_stale_png():
     assert first.console_errors == ()
     assert first.metadata is not None
     assert "WebGL" in first.metadata.gl_version
+    assert first.metadata.webgl_context_kind == "webgl1"
+    assert first.metadata.canvas_alpha is False
+    assert first.metadata.canvas_antialias is False
+    assert first.metadata.canvas_depth is False
+    assert first.metadata.canvas_stencil is False
+    assert first.metadata.premultiplied_alpha is False
+    assert first.metadata.preserve_drawing_buffer is True
+    assert first.metadata.canvas_clear_color_rgba == (1.0, 1.0, 1.0, 1.0)
 
     assert second.image_bytes == first.image_bytes
     assert second.image_sha256 == first.image_sha256

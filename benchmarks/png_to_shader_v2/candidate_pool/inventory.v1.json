@@ -1,0 +1,119 @@
+{
+  "schema_version": "png_to_shader_v2_candidate_pool_v1",
+  "snapshot_id": "cc0_candidate_pool_20260720",
+  "captured_on": "2026-07-20",
+  "access_policy": "development_visible_candidate",
+  "release_held_out_eligible": false,
+  "release_ineligibility_reason": "development_side_observed",
+  "integrity": {
+    "png_count": 974,
+    "unique_sha256_count": 894,
+    "internal_duplicate_groups": 20,
+    "duplicate_file_count": 80,
+    "invalid_png_count": 0,
+    "current_manifest_sha256_collisions": 0
+  },
+  "sources": [
+    {
+      "source_id": "kenney_particle_pack_cc0",
+      "source_page": "https://kenney.nl/assets/particle-pack",
+      "license": "CC0-1.0",
+      "license_evidence": "images/kenney_particle_pack/License.txt",
+      "archive": "raw_archives/kenney_particle-pack.zip",
+      "archive_sha256": "b631d4b07f7002549fdcf155f01141ad482f79f3440e4e301eed49ce5f1d8958",
+      "visual_family": "kenney_particle_pack"
+    },
+    {
+      "source_id": "kenney_ui_pack_cc0",
+      "source_page": "https://kenney.nl/assets/ui-pack",
+      "license": "CC0-1.0",
+      "license_evidence": "images/kenney_ui_pack/License.txt",
+      "archive": "raw_archives/kenney_ui-pack.zip",
+      "archive_sha256": "a8a14a234911eb648c062622915c93e79e94e97cb7f9f375a70f6617f1174318",
+      "visual_family": "kenney_ui_pack"
+    },
+    {
+      "source_id": "oga_ui_sprite_pack_cc0",
+      "source_page": "https://opengameart.org/content/ui-sprite-pack",
+      "license": "CC0-1.0",
+      "license_evidence": "source_page",
+      "archive": "raw_archives/opengameart-ui-sprites.zip",
+      "archive_sha256": "ed26cac641b6460684107c71343e1887c7d6a80ae955853088a7f726cd528648",
+      "visual_family": "oga_ui_sprite_pack"
+    },
+    {
+      "source_id": "oga_skeuomorphic_buttons_cc0",
+      "source_page": "https://opengameart.org/content/skeuomorphic-circular-buttons",
+      "license": "CC0-1.0",
+      "license_evidence": "source_page",
+      "files": [
+        {
+          "path": "images/opengameart/oga-skeuomorphicbuttons.png",
+          "sha256": "ff7be93829998da4f3ee2560a51f739437124c440568fe96c7fc7005ca8ab552"
+        }
+      ],
+      "visual_family": "oga_skeuomorphic_buttons"
+    },
+    {
+      "source_id": "oga_power_rings_cc0",
+      "source_page": "https://opengameart.org/content/power-rings",
+      "license": "CC0-1.0",
+      "license_evidence": "source_page",
+      "files": [
+        {
+          "path": "images/opengameart/oga-power_ring.png",
+          "sha256": "5d9c8624db47f735e053ebe1921ba9cfec685056db28db3f68268c97e925affb"
+        }
+      ],
+      "visual_family": "oga_power_rings"
+    },
+    {
+      "source_id": "oga_wolf_spirit_rings_cc0",
+      "source_page": "https://opengameart.org/content/wolf-spirit",
+      "license": "CC0-1.0",
+      "license_evidence": "source_page",
+      "files": [
+        {
+          "path": "images/opengameart/oga-aro-azul.png",
+          "sha256": "33479f2897f438cdb7746fb9ba66962cb950f3c5e00d11c1801250447ab588e9"
+        },
+        {
+          "path": "images/opengameart/oga-aro-verde.png",
+          "sha256": "b953efbec2f5a68eda140b40e40140b0152afb5ebd21dbcc936de360050bbb64"
+        },
+        {
+          "path": "images/opengameart/oga-aro-rojo.png",
+          "sha256": "c25e69c9aaad461526e705edbb4b963abca0e4c721e0a184700ffc038a21ea0c"
+        },
+        {
+          "path": "images/opengameart/oga-aro-morado.png",
+          "sha256": "3ad88c0d2ccbf7b8d1140f9e01789145d443d6b8b3cffc2c80f5f90584bc6c04"
+        }
+      ],
+      "visual_family": "oga_wolf_spirit_rings"
+    },
+    {
+      "source_id": "oga_magic_summoning_circle_cc0",
+      "source_page": "https://opengameart.org/content/magic-summoning-circle",
+      "license": "CC0-1.0",
+      "license_evidence": "source_page_and_archive_readme",
+      "archive": "raw_archives/opengameart-summoning-circle.zip",
+      "archive_sha256": "06a2ec5444de67d9c3ac2ed6957575b7117b4c1b3a7d16d74f4978d3a1fdcdf0",
+      "visual_family": "oga_magic_summoning_circle"
+    },
+    {
+      "source_id": "oga_ring_sprite_cc0",
+      "source_page": "https://opengameart.org/content/ring",
+      "license": "CC0-1.0",
+      "license_evidence": "source_page_and_archive_readme",
+      "archive": "raw_archives/opengameart-ring.7z",
+      "archive_sha256": "4160c05fe0eeb3dba010b3e53b4420dccb86c72ce6fc8658dec51d9ff76eff2f",
+      "visual_family": "oga_ring_sprite"
+    }
+  ],
+  "preview": {
+    "path": "overview.png",
+    "sha256": "f92d196244a7e679a7047c509180ac93e07a241ac7fba5e046b38ac086c3812b",
+    "sample_count": 33
+  }
+}

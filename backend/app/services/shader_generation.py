@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, cast
 from uuid import UUID
 
+from backend.app.core.runtime_policy import RuntimePolicyRegistry
 from backend.app.schemas.shader import (
     GenerationMode,
     QualityPresetName,
@@ -54,6 +55,7 @@ class ShaderGenerationDependencies:
     pool: Any
     procedural_service: Any
     locks: ProjectLockRegistry
+    runtime_policy: RuntimePolicyRegistry
 
 
 class ShaderGenerationUseCaseError(RuntimeError):
@@ -312,6 +314,22 @@ def _procedural_review(value: dict[str, Any] | None) -> ShaderReview | None:
     )
 
 
+def _assert_runtime_policy_result(
+    result: Any,
+    expected: dict[str, Any],
+) -> None:
+    """拒绝 Agent 实际生效策略与 Backend 冻结策略不一致的结果."""
+    actual = {
+        "schema_version": result.runtime_policy_schema_version,
+        "config_sha256": result.runtime_policy_sha256,
+        "profile": result.quality_preset,
+        "budget": result.budget_policy,
+        "acceptance": result.acceptance_policy,
+    }
+    if actual != expected:
+        raise RuntimeError("Agent 返回的运行策略证据与 Backend 冻结配置不一致。")
+
+
 async def execute_shader_generation(
     command: ShaderGenerationCommand,
     dependencies: ShaderGenerationDependencies,
@@ -321,6 +339,8 @@ async def execute_shader_generation(
     run_id = command.run_id
     generation_mode = command.generation_mode
     quality_preset = command.quality_preset
+    resolved_policy = dependencies.runtime_policy.resolve(quality_preset)
+    runtime_policy_evidence = resolved_policy.evidence()
     pool = dependencies.pool
     glsl_model_name, vision_model_name = get_png_to_shader_v1_models()
     run_started = False
@@ -351,6 +371,7 @@ async def execute_shader_generation(
                     generation_mode=generation_mode,
                     quality_preset=quality_preset,
                     instruction=command.instruction,
+                    runtime_policy=runtime_policy_evidence,
                 )
                 run_started = True
 
@@ -361,10 +382,17 @@ async def execute_shader_generation(
                 run_id=str(run_id),
                 quality_preset=quality_preset,
                 instruction=command.instruction,
+                budget_policy=resolved_policy.budget,
+                acceptance_policy=resolved_policy.acceptance,
+                runtime_policy_schema_version=(
+                    resolved_policy.config_schema_version
+                ),
+                runtime_policy_sha256=resolved_policy.config_sha256,
                 service=dependencies.procedural_service,
             )
             if result is None:
                 raise RuntimeError("procedural_v1 未返回结果。")
+            _assert_runtime_policy_result(result, runtime_policy_evidence)
     except ProjectBusyError as exc:
         duration_ms = (time.perf_counter() - command.started_at) * 1000
         logger.warning(
@@ -645,6 +673,7 @@ async def execute_shader_generation(
                     "final_render_url": f"{artifact_base}/final-render",
                     "metrics_url": metrics_url,
                     "manifest_url": f"{artifact_base}/manifest",
+                    "runtime_policy": runtime_policy_evidence,
                 },
             )
         total_loss = (

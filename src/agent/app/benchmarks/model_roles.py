@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 from uuid import uuid4
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 from langchain_core.messages import BaseMessage, SystemMessage
 from pydantic import Field, model_validator
 from typing_extensions import Self

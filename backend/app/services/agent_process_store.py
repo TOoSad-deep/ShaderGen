@@ -226,6 +226,7 @@ async def start_shader_generation_run(
     generation_mode: str = "procedural_v1",
     quality_preset: str | None = None,
     instruction: str = "",
+    runtime_policy: Mapping[str, Any] | None = None,
 ) -> None:
     """写入 Shader 生成运行记录."""
     try:
@@ -240,6 +241,7 @@ async def start_shader_generation_run(
                 "generation_mode": generation_mode,
                 "quality_preset": quality_preset,
                 "instruction": instruction,
+                "runtime_policy": dict(runtime_policy or {}),
             },
             glsl_model_name=glsl_model_name,
             vision_model_name=vision_model_name,

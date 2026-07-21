@@ -1,0 +1,168 @@
+{
+  "schema_version": "expected_primitives_taxonomy_v1",
+  "taxonomy_id": "png_to_shader_expected_primitives",
+  "taxonomy_version": "png_to_shader_expected_primitives_v1",
+  "node_registry_version": "effect_node_registry_v0",
+  "primitives": [
+    {
+      "primitive_id": "circle_sdf",
+      "category": "geometry",
+      "node_kind": "circle_sdf",
+      "node_version": "1",
+      "template_id": "geometry.circle_sdf.v0",
+      "description": "圆形 signed-distance geometry。"
+    },
+    {
+      "primitive_id": "ellipse_sdf",
+      "category": "geometry",
+      "node_kind": "ellipse_sdf",
+      "node_version": "1",
+      "template_id": "geometry.ellipse_sdf.v0",
+      "description": "椭圆 signed-distance geometry。"
+    },
+    {
+      "primitive_id": "rounded_rect_sdf",
+      "category": "geometry",
+      "node_kind": "rounded_rect_sdf",
+      "node_version": "1",
+      "template_id": "geometry.rounded_rect_sdf.v0",
+      "description": "圆角矩形 signed-distance geometry。"
+    },
+    {
+      "primitive_id": "fill",
+      "category": "fill",
+      "node_kind": "solid_fill",
+      "node_version": "1",
+      "template_id": "fill.solid.v0",
+      "description": "V1 expected-primitives 中的纯色填充兼容标签。"
+    },
+    {
+      "primitive_id": "solid_fill",
+      "category": "fill",
+      "node_kind": "solid_fill",
+      "node_version": "1",
+      "template_id": "fill.solid.v0",
+      "description": "Effect Genome 的纯色填充。"
+    },
+    {
+      "primitive_id": "linear_position_field",
+      "category": "fill",
+      "node_kind": "linear_gradient",
+      "node_version": "1",
+      "template_id": "fill.linear_gradient.v0",
+      "description": "V1 线性位置场标签，对应线性渐变节点。"
+    },
+    {
+      "primitive_id": "linear_gradient",
+      "category": "fill",
+      "node_kind": "linear_gradient",
+      "node_version": "1",
+      "template_id": "fill.linear_gradient.v0",
+      "description": "Effect Genome 的线性渐变填充。"
+    },
+    {
+      "primitive_id": "gaussian_color_lobe",
+      "category": "fill",
+      "node_kind": "gaussian_color_lobe",
+      "node_version": "1",
+      "template_id": "fill.gaussian_color_lobe.v0",
+      "description": "局部高斯颜色瓣。"
+    },
+    {
+      "primitive_id": "gaussian_shadow",
+      "category": "light",
+      "node_kind": "shadow",
+      "node_version": "1",
+      "template_id": "light.shadow.v0",
+      "description": "V1 高斯阴影标签，对应 Shadow 节点。"
+    },
+    {
+      "primitive_id": "gaussian_glow",
+      "category": "light",
+      "node_kind": "glow",
+      "node_version": "1",
+      "template_id": "light.glow.v0",
+      "description": "V1 高斯辉光标签，对应 Glow 节点。"
+    },
+    {
+      "primitive_id": "rim_band",
+      "category": "light",
+      "node_kind": "rim_band",
+      "node_version": "1",
+      "template_id": "light.rim_band.v0",
+      "description": "方向性边缘光带。"
+    },
+    {
+      "primitive_id": "outline_band",
+      "category": "light",
+      "node_kind": "outline_band",
+      "node_version": "1",
+      "template_id": "light.outline_band.v0",
+      "description": "轮廓带。"
+    },
+    {
+      "primitive_id": "radial_band",
+      "category": "light",
+      "node_kind": "rim_band",
+      "node_version": "1",
+      "template_id": "light.rim_band.v0",
+      "description": "V1 径向带兼容标签，由 RimBand 模板表达。"
+    },
+    {
+      "primitive_id": "angular_window",
+      "category": "light",
+      "node_kind": "arc_highlight",
+      "node_version": "1",
+      "template_id": "light.arc_highlight.v0",
+      "description": "V1 角向窗口兼容标签，对应弧形高光。"
+    },
+    {
+      "primitive_id": "arc_highlight",
+      "category": "light",
+      "node_kind": "arc_highlight",
+      "node_version": "1",
+      "template_id": "light.arc_highlight.v0",
+      "description": "Effect Genome 的弧形高光。"
+    },
+    {
+      "primitive_id": "union_mask",
+      "category": "mask_algebra",
+      "node_kind": "union_mask",
+      "node_version": "1",
+      "template_id": "mask.union.v0",
+      "description": "两个 mask 的并集。"
+    },
+    {
+      "primitive_id": "intersection_mask",
+      "category": "mask_algebra",
+      "node_kind": "intersection_mask",
+      "node_version": "1",
+      "template_id": "mask.intersection.v0",
+      "description": "两个 mask 的交集。"
+    },
+    {
+      "primitive_id": "difference_mask",
+      "category": "mask_algebra",
+      "node_kind": "difference_mask",
+      "node_version": "1",
+      "template_id": "mask.difference.v0",
+      "description": "两个 mask 的差集。"
+    },
+    {
+      "primitive_id": "over_blend",
+      "category": "composition",
+      "node_kind": "over_blend",
+      "node_version": "1",
+      "template_id": "composition.over_blend.v0",
+      "description": "前景覆盖背景的 alpha composition。"
+    },
+    {
+      "primitive_id": "color_output",
+      "category": "output",
+      "node_kind": "color_output",
+      "node_version": "1",
+      "template_id": "output.color.v0",
+      "description": "最终颜色输出节点。"
+    }
+  ]
+}
