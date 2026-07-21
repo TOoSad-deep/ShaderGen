@@ -54,12 +54,12 @@ import json
 import sys
 import shaderforge.contracts
 import agent.app.contracts.llm
-import agent.app.lab.models
+import nodelab.models
 print(json.dumps({
     'playwright': 'playwright.async_api' in sys.modules,
     'numpy': 'numpy' in sys.modules,
     'pillow': 'PIL.Image' in sys.modules,
-    'lab_runner': 'agent.app.lab.runner' in sys.modules,
+    'lab_runner': 'nodelab.runner' in sys.modules,
     'v1_contracts': 'agent.app.contracts.png_to_shader_v1' in sys.modules,
 }))
 """
@@ -93,21 +93,37 @@ def test_states_do_not_depend_on_agent_implementation_layers() -> None:
 
 
 def test_node_lab_core_is_transport_free_and_does_not_reflect_nodes() -> None:
-    violations = _violations(
-        "lab",
-        (
-            "backend",
-            "fastapi",
-            "agent.app.graphs",
-            "agent.app.llms",
-            "agent.app.nodes",
-        ),
+    core_root = ROOT / "src/nodelab"
+    forbidden = (
+        "backend",
+        "fastapi",
+        "agent.app.graphs",
+        "agent.app.llms",
+        "agent.app.nodes",
+        "shaderforge.analysis",
+        "shaderforge.evaluation",
+        "shaderforge.public",
+        "shaderforge.rendering",
+        "shaderforge.validation",
     )
+    violations = [
+        f"{path.relative_to(core_root).as_posix()}: {target}"
+        for path in sorted(core_root.rglob("*.py"))
+        for target in _import_targets(path)
+        if target.startswith(forbidden)
+    ]
     assert violations == []
+    assert all(
+        "png_to_shader_v1" not in path.read_text(encoding="utf-8")
+        for path in core_root.glob("*.py")
+    )
 
 
 def test_node_lab_node_execution_is_owned_by_production_provider() -> None:
-    adapters = ROOT / "src/agent/app/lab/adapters.py"
+    adapters = (
+        ROOT
+        / "src/agent/app/nodes/png_to_shader_v1/integrations/node_lab/capability_executor.py"
+    )
     deterministic = (
         ROOT
         / "src/agent/app/nodes/png_to_shader_v1/integrations/node_lab/deterministic.py"
@@ -145,11 +161,11 @@ def test_node_lab_node_execution_is_owned_by_production_provider() -> None:
 def test_m5_and_node_lab_benchmarks_keep_independent_evidence() -> None:
     m5_runner = ROOT / "scripts/run_png_to_shader_v1_benchmark.py"
     node_lab_runner = ROOT / "scripts/run_node_lab_benchmark.py"
-    node_lab_benchmark = ROOT / "src/agent/app/lab/benchmark.py"
+    node_lab_benchmark = ROOT / "src/nodelab/benchmark.py"
 
     m5_imports = _import_targets(m5_runner)
     assert not any(
-        target.startswith(("agent.app.lab", "agent.app.services.node_lab"))
+        target.startswith(("nodelab", "agent.app.services.node_lab"))
         for target in m5_imports
     )
     assert "agent.app.services.png_to_shader_v1" in m5_imports
@@ -176,6 +192,7 @@ def test_agent_package_layout_uses_llms_gateway() -> None:
     assert '"agent.app.nodes.integrations"' not in pyproject
     assert '"agent.app.nodes.integrations.node_lab"' not in pyproject
     for package in (
+        "nodelab",
         "agent.app.contracts",
         "agent.app.llms",
         "agent.app.llms.families",

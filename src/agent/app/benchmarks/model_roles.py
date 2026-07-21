@@ -34,14 +34,6 @@ from agent.app.contracts.llm import (
     LLMResponse,
 )
 from agent.app.contracts.png_to_shader_v1 import AuthorMode
-from agent.app.lab.benchmark import source_environment
-from agent.app.lab.models import (
-    Identifier,
-    LabRunCreateRequest,
-    NodeLabModel,
-    StepExecutionRequest,
-    ensure_json_object,
-)
 from agent.app.nodes.png_to_shader_v1 import (
     AUTHOR_PROMPTS,
     SHADER_AUTHOR_MODEL_CONFIG,
@@ -53,6 +45,14 @@ from agent.app.nodes.png_to_shader_v1 import (
 )
 from agent.app.prompts.prompt_loader import PromptDefinition
 from agent.app.services.node_lab import create_node_lab_application
+from nodelab.benchmark import source_environment
+from nodelab.models import (
+    Identifier,
+    LabRunCreateRequest,
+    NodeLabModel,
+    StepExecutionRequest,
+    ensure_json_object,
+)
 from shaderforge.public import (
     WEBGL1_STATIC_NO_TEXTURE_V1,
     RunArtifactStore,

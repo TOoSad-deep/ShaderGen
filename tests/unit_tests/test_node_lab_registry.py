@@ -5,11 +5,13 @@ from pathlib import Path
 import pytest
 
 from agent.app.graphs.png_to_shader_v1_graph import png_to_shader_v1_graph
-from agent.app.lab.capabilities import build_deterministic_capability_registry
-from agent.app.lab.models import NodeLabError
 from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
     build_png_to_shader_v1_registry,
 )
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab.capability_registry import (
+    build_png_to_shader_v1_capability_registry,
+)
+from nodelab.models import NodeLabError
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -214,7 +216,7 @@ def test_unknown_node_is_rejected_without_reflection() -> None:
 
 
 def test_capability_descriptors_expose_actual_input_limits() -> None:
-    registry = build_deterministic_capability_registry()
+    registry = build_png_to_shader_v1_capability_registry()
     descriptors = registry.describe_capabilities()
 
     assert len(descriptors) == 8

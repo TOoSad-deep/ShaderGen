@@ -1,4 +1,5 @@
 schema_version: node_lab_benchmark_manifest_v1
+pipeline_id: png_to_shader_v1
 suite_id: node_lab_scenario_ai_off_v1
 repetitions: 1
 warmups: 0

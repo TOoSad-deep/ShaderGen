@@ -10,20 +10,25 @@ from agent.app.graphs.png_to_shader_v1_routing import (
     decide_after_render,
     decide_after_selection,
 )
-from agent.app.lab.adapters import RendererFactory, default_renderer_factory
-from agent.app.lab.integration import (
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab.capability_executor import (
+    RendererFactory,
+    default_renderer_factory,
+)
+from nodelab.integration import (
     NodeExecutionHost,
     NodeExecutorBinding,
     RouteDecider,
 )
-from agent.app.lab.models import ExecutionMode, NodeDescriptor
-from agent.app.lab.registry import NodeRegistry
+from nodelab.models import ExecutionMode, NodeDescriptor
+from nodelab.registry import NodeRegistry
 
+from .capability_registry import build_png_to_shader_v1_capability_registry
 from .deterministic import (
     DeterministicNodeExecutor,
     MemoryReader,
     ResourceCleaner,
 )
+from .fixtures import build_png_to_shader_v1_fixture_registry
 from .model import (
     DEFAULT_MODEL_FIXTURE_PATH,
     ModelRoleExecutor,
@@ -31,6 +36,7 @@ from .model import (
 from .registry import (
     build_png_to_shader_v1_descriptors,
 )
+from .suites import build_png_to_shader_v1_suite_registry
 
 PIPELINE_ID = "png_to_shader_v1"
 ROOT = Path(__file__).resolve().parents[7]
@@ -71,6 +77,13 @@ class PngToShaderV1NodeProvider:
             *Path(ROOT / "src/agent/app/prompts").glob("*.yaml"),
             *Path(ROOT / "src/agent/app/prompts").glob("*.py"),
             *Path(ROOT / "src/agent/app/parsers").glob("*.py"),
+            ROOT / "src/shaderforge/public.py",
+            *Path(ROOT / "src/shaderforge/analysis").glob("*.py"),
+            *Path(ROOT / "src/shaderforge/contracts").glob("*.py"),
+            *Path(ROOT / "src/shaderforge/validation").glob("*.py"),
+            *Path(ROOT / "src/shaderforge/rendering").glob("*.py"),
+            *Path(ROOT / "src/shaderforge/evaluation").glob("*.py"),
+            *Path(ROOT / "src/shaderforge/store").glob("*.py"),
             ROOT / "src/agent/app/graphs/png_to_shader_v1_routing.py",
         }
         return tuple(
@@ -149,5 +162,8 @@ __all__ = [
     "PngToShaderV1NodeProvider",
     "ResourceCleaner",
     "build_png_to_shader_v1_registry",
+    "build_png_to_shader_v1_capability_registry",
+    "build_png_to_shader_v1_fixture_registry",
+    "build_png_to_shader_v1_suite_registry",
     "create_png_to_shader_v1_node_provider",
 ]

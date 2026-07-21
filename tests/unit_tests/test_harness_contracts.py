@@ -690,15 +690,14 @@ def test_docs_check_enforces_agent_readme_harness_router(monkeypatch) -> None:
 
 def test_agent_architecture_docs_capture_harness_safety_boundaries() -> None:
     graph_architecture = _read("src/agent/app/graphs/ARCHITECTURE.md")
-    lab_architecture = _read("src/agent/app/lab/ARCHITECTURE.md")
+    lab_architecture = _read("src/nodelab/ARCHITECTURE.md")
     state_architecture = _read("src/agent/app/states/ARCHITECTURE.md")
 
     assert "失败的 deterministic measurement seed" in graph_architecture
     assert "不触发模型 compile repair" in graph_architecture
-    assert "route_deciders() -> agent.app.lab.runner -> agent.app.lab.adapters" in (
-        lab_architecture
-    )
-    assert "-X-> agent.app.graphs / production routing" in lab_architecture
+    assert "route_deciders() -> V1 capability executor" in lab_architecture
+    assert "空 Application 不默认注入" in lab_architecture
+    assert "nodelab.adapters" not in lab_architecture
     assert "模型 reasoning 原文不进入 State" in state_architecture
     for field_name in ("quality_preset", "measurement_seed_attempted", "cancelled"):
         assert f"`{field_name}`" in state_architecture
@@ -716,7 +715,7 @@ def test_agent_harness_docs_separate_product_diagnostics_and_store_boundaries() 
     assert "SHADERGEN_NODE_LAB_ENABLED=true" in readme
     for architecture_path in (
         "src/agent/app/config/ARCHITECTURE.md",
-        "src/agent/app/lab/ARCHITECTURE.md",
+        "src/nodelab/ARCHITECTURE.md",
         "src/agent/app/nodes/png_to_shader_v1/ARCHITECTURE.md",
     ):
         assert architecture_path in readme

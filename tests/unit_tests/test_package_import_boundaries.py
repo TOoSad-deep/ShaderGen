@@ -5,6 +5,7 @@ from importlib.resources import files
 from pathlib import Path
 
 import backend.sql
+import nodelab
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -81,12 +82,12 @@ def test_node_lab_model_import_does_not_construct_application_dependencies() -> 
         """
 import json
 import sys
-import agent.app.lab as lab
-from agent.app.lab.models import NodeDescriptor
+import nodelab as lab
+from nodelab.models import NodeDescriptor
 
 model_identity = lab.NodeDescriptor is NodeDescriptor
 exports_complete = set(lab.__all__) == set(lab._EXPORT_MODULES)
-runner_after_model = "agent.app.lab.runner" in sys.modules
+runner_after_model = "nodelab.runner" in sys.modules
 renderer_after_model = "shaderforge.rendering" in sys.modules
 playwright_after_model = "playwright.async_api" in sys.modules
 
@@ -99,7 +100,7 @@ print(json.dumps({
     "renderer_after_model": renderer_after_model,
     "playwright_after_model": playwright_after_model,
     "application_name": application.__name__,
-    "runner_loaded": "agent.app.lab.runner" in sys.modules,
+    "runner_loaded": "nodelab.runner" in sys.modules,
 }))
 """
     )
@@ -128,3 +129,12 @@ def test_backend_sql_is_an_explicit_packaged_resource_boundary() -> None:
     assert "CREATE TABLE IF NOT EXISTS agent_runs" in schema.read_text(
         encoding="utf-8"
     )
+
+
+def test_node_lab_is_an_explicit_typed_top_level_package() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert '    "nodelab",' in pyproject
+    assert '"nodelab" = "src/nodelab"' in pyproject
+    assert not (ROOT / "src/agent/app/lab/__init__.py").exists()
+    assert files(nodelab).joinpath("py.typed").is_file()

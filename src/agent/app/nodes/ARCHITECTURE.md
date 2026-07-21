@@ -29,7 +29,7 @@
 - Node 不决定全局流程，不持有数据库连接，不在原地修改 State。
 - Node factory 返回的 callable 同时是 Graph 与 Node Lab 的单节点调用 API。输入证据不变量（Author/provenance/GLSL、Candidate/hash、reference/measurements、best Artifact）必须由 Node 校验；Node Lab 只能适配 JSON/Artifact 形状，不能维护更严格或更宽松的平行业务规则。
 - V1 Graph 通过 `nodes/png_to_shader_v1/__init__.py` 使用稳定工厂；`model/` 和 `deterministic/` 的内部阶段 helper 不是 Graph Node。新增内部模块时必须纳入 Node Lab 递归源码指纹和架构边界扫描，不保留旧根级兼容入口。
-- 新增生产 Graph Node 时，同步在同一功能命名空间的 `integrations/node_lab` 登记 descriptor 和 binding，但禁止修改 `agent.app.lab` 或 Node Lab Service。只消费/返回 JSON-safe State 的 Node 优先用 `DirectNodeExecutor`；只有需要大对象 Artifact 化、依赖注入或输出安全投影时才写专用 Adapter。Graph 节点集合与 Provider descriptor 的一致性属于必跑测试。
+- 新增生产 Graph Node 时，同步在同一功能命名空间的 `integrations/node_lab` 登记 descriptor 和 binding，但禁止修改 `nodelab` 或 Node Lab Service。只消费/返回 JSON-safe State 的 Node 优先用 `DirectNodeExecutor`；只有需要大对象 Artifact 化、依赖注入或输出安全投影时才写专用 Adapter。Graph 节点集合与 Provider descriptor 的一致性属于必跑测试。
 - 策略晋升同时暴露无副作用的生产 preview Node；真实 Graph 晋升与 Node Lab preview 共用同一份已验证计划构造，不允许在 Lab 内重写摘要或门禁。
 - 两个以上 Node 复用的消息 helper 放入 `app/messages/`；reasoning 日志策略放入 `app/observability/`。
 - 不新增把分析、生成、测试和优化混在一起的 `mega_agent_node`。

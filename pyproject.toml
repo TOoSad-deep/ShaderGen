@@ -41,7 +41,7 @@ packages = [
     "agent.app.config",
     "agent.app.contracts",
     "agent.app.graphs",
-    "agent.app.lab",
+    "nodelab",
     "agent.app.llms",
     "agent.app.llms.families",
     "agent.app.messages",
@@ -81,6 +81,7 @@ packages = [
 ]
 [tool.setuptools.package-dir]
 "agent" = "src/agent"
+"nodelab" = "src/nodelab"
 "shaderforge" = "src/shaderforge"
 
 

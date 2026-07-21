@@ -7,12 +7,12 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 
-from agent.app.lab.models import CapabilityExecutionRequest, LabRunCreateRequest
-from agent.app.lab.runner import NodeLabApplication
 from agent.app.services.node_lab import create_node_lab_application
 from backend.app.api.router import build_api_router
 from backend.app.main import log_request_validation_error
 from backend.app.services.node_lab import NodeLabBackendService
+from nodelab.models import CapabilityExecutionRequest, LabRunCreateRequest
+from nodelab.runner import NodeLabApplication
 from shaderforge.rendering import CompileResult, RenderResult
 from shaderforge.validation import validate_shader
 
@@ -278,6 +278,13 @@ def test_node_lab_http_batch_uses_fixed_ai_off_suite_and_persists_report(
     assert unknown.status_code == 422
     assert unknown.json()["detail"]["code"] == "input_contract_invalid"
     assert "arbitrary-manifest" not in unknown.text
+
+    valid_unknown = client.post(
+        "/api/lab/v1/batches",
+        json={"suite_id": "unknown-suite-v1"},
+    )
+    assert valid_unknown.status_code == 404
+    assert valid_unknown.json()["detail"]["code"] == "suite_not_found"
 
 
 def test_model_preview_and_cost_gates_are_enforced_before_step_creation(

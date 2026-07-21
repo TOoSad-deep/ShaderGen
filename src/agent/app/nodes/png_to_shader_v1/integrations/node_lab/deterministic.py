@@ -16,20 +16,6 @@ from agent.app.graphs.png_to_shader_v1_routing import (
     decide_after_render,
     decide_after_selection,
 )
-from agent.app.lab.adapters import (
-    RendererFactory,
-    ShaderRenderer,
-    default_renderer_factory,
-)
-from agent.app.lab.models import (
-    ArtifactDescriptor,
-    LabRunRecord,
-    NodeDescriptor,
-    NodeExecutionResult,
-    NodeLabError,
-    StepExecutionRequest,
-    ensure_json_object,
-)
 from agent.app.nodes.png_to_shader_v1.deterministic import (
     NodeEvidenceError,
     ProjectMemoryReader,
@@ -47,6 +33,20 @@ from agent.app.nodes.png_to_shader_v1.deterministic import (
     make_preview_validated_strategy_node,
     make_render_and_evaluate_node,
     make_select_current_best_node,
+)
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab.capability_executor import (
+    RendererFactory,
+    ShaderRenderer,
+    default_renderer_factory,
+)
+from nodelab.models import (
+    ArtifactDescriptor,
+    LabRunRecord,
+    NodeDescriptor,
+    NodeExecutionResult,
+    NodeLabError,
+    StepExecutionRequest,
+    ensure_json_object,
 )
 from shaderforge.public import (
     ArtifactRef,

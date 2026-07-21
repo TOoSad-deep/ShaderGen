@@ -10,7 +10,8 @@ from typing import Any
 
 import pytest
 
-from agent.app.lab.benchmark import (
+from agent.app.services.node_lab import create_node_lab_application
+from nodelab.benchmark import (
     BenchmarkExpectation,
     ValidatedBenchmarkSuite,
     compare_benchmark_reports,
@@ -18,9 +19,7 @@ from agent.app.lab.benchmark import (
     run_benchmark_suite,
     source_environment,
 )
-from agent.app.lab.runner import NodeLabApplication
-from agent.app.lab.store import NodeLabStore
-from agent.app.services.node_lab import create_node_lab_application
+from nodelab.runner import NodeLabApplication
 from shaderforge.rendering import CompileResult, RenderResult
 from shaderforge.validation import validate_shader
 
@@ -379,11 +378,9 @@ async def test_warm_renderer_is_reused_and_warmup_is_excluded(
         renderers.append(renderer)
         return renderer
 
-    application = NodeLabApplication(
-        store=NodeLabStore(tmp_path / "lab"),
+    application = create_node_lab_application(
+        root=tmp_path / "lab",
         renderer_factory=factory,
-        id_factory=SequentialIds(),
-        now=lambda: FIXED_NOW,
     )
     suite = load_benchmark_manifest(
         WARM_MANIFEST,

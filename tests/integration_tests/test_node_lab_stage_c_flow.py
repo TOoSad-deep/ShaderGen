@@ -11,12 +11,6 @@ from fastapi.testclient import TestClient
 from langchain_core.messages import BaseMessage
 
 from agent.app.contracts.llm import LLMCallOptions, LLMResponse
-from agent.app.lab.models import (
-    LabRunCreateRequest,
-    NodeLabError,
-    StepExecutionRequest,
-    StepExecutionResponse,
-)
 from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
     MODEL_EXECUTION_MODES,
     DeterministicNodeExecutor,
@@ -26,6 +20,12 @@ from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
 from agent.app.services.node_lab import NodeLabApplication, create_node_lab_application
 from backend.app.api.routes.node_lab import router as node_lab_router
 from backend.app.services.node_lab import NodeLabBackendService
+from nodelab.models import (
+    LabRunCreateRequest,
+    NodeLabError,
+    StepExecutionRequest,
+    StepExecutionResponse,
+)
 from tests.fixtures.png_to_shader_v1_samples import GOLDEN_GLSL
 
 ROOT = Path(__file__).resolve().parents[2]

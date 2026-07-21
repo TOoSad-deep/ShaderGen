@@ -6,13 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from agent.app.lab.models import (
+from agent.app.services.node_lab import create_node_lab_application
+from nodelab.models import (
     CapabilityExecutionRequest,
     LabRunCreateRequest,
     StepExecutionRequest,
 )
-from agent.app.lab.runner import NodeLabApplication
-from agent.app.services.node_lab import create_node_lab_application
+from nodelab.runner import NodeLabApplication
 from shaderforge.rendering import CompileResult, RenderResult
 from shaderforge.validation import validate_shader
 

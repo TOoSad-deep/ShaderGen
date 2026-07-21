@@ -14,13 +14,13 @@ backend/app/services（产品路径）
 agent.app.llms
   -> 实现 agent.app.contracts.llm.LLMGateway
 
-agent.app.graphs / deterministic nodes / lab capabilities
+agent.app.graphs / deterministic nodes / Node Lab provider capabilities
   -> shaderforge.public（跨能力聚合入口）
   -> shaderforge.analysis / contracts / evaluation / generation / rendering / store / validation（typed 子包公共根）
 
 backend 诊断 Route（仅显式开启）/ CLI / benchmark / tests
   -> agent.app.services.node_lab
-  -> agent.app.lab（通用 Provider 协议、Fixture、不可变步骤与 Artifact Harness）
+  -> nodelab（通用 Provider 协议、Fixture、不可变步骤与 Artifact Harness）
   -> agent.app.nodes.png_to_shader_v1.integrations.node_lab 公共 Provider
      -> production Node factory / routing / Prompt / Parser
 
@@ -40,7 +40,6 @@ backend 诊断 Route（仅显式开启）/ CLI / benchmark / tests
 - `states/`：图 State 和 Runtime Context 类型。
 - `nodes/`：按 Pipeline/版本保存生产 Node。当前 `nodes/png_to_shader_v1/` 统一容纳 `model/`、`deterministic/` 和 `integrations/node_lab/`；模型角色只依赖 Gateway 抽象，确定性 Node 可依赖 ShaderForge 公共能力，新 Node 在同一功能命名空间的 Provider 登记，不修改 Harness。
 - `llms/`：LangChain Gateway、provider 配置、model-family 客户端和统一响应。
-- `lab/`：Node Lab transport-free Harness；保存通用 `NodeProvider`/Executor 协议、动态 Registry、严格 Schema、Fixture、LabRun/步骤/Artifact 证据、AI-off benchmark、scenario binding、cold/warm Renderer 生命周期和中断恢复，不直接注册 FastAPI，也不导入任何具体 Node/Graph。
 - `messages/`：两个以上 Node 复用的消息构造 helper。
 - `memory/`：项目长期记忆结构和抽象 Store 操作。
 - `context/`：不访问 Store 的纯 GSSC Context Builder。

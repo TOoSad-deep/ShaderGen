@@ -8,12 +8,11 @@ import json
 import sys
 from pathlib import Path
 
-from agent.app.lab.benchmark import compare_benchmark_reports
-from agent.app.lab.suites import (
-    describe_registered_suites,
-    resolve_registered_suite,
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab.suites import (
+    build_png_to_shader_v1_suite_registry,
 )
 from agent.app.services.node_lab import create_node_lab_application
+from nodelab.benchmark import compare_benchmark_reports
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST = ROOT / "benchmarks/node_lab/png_to_shader_v1/manifest.yaml"
@@ -24,6 +23,7 @@ EXIT_CASE_FAILED = 1
 EXIT_CONFIGURATION_ERROR = 2
 EXIT_INTERNAL_ERROR = 3
 EXIT_INTERRUPTED = 130
+SUITES = build_png_to_shader_v1_suite_registry()
 
 
 def _write_stdout(value: dict[str, object]) -> None:
@@ -40,7 +40,7 @@ def _parser() -> argparse.ArgumentParser:
     source.add_argument("--manifest", type=Path)
     source.add_argument(
         "--suite-id",
-        choices=describe_registered_suites(),
+        choices=SUITES.describe(),
         help="选择仓库内版本化 AI-off suite；与 --manifest 互斥。",
     )
     parser.add_argument("--output-root", type=Path, default=DEFAULT_OUTPUT_ROOT)
@@ -65,7 +65,7 @@ async def _run(args: argparse.Namespace) -> int:
         return EXIT_OK
 
     manifest = (
-        resolve_registered_suite(args.suite_id)
+        SUITES.resolve(args.suite_id)
         if args.suite_id is not None
         else args.manifest or DEFAULT_MANIFEST
     )

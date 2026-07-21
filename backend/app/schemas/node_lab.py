@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-NodeLabSuiteId = Literal[
-    "node_lab_ai_off_v1",
-    "node_lab_scenario_ai_off_v1",
-    "node_lab_renderer_warm_ai_off_v1",
+NodeLabSuiteId = Annotated[
+    str,
+    Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
+    ),
 ]
 
 NODE_LAB_RUN_OPENAPI_EXAMPLES: dict[str, dict[str, Any]] = {
@@ -306,6 +309,7 @@ class NodeLabBatchValidationResponse(NodeLabHttpModel):
     """冻结 manifest 与执行形态的校验摘要."""
 
     schema_version: Literal["node_lab_benchmark_manifest_v1"]
+    pipeline_id: str | None = None
     suite_id: NodeLabSuiteId
     manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     case_count: int
@@ -328,6 +332,7 @@ class NodeLabBatchReportResponse(NodeLabHttpModel):
 
     schema_version: Literal["node_lab_benchmark_report_v1"]
     suite_run_id: str
+    pipeline_id: str | None = None
     suite_id: NodeLabSuiteId
     manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     config_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")

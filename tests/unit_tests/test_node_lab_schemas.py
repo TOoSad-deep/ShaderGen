@@ -5,8 +5,8 @@ import math
 import pytest
 from pydantic import ValidationError
 
-from agent.app.lab.fixtures import FixtureDefinition
-from agent.app.lab.models import (
+from nodelab.fixtures import FixtureDefinition
+from nodelab.models import (
     LabRunCreateRequest,
     StepExecutionRequest,
     ensure_json_object,

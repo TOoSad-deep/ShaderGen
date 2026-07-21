@@ -17,11 +17,11 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from agent.app.lab.benchmark import source_environment
-from agent.app.lab.models import CapabilityExecutionRequest, LabRunCreateRequest
 from agent.app.services.node_lab import create_node_lab_application
 from backend.app.api.routes.node_lab import router as node_lab_router
 from backend.app.services.node_lab import NodeLabBackendService
+from nodelab.benchmark import source_environment
+from nodelab.models import CapabilityExecutionRequest, LabRunCreateRequest
 from shaderforge.store import RunArtifactStore
 
 ROOT = Path(__file__).resolve().parents[1]

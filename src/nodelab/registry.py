@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from agent.app.lab.models import NodeDescriptor, NodeLabError
+from nodelab.models import NodeDescriptor, NodeLabError
 
 
 class NodeRegistry:

@@ -4,13 +4,45 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
+from typing import cast
 
 from agent.app.contracts.llm import LLMGateway
-from agent.app.lab.adapters import RendererFactory, default_renderer_factory
-from agent.app.lab.capabilities import CapabilityRegistry
-from agent.app.lab.fixtures import FixtureRegistry
-from agent.app.lab.integration import NodeExecutor, NodeProvider
-from agent.app.lab.models import (
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
+    DEFAULT_MODEL_FIXTURE_PATH,
+    MemoryReader,
+    ResourceCleaner,
+    create_png_to_shader_v1_node_provider,
+)
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab.capability_executor import (
+    CapabilityExecutionRuntime,
+    DeterministicCapabilityExecutor,
+    RendererFactory,
+    ShaderRenderer,
+    default_renderer_factory,
+)
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab.capability_registry import (
+    build_png_to_shader_v1_capability_registry,
+)
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab.fixtures import (
+    build_png_to_shader_v1_fixture_registry,
+)
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab.suites import (
+    build_png_to_shader_v1_suite_registry,
+)
+from nodelab.capabilities import CapabilityRegistry
+from nodelab.fixtures import FixtureRegistry
+from nodelab.integration import (
+    AsyncResource,
+    BenchmarkResourceFactory,
+    CapabilityExecutorFactory,
+    CapabilityRuntimeFactory,
+    NodeExecutionHost,
+    NodeExecutor,
+    NodeProvider,
+    RouteCapabilityProvider,
+    RouteDecider,
+)
+from nodelab.models import (
     ArtifactDescriptor,
     CapabilityDescriptor,
     CapabilityExecutionResponse,
@@ -19,33 +51,24 @@ from agent.app.lab.models import (
     StepExecutionResponse,
     StepSummary,
 )
-from agent.app.lab.models import (
+from nodelab.models import (
     CapabilityExecutionRequest as CapabilityExecutionRequest,
 )
-from agent.app.lab.models import EffectMode as EffectMode
-from agent.app.lab.models import (
+from nodelab.models import EffectMode as EffectMode
+from nodelab.models import (
     ExecutionMode as ExecutionMode,
 )
-from agent.app.lab.models import (
+from nodelab.models import (
     LabRunCreateRequest as LabRunCreateRequest,
 )
-from agent.app.lab.models import NodeLabError as NodeLabError
-from agent.app.lab.models import (
+from nodelab.models import NodeLabError as NodeLabError
+from nodelab.models import (
     StepExecutionRequest as StepExecutionRequest,
 )
-from agent.app.lab.registry import NodeRegistry
-from agent.app.lab.runner import NodeLabApplication as NodeLabApplication
-from agent.app.lab.store import NodeLabStore
-from agent.app.lab.suites import (
-    describe_registered_suites,
-    resolve_registered_suite,
-)
-from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
-    DEFAULT_MODEL_FIXTURE_PATH,
-    MemoryReader,
-    ResourceCleaner,
-    create_png_to_shader_v1_node_provider,
-)
+from nodelab.registry import NodeRegistry
+from nodelab.runner import NodeLabApplication as NodeLabApplication
+from nodelab.store import NodeLabStore
+from nodelab.suites import SuiteRegistry
 
 ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_NODE_LAB_ROOT = ROOT / "output/node-lab"
@@ -59,6 +82,10 @@ def create_node_lab_application(
     registry: NodeRegistry | None = None,
     fixtures: FixtureRegistry | None = None,
     capability_registry: CapabilityRegistry | None = None,
+    capability_executor_factory: CapabilityExecutorFactory | None = None,
+    suite_registry: SuiteRegistry | None = None,
+    benchmark_resource_factory: BenchmarkResourceFactory | None = None,
+    capability_runtime_factory: CapabilityRuntimeFactory | None = None,
     executors: Mapping[ExecutionMode, NodeExecutor] | None = None,
     renderer_factory: RendererFactory = default_renderer_factory,
     memory_reader: MemoryReader | None = None,
@@ -68,7 +95,8 @@ def create_node_lab_application(
     model_fixture_path: str | Path = DEFAULT_MODEL_FIXTURE_PATH,
 ) -> NodeLabApplication:
     """创建可供 Backend、CLI 或测试持有生命周期的 Node Lab Application."""
-    if node_provider is None and registry is None:
+    use_default_v1 = node_provider is None and registry is None
+    if use_default_v1:
         node_provider = create_png_to_shader_v1_node_provider(
             renderer_factory=renderer_factory,
             memory_reader=memory_reader,
@@ -77,14 +105,59 @@ def create_node_lab_application(
             real_model_enabled=real_model_enabled,
             model_fixture_path=model_fixture_path,
         )
+        capability_registry = (
+            capability_registry or build_png_to_shader_v1_capability_registry()
+        )
+        suite_registry = suite_registry or build_png_to_shader_v1_suite_registry()
+        fixtures = fixtures or build_png_to_shader_v1_fixture_registry()
+
+    route_deciders: Mapping[str, RouteDecider] = (
+        node_provider.route_deciders()
+        if isinstance(node_provider, RouteCapabilityProvider)
+        else {}
+    )
+
+    def v1_capability_executor_factory(
+        host: NodeExecutionHost,
+    ) -> DeterministicCapabilityExecutor:
+        return DeterministicCapabilityExecutor(
+            host,
+            renderer_factory=renderer_factory,
+            route_deciders=route_deciders,
+        )
+
+    def v1_capability_runtime_factory(
+        resource: AsyncResource,
+        close_resource: bool,
+        resource_usage_count: int,
+    ) -> CapabilityExecutionRuntime:
+        renderer = cast(ShaderRenderer, resource)
+        return CapabilityExecutionRuntime(
+            renderer=renderer,
+            close_renderer=close_resource,
+            browser_launch_count=resource_usage_count,
+        )
+
+    if use_default_v1:
+        capability_executor_factory = (
+            capability_executor_factory or v1_capability_executor_factory
+        )
+        benchmark_resource_factory = benchmark_resource_factory or renderer_factory
+        capability_runtime_factory = (
+            capability_runtime_factory or v1_capability_runtime_factory
+        )
+
     application = NodeLabApplication(
         store=NodeLabStore(root),
         node_provider=node_provider,
         registry=registry,
         fixtures=fixtures,
         capability_registry=capability_registry,
+        capability_executor_factory=capability_executor_factory,
+        suite_registry=suite_registry,
         executors=executors,
-        renderer_factory=renderer_factory,
+        benchmark_resource_factory=benchmark_resource_factory,
+        capability_runtime_factory=capability_runtime_factory,
     )
     return application
 
@@ -186,9 +259,12 @@ async def run_suite(
     )
 
 
-def describe_suites() -> tuple[str, ...]:
+def describe_suites(
+    *,
+    application: NodeLabApplication | None = None,
+) -> tuple[str, ...]:
     """列出 HTTP/CLI 可安全选择的内置 AI-off suite."""
-    return describe_registered_suites()
+    return _application(application).describe_suites()
 
 
 def validate_registered_suite(
@@ -197,7 +273,8 @@ def validate_registered_suite(
     application: NodeLabApplication | None = None,
 ) -> dict[str, object]:
     """校验一个 allowlist suite，不接收客户端路径."""
-    return _application(application).validate_suite(resolve_registered_suite(suite_id))
+    app = _application(application)
+    return app.validate_suite(app.resolve_suite(suite_id))
 
 
 async def run_registered_suite(
@@ -208,8 +285,9 @@ async def run_registered_suite(
     application: NodeLabApplication | None = None,
 ) -> dict[str, object]:
     """运行一个 allowlist AI-off suite，HTTP 不具备 real 模式."""
-    return await _application(application).run_suite(
-        resolve_registered_suite(suite_id),
+    app = _application(application)
+    return await app.run_suite(
+        app.resolve_suite(suite_id),
         output_root=output_root,
         suite_run_id=suite_run_id,
     )

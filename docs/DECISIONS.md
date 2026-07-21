@@ -22,10 +22,11 @@
 | D018 | updated | D036、D044 | V1 Checkpointer、Store 与 GSSC 仍有效，persistence 生命周期现由冻结配置与补偿清理栈管理。 |
 | D023 | updated | D036 | V1 产品化边界仍有效，legacy 分流和独立 Review 部分已删除。 |
 | D027 | updated | D036 | 可靠性与安全账本原则仍有效，legacy 兼容部分已删除。 |
-| D028 | updated | D032、D038 | Node Lab Harness 原则仍有效，节点语义和 Provider 已收敛到生产功能命名空间。 |
-| D032 | updated | D038 | Node 是唯一语义实现仍有效，Provider 当前位于 V1 功能命名空间。 |
+| D028 | updated | D032、D038、D048、D049 | Node Lab Harness 原则仍有效，通用内核现为顶层 Python 包。 |
+| D032 | updated | D038、D048、D049 | Node 是唯一语义实现仍有效，Provider 及其 capability/fixture/suite 归功能命名空间。 |
 | D034 | updated | D038 | 按职责拆分仍有效，文件已进一步迁入 V1 功能命名空间。 |
 | D035 | updated | D036、D044 | 薄 Route、Backend Service 和 Renderer 双层清理仍有效；Backend persistence 清理由 D044 加固。 |
+| D048 | updated | D049 | Pipeline 作用域与无 V1 默认语义继续有效；通用内核已迁出 Agent 内部目录。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -373,3 +374,17 @@
 - 决策：后续 PNG-to-Shader 演进采用 `human_doc/png-to-shader-v2-v5-plan/` 中已正式 Review 的总纲与四版本方案：V2 建立 TargetHypothesis、RequestConstraintSet、Intent IR、Effect Genome 和 Deterministic Compiler；V3 在固定拓扑上建立版本化 Oracle、SelectionKey、SearchJournal 和确定性参数搜索；V4 只在结构停滞后通过受限 GenomePatch、版本化 shortlist、Pairwise/HITL 和 staging SelectionSnapshot 改变结构或偏好；V5 再引入 Async Run、Ledger、Checkpoint/NodeCommit、RunJob/RendererJob 双 fencing、SSE、取消和恢复。Review 结论为 Conditional Go，仅允许先实施 V2.0 Schema、Hash、Artifact Adapter、golden fixture、数据 Manifest 和 State 恢复契约；不得跳过 V2.0 并行启动 Prompt、Compiler、Search 或新 Graph。
 - 原因：第一稿在多测量假设、ConstraintSet 集合级身份、跨版本 State、Search 恢复、evaluation revision 原子发布、Renderer 幂等与 durable 副作用等位置存在可编码性断层；把 V2–V5 合成一个大任务会迫使后续版本依赖仍在变化的根契约。正式 Review 已将事实、推断、约束、Genome、Evidence、选择语义和持久化边界拆成可独立冻结的版本层，并为质量、人工评测和恢复建立可重复判定协议。
 - 影响：当前 F09 仍是唯一 `active` 功能，F02–F05 及异步产品能力继续为 `not_started`；本决策和方案文档不改变现有 V1 Graph、API、RenderContract、`current_best`、checkpoint 或发布 gate。F09 M6.2 证据冻结后，首个实现 PR 只交付 V2.0 契约和测试资产；后续每个增量必须满足总纲的一次一个 active 功能、版本化 Manifest、V1 只读兼容和对应退出门槛。
+
+## D048 - Node Lab 内核以 Pipeline 作用域装配，不持有 V1 默认语义
+
+- 日期：2026-07-21
+- 决策：`agent.app.lab` 只保留 transport-free 模型、Registry、Store、Runner、benchmark 和 Provider/Executor 协议；空 Application 不登记任何生产 Node、Fixture、capability 或 suite。Node descriptor 必须显式声明 `pipeline_id`，Node/Capability Registry、LabRun 和 benchmark manifest 在 Application 边界校验同一作用域。PNG-to-Shader V1 的 capability descriptor/Executor、Fixture 和 suite allowlist 迁入 `agent.app.nodes.png_to_shader_v1.integrations.node_lab`；`agent.app.services.node_lab` 仅在调用方未注入 Provider 时进行 V1 兼容装配。
+- 原因：原 `NodeProvider` 虽可替换，但 Harness 模型默认写死 `png_to_shader_v1`，Runner 自动注入 ShaderForge capability/Fixture，suite 和 HTTP schema 也固定为三个 V1 id。新 Agent 即使提供自有节点，仍会静默继承 V1 的校验、Renderer、路由和 benchmark，形成看似通用、实际跨 Pipeline 污染的契约。
+- 影响：显式传入新 Provider 后，capability、Fixture、suite 和 warm benchmark 资源默认为空，必须由所属 Pipeline 组合根注入；HTTP suite id 改为受限格式字符串并由当前 `SuiteRegistry` 动态校验，不再用 V1 Literal 固化。当前 V1 的 20 节点、八个 capability、三个 AI-off suite、API 路径、Graph、模型门禁和 H02 行为保持不变。新 manifest 应包含 `pipeline_id`；旧 v1 manifest 缺失该字段时仍可只读加载，但显式不匹配必须在首个 attempt 前失败。
+
+## D049 - Node Lab 抽为中立 Python 包，暂不独立部署
+
+- 日期：2026-07-21
+- 决策：将通用 Harness 从 `src/agent/app/lab/` 迁到顶层 typed 包 `src/nodelab/`，公共导入统一改为 `nodelab.*`，不保留 Agent 内部兼容壳。V1 Provider 继续归属 `agent.app.nodes.png_to_shader_v1.integrations.node_lab`，`agent.app.services.node_lab` 继续作为默认组合根，Backend Route 继续只是显式开启的可选 transport；本次不创建独立进程、远程协议或部署单元。
+- 原因：内核已不持有 Agent、Graph、ShaderForge 或 V1 语义，继续放在 Agent 内部目录会错误表达所有权并阻碍其他 Pipeline 复用；但当前执行、Artifact Store、资源生命周期和 Provider 都是同进程 Python 协议，尚无独立扩缩容、多仓/多语言、队列取消、远程鉴权或资源隔离需求，提前服务化只会增加分布式状态和运维契约。
+- 影响：`nodelab` 作为当前 `shadergen` distribution 中的独立包随 wheel 发布并携带 `py.typed`；调用方需要迁移旧的内部导入。Agent 只保留 Pipeline Provider 与组合服务，Backend/CLI/benchmark 的行为、API 路径、Graph、V1 descriptor/capability/suite 和真实模型门禁不变。未来只有出现独立部署或跨进程需求时，才在现有 Application API 外增加远程服务边界。

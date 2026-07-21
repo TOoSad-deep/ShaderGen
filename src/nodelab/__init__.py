@@ -6,14 +6,17 @@ from importlib import import_module
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from agent.app.lab.fixtures import FixtureDefinition, FixtureRegistry
-    from agent.app.lab.integration import (
+    from nodelab.capabilities import CapabilityRegistry
+    from nodelab.fixtures import FixtureDefinition, FixtureRegistry
+    from nodelab.integration import (
+        AsyncResource,
+        CapabilityExecutor,
         DirectNodeExecutor,
         NodeExecutor,
         NodeExecutorBinding,
         NodeProvider,
     )
-    from agent.app.lab.models import (
+    from nodelab.models import (
         ArtifactDescriptor,
         CapabilityDescriptor,
         CapabilityExecutionRequest,
@@ -24,13 +27,17 @@ if TYPE_CHECKING:
         StepExecutionRequest,
         StepExecutionResponse,
     )
-    from agent.app.lab.registry import NodeRegistry
-    from agent.app.lab.runner import NodeLabApplication
-    from agent.app.lab.store import NodeLabStore
+    from nodelab.registry import NodeRegistry
+    from nodelab.runner import NodeLabApplication
+    from nodelab.store import NodeLabStore
+    from nodelab.suites import SuiteRegistry
 
 __all__ = [
     "ArtifactDescriptor",
+    "AsyncResource",
     "CapabilityDescriptor",
+    "CapabilityExecutor",
+    "CapabilityRegistry",
     "CapabilityExecutionRequest",
     "CapabilityExecutionResponse",
     "FixtureDefinition",
@@ -47,27 +54,32 @@ __all__ = [
     "DirectNodeExecutor",
     "StepExecutionRequest",
     "StepExecutionResponse",
+    "SuiteRegistry",
 ]
 
 _EXPORT_MODULES = {
-    "FixtureDefinition": "agent.app.lab.fixtures",
-    "FixtureRegistry": "agent.app.lab.fixtures",
-    "DirectNodeExecutor": "agent.app.lab.integration",
-    "NodeExecutor": "agent.app.lab.integration",
-    "NodeExecutorBinding": "agent.app.lab.integration",
-    "NodeProvider": "agent.app.lab.integration",
-    "ArtifactDescriptor": "agent.app.lab.models",
-    "CapabilityDescriptor": "agent.app.lab.models",
-    "CapabilityExecutionRequest": "agent.app.lab.models",
-    "CapabilityExecutionResponse": "agent.app.lab.models",
-    "LabRunCreateRequest": "agent.app.lab.models",
-    "LabRunRecord": "agent.app.lab.models",
-    "NodeDescriptor": "agent.app.lab.models",
-    "StepExecutionRequest": "agent.app.lab.models",
-    "StepExecutionResponse": "agent.app.lab.models",
-    "NodeRegistry": "agent.app.lab.registry",
-    "NodeLabApplication": "agent.app.lab.runner",
-    "NodeLabStore": "agent.app.lab.store",
+    "FixtureDefinition": "nodelab.fixtures",
+    "FixtureRegistry": "nodelab.fixtures",
+    "CapabilityRegistry": "nodelab.capabilities",
+    "AsyncResource": "nodelab.integration",
+    "CapabilityExecutor": "nodelab.integration",
+    "DirectNodeExecutor": "nodelab.integration",
+    "NodeExecutor": "nodelab.integration",
+    "NodeExecutorBinding": "nodelab.integration",
+    "NodeProvider": "nodelab.integration",
+    "ArtifactDescriptor": "nodelab.models",
+    "CapabilityDescriptor": "nodelab.models",
+    "CapabilityExecutionRequest": "nodelab.models",
+    "CapabilityExecutionResponse": "nodelab.models",
+    "LabRunCreateRequest": "nodelab.models",
+    "LabRunRecord": "nodelab.models",
+    "NodeDescriptor": "nodelab.models",
+    "StepExecutionRequest": "nodelab.models",
+    "StepExecutionResponse": "nodelab.models",
+    "NodeRegistry": "nodelab.registry",
+    "NodeLabApplication": "nodelab.runner",
+    "NodeLabStore": "nodelab.store",
+    "SuiteRegistry": "nodelab.suites",
 }
 
 

@@ -7,8 +7,10 @@ from collections.abc import Awaitable, Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
-from agent.app.lab.models import (
+from nodelab.models import (
     ArtifactDescriptor,
+    CapabilityDescriptor,
+    CapabilityExecutionRequest,
     ExecutionMode,
     LabRunRecord,
     NodeDescriptor,
@@ -16,6 +18,29 @@ from agent.app.lab.models import (
     StepExecutionRequest,
     ensure_json_object,
 )
+
+
+class AsyncResource(Protocol):
+    """Benchmark 可跨 attempt 复用并异步关闭的领域资源."""
+
+    async def close(self) -> None:
+        """关闭资源."""
+
+
+class CapabilityExecutor(Protocol):
+    """Pipeline Provider 注入的独立 capability 执行契约."""
+
+    async def execute_capability(
+        self,
+        request: CapabilityExecutionRequest,
+        descriptor: CapabilityDescriptor,
+        runtime: object | None = None,
+    ) -> NodeExecutionResult:
+        """执行 capability；runtime 由所属 Pipeline 定义."""
+
+
+BenchmarkResourceFactory = Callable[[], AsyncResource]
+CapabilityRuntimeFactory = Callable[[AsyncResource, bool, int], object]
 
 
 class NodeExecutor(Protocol):
@@ -71,6 +96,9 @@ class NodeExecutionHost(Protocol):
         artifact_id: str,
     ) -> tuple[ArtifactDescriptor, bytes]:
         """读取同一 LabRun 的不透明 Artifact."""
+
+
+CapabilityExecutorFactory = Callable[[NodeExecutionHost], CapabilityExecutor]
 
 
 @dataclass(frozen=True)

@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from pydantic import Field, field_validator
 
-from agent.app.lab.models import (
+from nodelab.models import (
     Identifier,
     NodeLabError,
     NodeLabModel,
@@ -99,29 +99,3 @@ class FixtureRegistry:
                 key=lambda fixture: fixture.fixture_id,
             )
         )
-
-
-def build_default_fixture_registry() -> FixtureRegistry:
-    """建立阶段 A 的最小无模型 Fixture 集."""
-    return FixtureRegistry(
-        [
-            FixtureDefinition(
-                fixture_id="decide-after-render-success-v1",
-                node_id="decide_after_render",
-                fixture_version="v1",
-                input_state={
-                    "render_status": "success",
-                    "cancelled": False,
-                    "stop_reason": "",
-                    "budget_policy": {
-                        "max_model_calls": 6,
-                        "max_compile_repairs": 1,
-                    },
-                },
-                output_patch={"next_action": "select"},
-                expected_outcome="success",
-                next_action="select",
-                tags=["fixture", "routing", "ai-off"],
-            )
-        ]
-    )

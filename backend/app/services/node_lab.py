@@ -48,7 +48,7 @@ class NodeLabBackendService:
 
     def describe_suites(self) -> tuple[str, ...]:
         """列出 HTTP 可运行的固定 AI-off suite id."""
-        return describe_suites()
+        return describe_suites(application=self.application)
 
     def validate_batch_suite(self, suite_id: str) -> dict[str, object]:
         """校验 allowlist suite，不接受客户端 manifest 路径."""

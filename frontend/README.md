@@ -47,7 +47,7 @@
 ## Node Lab 工作台
 
 - `/lab` 是本地调试页面，不改变产品 `/api/shader/*` 契约。后端必须通过 `make dev-node-lab` 显式启用；普通 `make dev-backend` 下页面会显示稳定的 API 未开放错误。
-- 左侧目录来自 20 个 Node descriptor（包括确定性 `prepare_measurement_seed`）；中间输入编辑器使用机器可读示例、执行模式、Fixture、`base_step_id` 和显式模型门禁；右侧只展示安全 Output、State Diff、diagnostics/usage/provenance。
+- 左侧目录动态读取当前 Pipeline Provider 的 Node descriptor；默认 V1 为 20 个节点（包括确定性 `prepare_measurement_seed`）。中间输入编辑器使用机器可读示例、执行模式、Fixture、`base_step_id` 和显式模型门禁；右侧只展示安全 Output、State Diff、diagnostics/usage/provenance。
 - 页面支持新建或恢复 LabRun、上传同 Run 私有 Artifact、从任意父步骤分支、下载不透明 Artifact，并在底部根据 summary 重建不可变步骤 DAG；完整步骤结果按选择惰性加载并缓存，Artifact descriptor 独立维护，不与 step list 混用。
 - Real 模型步骤仍需服务端环境开关、页面单步确认和 Backend/Application 三层校验。页面不会自动开启真实模型，也不提供 `project_commit` 选项。
 

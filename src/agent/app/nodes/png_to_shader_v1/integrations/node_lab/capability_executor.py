@@ -1,4 +1,4 @@
-"""复用 ShaderForge 公共能力的 Node Lab 确定性 Adapter."""
+"""PNG-to-Shader V1 复用 ShaderForge 公共能力的 capability Executor."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from agent.app.lab.integration import RouteDecider
-from agent.app.lab.models import (
+from nodelab.integration import RouteDecider
+from nodelab.models import (
     ArtifactDescriptor,
     CapabilityDescriptor,
     CapabilityExecutionRequest,
@@ -226,8 +226,8 @@ class DeterministicCapabilityExecutor:
     async def execute_capability(
         self,
         request: CapabilityExecutionRequest,
-        descriptor: CapabilityDescriptor | None = None,
-        runtime: CapabilityExecutionRuntime | None = None,
+        descriptor: CapabilityDescriptor,
+        runtime: object | None = None,
     ) -> NodeExecutionResult:
         """执行一个 allowlist capability；descriptor 只用于统一调用签名."""
         handlers: dict[
@@ -251,19 +251,30 @@ class DeterministicCapabilityExecutor:
                 lab_run_id=request.lab_run_id,
                 details={"capability_id": request.capability_id},
             )
-        if descriptor is not None:
-            properties = descriptor.input_schema.get("properties", {})
-            if isinstance(properties, dict):
-                unknown = sorted(set(request.inputs) - set(properties))
-                if unknown:
-                    raise _input_error(
-                        request,
-                        unknown[0],
-                        f"输入包含未声明字段：{', '.join(unknown)}。",
-                    )
+        properties = descriptor.input_schema.get("properties", {})
+        if isinstance(properties, dict):
+            unknown = sorted(set(request.inputs) - set(properties))
+            if unknown:
+                raise _input_error(
+                    request,
+                    unknown[0],
+                    f"输入包含未声明字段：{', '.join(unknown)}。",
+                )
+        typed_runtime: CapabilityExecutionRuntime | None
+        if runtime is None:
+            typed_runtime = None
+        elif isinstance(runtime, CapabilityExecutionRuntime):
+            typed_runtime = runtime
+        else:
+            raise NodeLabError(
+                "capability_runtime_invalid",
+                "Capability runtime 与 PNG-to-Shader V1 不兼容。",
+                stage="capability_runtime",
+                lab_run_id=request.lab_run_id,
+            )
         try:
             if request.capability_id == "render-shader":
-                return await self._render_shader(request, runtime=runtime)
+                return await self._render_shader(request, runtime=typed_runtime)
             if handler is None:
                 raise NodeLabError(
                     "internal_invariant_failed",
@@ -590,9 +601,7 @@ class DeterministicCapabilityExecutor:
             outcome="stopped" if action == "finalize" else "success",
             output_patch=result,
             next_action=action,
-            provenance={
-                "implementation": f"{decider.__module__}.{decider.__name__}"
-            },
+            provenance={"implementation": f"{decider.__module__}.{decider.__name__}"},
             usage={"model_call_count": 0, "browser_launch_count": 0},
         )
 

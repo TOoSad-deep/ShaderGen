@@ -8,7 +8,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
-from agent.app.lab.models import (
+from nodelab.models import (
     ArtifactDescriptor,
     LabRunRecord,
     NodeLabError,

@@ -319,6 +319,10 @@ def _check_evidence_registry() -> None:
 
 
 def _check_agent_architecture_docs() -> None:
+    _require(
+        (ROOT / "src/nodelab/ARCHITECTURE.md").is_file(),
+        "src/nodelab 缺少 ARCHITECTURE.md。",
+    )
     app_dir = ROOT / "src/agent/app"
     for child in sorted(app_dir.iterdir()):
         if child.is_dir() and not child.name.startswith("__"):
@@ -545,6 +549,15 @@ def _check_agent_readme_harness_router() -> None:
         v1_nodes_architecture in readme,
         "src/agent/README.md 导航缺少 V1 Node 子架构。",
     )
+    nodelab_architecture = "src/nodelab/ARCHITECTURE.md"
+    _require(
+        nodelab_architecture in readme,
+        "src/agent/README.md 导航缺少 Node Lab 独立包架构。",
+    )
+    _require(
+        nodelab_architecture in architecture,
+        "src/agent/ARCHITECTURE.md 索引缺少 Node Lab 独立包架构。",
+    )
 
 
 def _live_harness_markdown_paths() -> list[Path]:
@@ -559,6 +572,7 @@ def _live_harness_markdown_paths() -> list[Path]:
     paths.append(ROOT / "frontend/README.md")
     paths.extend((ROOT / "src/agent").rglob("ARCHITECTURE.md"))
     paths.append(ROOT / "src/agent/README.md")
+    paths.append(ROOT / "src/nodelab/ARCHITECTURE.md")
     paths.extend((ROOT / "src/shaderforge").rglob("ARCHITECTURE.md"))
     return sorted({path for path in paths if path.is_file()})
 

@@ -6,8 +6,23 @@ from typing import Mapping
 
 import pytest
 
-from agent.app.lab.integration import DirectNodeExecutor, NodeExecutorBinding
-from agent.app.lab.models import (
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
+    build_png_to_shader_v1_registry,
+)
+from agent.app.nodes.png_to_shader_v1.integrations.node_lab.fixtures import (
+    build_png_to_shader_v1_fixture_registry,
+)
+from agent.app.services.node_lab import (
+    create_lab_run,
+    create_node_lab_application,
+    describe_nodes,
+    execute_step,
+)
+from nodelab.capabilities import CapabilityRegistry
+from nodelab.integration import DirectNodeExecutor, NodeExecutorBinding
+from nodelab.models import (
+    CapabilityDescriptor,
+    CapabilityExecutionRequest,
     LabRunCreateRequest,
     NodeDescriptor,
     NodeExecutionResult,
@@ -15,16 +30,8 @@ from agent.app.lab.models import (
     NodeLabError,
     StepExecutionRequest,
 )
-from agent.app.lab.runner import NodeLabApplication
-from agent.app.lab.store import NodeLabStore
-from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
-    build_png_to_shader_v1_registry,
-)
-from agent.app.services.node_lab import (
-    create_lab_run,
-    describe_nodes,
-    execute_step,
-)
+from nodelab.runner import NodeLabApplication
+from nodelab.store import NodeLabStore
 
 FIXED_NOW = datetime(2026, 7, 14, 8, 0, tzinfo=timezone.utc)
 
@@ -131,6 +138,17 @@ class EchoNodeProvider:
         return ("tests/unit_tests/test_node_lab_runner.py",)
 
 
+class EchoCapabilityExecutor:
+    async def execute_capability(
+        self,
+        request: CapabilityExecutionRequest,
+        descriptor: CapabilityDescriptor,
+        runtime: object | None = None,
+    ) -> NodeExecutionResult:
+        del descriptor, runtime
+        return NodeExecutionResult(output_patch={"echo": request.inputs["value"]})
+
+
 def _id_factory(values: list[str]):
     iterator = iter(values)
     return lambda: next(iterator)
@@ -176,6 +194,56 @@ async def test_custom_provider_connects_new_node_without_lab_specific_code(
     assert caught.value.code == "pipeline_scope_mismatch"
 
 
+@pytest.mark.anyio
+async def test_custom_provider_does_not_inherit_v1_capabilities_fixtures_or_suites(
+    tmp_path: Path,
+) -> None:
+    plain = create_node_lab_application(
+        root=tmp_path / "plain",
+        node_provider=EchoNodeProvider(),
+    )
+    assert plain.pipeline_id == "custom_pipeline"
+    assert plain.describe_capabilities() == ()
+    assert plain.describe_suites() == ()
+
+    capability = CapabilityDescriptor(
+        pipeline_id="custom_pipeline",
+        capability_id="echo-capability",
+        summary="返回输入值。",
+        benchmark_profiles=["micro"],
+        benchmark_metrics=["schema_pass"],
+        source_ref="tests.echo_capability",
+        input_schema={
+            "type": "object",
+            "properties": {"value": {}},
+            "required": ["value"],
+            "additionalProperties": False,
+        },
+        output_schema={
+            "type": "object",
+            "properties": {"echo": {}},
+            "required": ["echo"],
+            "additionalProperties": False,
+        },
+    )
+    configured = create_node_lab_application(
+        root=tmp_path / "configured",
+        node_provider=EchoNodeProvider(),
+        capability_registry=CapabilityRegistry([capability]),
+        capability_executor_factory=lambda _host: EchoCapabilityExecutor(),
+    )
+    run = configured.create_run(LabRunCreateRequest())
+    response = await configured.execute_capability(
+        CapabilityExecutionRequest(
+            lab_run_id=run.lab_run_id,
+            capability_id="echo-capability",
+            inputs={"value": "hello"},
+        )
+    )
+    assert response.pipeline_id == "custom_pipeline"
+    assert response.output == {"echo": "hello"}
+
+
 def test_create_run_and_artifact_are_isolated_by_opaque_ids(tmp_path: Path) -> None:
     store = NodeLabStore(tmp_path)
     app = NodeLabApplication(
@@ -211,6 +279,7 @@ async def test_fixture_step_persists_immutable_branches_and_survives_restart(
     app = NodeLabApplication(
         store=store,
         registry=build_png_to_shader_v1_registry(),
+        fixtures=build_png_to_shader_v1_fixture_registry(),
         id_factory=_id_factory(["lab-1", "step-1", "step-2", "step-3"]),
         now=lambda: FIXED_NOW,
         timer=_timer([1.0, 1.01, 2.0, 2.02, 3.0, 3.03]),
@@ -255,7 +324,10 @@ async def test_fixture_step_persists_immutable_branches_and_survives_restart(
         "child"
     )
 
-    restarted = NodeLabApplication(store=NodeLabStore(tmp_path))
+    restarted = NodeLabApplication(
+        store=NodeLabStore(tmp_path),
+        pipeline_id=run.pipeline_id,
+    )
     assert restarted.list_step_ids(run.lab_run_id) == (
         "step-1",
         "step-2",
@@ -385,6 +457,7 @@ async def test_public_service_facade_uses_injected_application(tmp_path: Path) -
     app = NodeLabApplication(
         store=NodeLabStore(tmp_path),
         registry=build_png_to_shader_v1_registry(),
+        fixtures=build_png_to_shader_v1_fixture_registry(),
         id_factory=_id_factory(["lab-1", "step-1"]),
         now=lambda: FIXED_NOW,
         timer=_timer([1.0, 1.01]),

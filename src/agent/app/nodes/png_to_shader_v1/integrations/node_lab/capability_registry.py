@@ -1,16 +1,17 @@
-"""Node Lab 确定性领域能力目录."""
+"""PNG-to-Shader V1 的确定性 capability descriptor 目录."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent.app.lab.models import CapabilityDescriptor, NodeLabError
+from nodelab.capabilities import CapabilityRegistry
+from nodelab.models import CapabilityDescriptor
+
+PIPELINE_ID = "png_to_shader_v1"
 
 
 @dataclass(frozen=True)
 class _CapabilitySpec:
-    """构造 capability descriptor 的静态事实."""
-
     capability_id: str
     summary: str
     inputs: tuple[str, ...]
@@ -52,7 +53,7 @@ _SPECS = (
         ("render", "render_artifact", "diagnostics_artifact"),
         "src/shaderforge/rendering/webgl1_renderer.py",
         ("compile_success", "render_success", "duration_ms", "pixel_sha256"),
-        requires_browser=True,
+        True,
     ),
     _CapabilitySpec(
         "evaluate-render",
@@ -88,7 +89,6 @@ _SPECS = (
     ),
 )
 
-
 _ARTIFACT_ID_SCHEMA: dict[str, object] = {
     "type": "string",
     "minLength": 1,
@@ -98,7 +98,6 @@ _ARTIFACT_ID_SCHEMA: dict[str, object] = {
 
 
 def _input_schema(spec: _CapabilitySpec) -> dict[str, object]:
-    """生成与阶段 B Adapter 实际校验一致的输入 JSON Schema."""
     properties: dict[str, object] = {
         field: dict(_ARTIFACT_ID_SCHEMA) if field.endswith("_artifact_id") else {}
         for field in spec.inputs
@@ -111,11 +110,7 @@ def _input_schema(spec: _CapabilitySpec) -> dict[str, object]:
             "max_long_side": {"type": "integer", "minimum": 1, "maximum": 1024}
         },
         "validate-shader": {
-            "max_shader_chars": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 30_000,
-            }
+            "max_shader_chars": {"type": "integer", "minimum": 1, "maximum": 30_000}
         },
         "evaluate-render": {"metric_weights": {"type": "object"}},
         "select-current-best": {
@@ -123,8 +118,7 @@ def _input_schema(spec: _CapabilitySpec) -> dict[str, object]:
             "acceptance_policy": {"type": "object"},
         },
     }
-    optional = optional_by_capability.get(spec.capability_id, {})
-    properties.update(optional)
+    properties.update(optional_by_capability.get(spec.capability_id, {}))
     if spec.capability_id == "render-shader":
         properties["width"] = {"type": "integer", "minimum": 1, "maximum": 1024}
         properties["height"] = {"type": "integer", "minimum": 1, "maximum": 1024}
@@ -137,7 +131,6 @@ def _input_schema(spec: _CapabilitySpec) -> dict[str, object]:
 
 
 def _output_schema(fields: tuple[str, ...]) -> dict[str, object]:
-    """列出稳定顶层输出字段；领域对象细节由真实响应展示."""
     return {
         "type": "object",
         "properties": {field: {} for field in fields},
@@ -146,53 +139,27 @@ def _output_schema(fields: tuple[str, ...]) -> dict[str, object]:
     }
 
 
-class CapabilityRegistry:
-    """确定性能力的显式 allowlist."""
-
-    def __init__(self, descriptors: list[CapabilityDescriptor]) -> None:
-        """校验 capability_id 唯一并保留稳定顺序."""
-        by_id = {descriptor.capability_id: descriptor for descriptor in descriptors}
-        if len(by_id) != len(descriptors):
-            raise ValueError("Capability Registry 包含重复 id。")
-        self._descriptors = tuple(descriptors)
-        self._by_id = by_id
-
-    def describe_capabilities(self) -> tuple[CapabilityDescriptor, ...]:
-        """返回全部确定性能力描述."""
-        return self._descriptors
-
-    def get(self, capability_id: str) -> CapabilityDescriptor:
-        """读取 allowlist capability，未知 id fail closed."""
-        try:
-            return self._by_id[capability_id]
-        except KeyError as exc:
-            raise NodeLabError(
-                "capability_not_found",
-                "能力不在 PNG-to-Shader V1 Node Lab allowlist 中。",
-                stage="capability_registry",
-                details={"capability_id": capability_id},
-            ) from exc
-
-
-def build_deterministic_capability_registry() -> CapabilityRegistry:
-    """构造阶段 B 的八个确定性能力 descriptor."""
+def build_png_to_shader_v1_capability_registry() -> CapabilityRegistry:
+    """构造 V1 的八个确定性 capability descriptor."""
     return CapabilityRegistry(
-        [
-            CapabilityDescriptor(
-                capability_id=spec.capability_id,
-                summary=spec.summary,
-                requires_browser=spec.requires_browser,
-                cold_start_sensitive=spec.requires_browser,
-                benchmark_profiles=(
-                    ["node", "renderer_cold", "renderer_warm"]
-                    if spec.requires_browser
-                    else ["micro", "node"]
-                ),
-                benchmark_metrics=list(spec.metrics),
-                source_ref=spec.source_ref,
-                input_schema=_input_schema(spec),
-                output_schema=_output_schema(spec.outputs),
-            )
-            for spec in _SPECS
-        ]
+        CapabilityDescriptor(
+            pipeline_id=PIPELINE_ID,
+            capability_id=spec.capability_id,
+            summary=spec.summary,
+            requires_browser=spec.requires_browser,
+            cold_start_sensitive=spec.requires_browser,
+            benchmark_profiles=(
+                ["node", "renderer_cold", "renderer_warm"]
+                if spec.requires_browser
+                else ["micro", "node"]
+            ),
+            benchmark_metrics=list(spec.metrics),
+            source_ref=spec.source_ref,
+            input_schema=_input_schema(spec),
+            output_schema=_output_schema(spec.outputs),
+        )
+        for spec in _SPECS
     )
+
+
+__all__ = ["build_png_to_shader_v1_capability_registry"]

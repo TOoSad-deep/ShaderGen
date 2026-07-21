@@ -54,7 +54,7 @@ Graph 可视化的触发条件、ASCII/Mermaid/路由表同步清单、自动检
 - State 规则：`src/agent/app/states/ARCHITECTURE.md`
 - Node 规则：`src/agent/app/nodes/ARCHITECTURE.md`
 - PNG-to-Shader V1 Node 子架构：`src/agent/app/nodes/png_to_shader_v1/ARCHITECTURE.md`
-- Node Lab Harness 规则：`src/agent/app/lab/ARCHITECTURE.md`
+- Node Lab Harness 规则：`src/nodelab/ARCHITECTURE.md`
 - 离线 Agent benchmark 规则：`src/agent/app/benchmarks/ARCHITECTURE.md`
 - Contracts 规则：`src/agent/app/contracts/ARCHITECTURE.md`
 - LLM Gateway 规则：`src/agent/app/llms/ARCHITECTURE.md`

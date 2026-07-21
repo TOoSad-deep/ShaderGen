@@ -8,13 +8,6 @@ from pathlib import Path
 import pytest
 
 from agent.app.contracts.png_to_shader_v1 import AuthorMode, CandidateProvenance
-from agent.app.lab.models import (
-    ArtifactDescriptor,
-    LabRunRecord,
-    NodeExecutionResult,
-    NodeLabError,
-    StepExecutionRequest,
-)
 from agent.app.memory.models import MEMORY_SCHEMA_VERSION, MemoryItem
 from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
     build_png_to_shader_v1_registry,
@@ -22,6 +15,13 @@ from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
 from agent.app.nodes.png_to_shader_v1.integrations.node_lab.deterministic import (
     SUPPORTED_NODE_IDS,
     DeterministicNodeExecutor,
+)
+from nodelab.models import (
+    ArtifactDescriptor,
+    LabRunRecord,
+    NodeExecutionResult,
+    NodeLabError,
+    StepExecutionRequest,
 )
 from shaderforge.public import (
     MEASUREMENT_AFFINE_SEED_VERSION,

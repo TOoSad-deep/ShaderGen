@@ -11,30 +11,20 @@ from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
-from agent.app.lab.adapters import (
-    CapabilityExecutionRuntime,
-    DeterministicCapabilityExecutor,
-    RendererFactory,
-    ShaderRenderer,
-    default_renderer_factory,
-)
-from agent.app.lab.capabilities import (
-    CapabilityRegistry,
-    build_deterministic_capability_registry,
-)
-from agent.app.lab.fixtures import (
-    FixtureRegistry,
-    build_default_fixture_registry,
-)
-from agent.app.lab.integration import (
+from nodelab.capabilities import CapabilityRegistry
+from nodelab.fixtures import FixtureRegistry
+from nodelab.integration import (
+    AsyncResource,
+    BenchmarkResourceFactory,
+    CapabilityExecutor,
+    CapabilityExecutorFactory,
+    CapabilityRuntimeFactory,
     NodeExecutor,
     NodeProvider,
     PreflightNodeExecutor,
-    RouteCapabilityProvider,
-    RouteDecider,
 )
-from agent.app.lab.models import (
-    NODE_LAB_PIPELINE_ID,
+from nodelab.models import (
+    DEFAULT_NODE_LAB_PIPELINE_ID,
     ArtifactDescriptor,
     CapabilityDescriptor,
     CapabilityExecutionRequest,
@@ -53,8 +43,9 @@ from agent.app.lab.models import (
     StepSummary,
     ensure_json_object,
 )
-from agent.app.lab.registry import NodeRegistry
-from agent.app.lab.store import NodeLabStore
+from nodelab.registry import NodeRegistry
+from nodelab.store import NodeLabStore
+from nodelab.suites import SuiteRegistry
 
 IdFactory = Callable[[], str]
 NowFactory = Callable[[], datetime]
@@ -192,13 +183,17 @@ class NodeLabApplication:
         self,
         *,
         store: NodeLabStore,
+        pipeline_id: str | None = None,
         node_provider: NodeProvider | None = None,
         registry: NodeRegistry | None = None,
         fixtures: FixtureRegistry | None = None,
         capability_registry: CapabilityRegistry | None = None,
+        capability_executor_factory: CapabilityExecutorFactory | None = None,
+        suite_registry: SuiteRegistry | None = None,
         executors: Mapping[ExecutionMode, NodeExecutor] | None = None,
         node_executors: Mapping[tuple[str, ExecutionMode], NodeExecutor] | None = None,
-        renderer_factory: RendererFactory = default_renderer_factory,
+        benchmark_resource_factory: BenchmarkResourceFactory | None = None,
+        capability_runtime_factory: CapabilityRuntimeFactory | None = None,
         id_factory: IdFactory = _new_id,
         now: NowFactory = _utc_now,
         timer: Timer = time.perf_counter,
@@ -208,36 +203,50 @@ class NodeLabApplication:
             raise ValueError("node_provider 与 registry 不能同时注入。")
         self._store = store
         self._node_provider = node_provider
-        self._registry = NodeRegistry(node_provider.describe_nodes()) if node_provider else (
-            registry or NodeRegistry()
+        self._registry = (
+            NodeRegistry(node_provider.describe_nodes())
+            if node_provider
+            else (registry or NodeRegistry())
         )
-        self._pipeline_id = (
+        inferred_pipeline_id = (
             node_provider.pipeline_id
             if node_provider is not None
-            else self._registry.pipeline_id or NODE_LAB_PIPELINE_ID
+            else self._registry.pipeline_id
         )
+        self._pipeline_id = (
+            pipeline_id or inferred_pipeline_id or DEFAULT_NODE_LAB_PIPELINE_ID
+        )
+        if (
+            inferred_pipeline_id is not None
+            and inferred_pipeline_id != self._pipeline_id
+        ):
+            raise ValueError("显式 pipeline_id 与 NodeProvider/Registry 不一致。")
         if (
             self._registry.pipeline_id is not None
             and self._registry.pipeline_id != self._pipeline_id
         ):
             raise ValueError("NodeProvider pipeline_id 与 descriptor 不一致。")
-        self._fixtures = fixtures or build_default_fixture_registry()
-        self._capability_registry = (
-            capability_registry or build_deterministic_capability_registry()
+        self._fixtures = fixtures or FixtureRegistry()
+        self._capability_registry = capability_registry or CapabilityRegistry()
+        if (
+            self._capability_registry.pipeline_id is not None
+            and self._capability_registry.pipeline_id != self._pipeline_id
+        ):
+            raise ValueError("Capability Registry pipeline_id 与 Application 不一致。")
+        if (
+            self._capability_registry.describe_capabilities()
+            and capability_executor_factory is None
+        ):
+            raise ValueError("非空 Capability Registry 必须注入 CapabilityExecutor。")
+        self._capability_executor: CapabilityExecutor | None = (
+            capability_executor_factory(self)
+            if capability_executor_factory is not None
+            else None
         )
-        self._renderer_factory = renderer_factory
-        route_deciders: Mapping[str, RouteDecider] = (
-            node_provider.route_deciders()
-            if isinstance(node_provider, RouteCapabilityProvider)
-            else {}
-        )
-        self._deterministic_executor = DeterministicCapabilityExecutor(
-            self,
-            renderer_factory=renderer_factory,
-            route_deciders=route_deciders,
-        )
+        self._suite_registry = suite_registry or SuiteRegistry()
+        self._benchmark_resource_factory = benchmark_resource_factory
+        self._capability_runtime_factory = capability_runtime_factory
         configured: dict[ExecutionMode, NodeExecutor] = {
-            "deterministic": self._deterministic_executor,
             "fixture": FixtureNodeExecutor(self._fixtures),
         }
         configured.update(executors or {})
@@ -264,9 +273,7 @@ class NodeLabApplication:
                 for mode in descriptor.execution_modes
                 if mode in self._executors
             }
-            missing = sorted(
-                expected - set(self._node_executors) - covered_by_mode
-            )
+            missing = sorted(expected - set(self._node_executors) - covered_by_mode)
             if missing:
                 raise ValueError(f"NodeProvider 缺少 Executor 绑定：{missing}。")
 
@@ -310,6 +317,11 @@ class NodeLabApplication:
             return self._registry.describe_nodes()
         return (self._registry.get(node_id),)
 
+    @property
+    def pipeline_id(self) -> str:
+        """返回当前 Application 的稳定 Pipeline 作用域."""
+        return self._pipeline_id
+
     def benchmark_source_paths(self) -> tuple[Path, ...]:
         """返回 Provider 声明的 benchmark 生产源文件."""
         if self._node_provider is None:
@@ -324,6 +336,14 @@ class NodeLabApplication:
         if capability_id is None:
             return self._capability_registry.describe_capabilities()
         return (self._capability_registry.get(capability_id),)
+
+    def describe_suites(self) -> tuple[str, ...]:
+        """列出当前 Pipeline Provider 登记的 benchmark suite."""
+        return self._suite_registry.describe()
+
+    def resolve_suite(self, suite_id: str) -> Path:
+        """解析当前 Pipeline Provider 登记的 benchmark manifest."""
+        return self._suite_registry.resolve(suite_id)
 
     def create_run(self, request: LabRunCreateRequest) -> LabRunRecord:
         """创建不复用产品 run_id 的独立 LabRun."""
@@ -610,36 +630,48 @@ class NodeLabApplication:
         return await self._execute_capability(request)
 
     @asynccontextmanager
-    async def renderer_session(self) -> AsyncIterator[ShaderRenderer]:
-        """为 warm benchmark 持有一个 suite 级 Renderer 生命周期."""
-        renderer = self._renderer_factory()
+    async def benchmark_resource_session(self) -> AsyncIterator[AsyncResource]:
+        """为 warm benchmark 持有一个 Pipeline 自定义资源生命周期."""
+        if self._benchmark_resource_factory is None:
+            raise NodeLabError(
+                "benchmark_resource_not_configured",
+                "当前 Pipeline 未配置 warm benchmark 资源。",
+                stage="benchmark_resource",
+            )
+        resource = self._benchmark_resource_factory()
         try:
-            yield renderer
+            yield resource
         finally:
             try:
-                await renderer.close()
+                await resource.close()
             except Exception as exc:  # noqa: BLE001 - 生命周期失败安全归一化
                 raise NodeLabError(
-                    "renderer_unavailable",
-                    "Node Lab warm Renderer 清理失败。",
-                    stage="renderer_cleanup",
+                    "benchmark_resource_unavailable",
+                    "Node Lab warm benchmark 资源清理失败。",
+                    stage="benchmark_resource_cleanup",
                     retryable=True,
                 ) from exc
 
-    async def execute_capability_with_renderer(
+    async def execute_capability_with_resource(
         self,
         request: CapabilityExecutionRequest,
         *,
-        renderer: ShaderRenderer,
-        browser_launch_count: int,
+        resource: AsyncResource,
+        resource_usage_count: int,
     ) -> CapabilityExecutionResponse:
-        """在显式 suite 级 Renderer 中执行一次 capability."""
+        """在显式 suite 级领域资源中执行一次 capability."""
+        if self._capability_runtime_factory is None:
+            raise NodeLabError(
+                "capability_runtime_not_configured",
+                "当前 Pipeline 未配置 capability runtime。",
+                stage="capability_runtime",
+            )
         return await self._execute_capability(
             request,
-            runtime=CapabilityExecutionRuntime(
-                renderer=renderer,
-                close_renderer=False,
-                browser_launch_count=browser_launch_count,
+            runtime=self._capability_runtime_factory(
+                resource,
+                False,
+                resource_usage_count,
             ),
         )
 
@@ -647,7 +679,7 @@ class NodeLabApplication:
         self,
         request: CapabilityExecutionRequest,
         *,
-        runtime: CapabilityExecutionRuntime | None = None,
+        runtime: object | None = None,
     ) -> CapabilityExecutionResponse:
         """统一构造 cold/warm capability 响应，避免 benchmark 复制语义."""
         descriptor = self._capability_registry.get(request.capability_id)
@@ -655,7 +687,14 @@ class NodeLabApplication:
         execution_id = self._id_factory()
         started = self._timer()
         try:
-            result = await self._deterministic_executor.execute_capability(
+            if self._capability_executor is None:
+                raise NodeLabError(
+                    "capability_not_configured",
+                    "当前 Pipeline 未配置 capability executor。",
+                    stage="capability_execution",
+                    lab_run_id=request.lab_run_id,
+                )
+            result = await self._capability_executor.execute_capability(
                 request,
                 descriptor,
                 runtime,
@@ -683,7 +722,7 @@ class NodeLabApplication:
             output: dict[str, object] = {}
             artifacts: list[ArtifactDescriptor] = []
             diagnostics = {"error": error_detail}
-            provenance = {"execution_source": "deterministic"}
+            provenance = {"execution_source": "pipeline_capability"}
             usage: dict[str, object] = {}
             execution_status = "failed"
             outcome = "failed"
@@ -725,7 +764,7 @@ class NodeLabApplication:
 
     def validate_suite(self, manifest_path: str | Path) -> dict[str, object]:
         """校验版本化 benchmark manifest、文件 hash 和 capability allowlist."""
-        from agent.app.lab.benchmark import load_benchmark_manifest
+        from nodelab.benchmark import load_benchmark_manifest
 
         capability_ids = {
             descriptor.capability_id
@@ -739,6 +778,11 @@ class NodeLabApplication:
             capability_ids=capability_ids,
             node_ids=node_ids,
         )
+        if (
+            suite.manifest.pipeline_id is not None
+            and suite.manifest.pipeline_id != self._pipeline_id
+        ):
+            raise ValueError("benchmark manifest pipeline_id 与 Application 不一致。")
         return suite.summary()
 
     async def run_suite(
@@ -749,7 +793,7 @@ class NodeLabApplication:
         suite_run_id: str | None = None,
     ) -> dict[str, object]:
         """运行冻结的 AI-off suite 并生成逐 attempt 证据和报告."""
-        from agent.app.lab.benchmark import (
+        from nodelab.benchmark import (
             load_benchmark_manifest,
             run_benchmark_suite,
         )
@@ -766,6 +810,11 @@ class NodeLabApplication:
             capability_ids=capability_ids,
             node_ids=node_ids,
         )
+        if (
+            suite.manifest.pipeline_id is not None
+            and suite.manifest.pipeline_id != self._pipeline_id
+        ):
+            raise ValueError("benchmark manifest pipeline_id 与 Application 不一致。")
         report = await run_benchmark_suite(
             self,
             suite,

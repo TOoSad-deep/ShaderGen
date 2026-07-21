@@ -1,6 +1,6 @@
 # Node Lab 使用与逐节点学习指南
 
-Node Lab 是 PNG-to-Shader V1 的本地实验工作台。它让人工、Codex、测试和 benchmark 使用同一份节点契约、Fixture、Artifact 与不可变步骤语义；它不会替代产品 `/api/shader/*`、M5 固定 10 例门禁或人工盲评。
+Node Lab 是可由不同 Agent Pipeline 注入 Provider 的本地实验工作台。它让人工、Codex、测试和 benchmark 使用同一份节点契约、Fixture、Artifact 与不可变步骤语义。当前默认组合仍是 PNG-to-Shader V1；它不会替代产品 `/api/shader/*`、M5 固定 10 例门禁或人工盲评。
 
 ## 安全边界
 
@@ -48,7 +48,7 @@ make dev-frontend
 
 页面底部 DAG 中，选中卡片只切换查看的输出；中间的 `base_step_id` 决定下一步从哪个不可变快照继续。这两个概念不要混淆。
 
-## 20 个生产节点
+## 当前默认 V1 的 20 个生产节点
 
 | 顺序 | 节点 | 先观察什么 |
 |---:|---|---|
@@ -75,16 +75,17 @@ make dev-frontend
 
 八个独立 capability 适合先理解底层确定性事实：normalize、measure、validate、render、evaluate、select，以及 render/selection 两个 routing。它们可在 Swagger 或 Python Application API 中单独调用；生产节点实验统一走通用 step 接口。
 
-## 新 Node 接入规则
+## 新 Pipeline / Node 接入规则
 
-Node Lab 内核只认 `NodeProvider` 协议，不认 PNG-to-Shader 的具体文件、Graph 或节点 ID。新增生产 Node 时：
+Node Lab 内核只认通用 `NodeProvider`、`CapabilityExecutor` 和 Registry，不认 PNG-to-Shader 的具体文件、Graph、Renderer 或节点 ID。新增 Pipeline 或生产 Node 时：
 
 1. 在生产 Graph 中正常注册 Node，并完成 Graph 可视化与路由测试。
-2. 在所属功能命名空间的 Provider registry 声明 descriptor、Schema 和机器可读示例；当前路径是 `src/agent/app/nodes/png_to_shader_v1/integrations/node_lab/registry.py`。
+2. 在所属功能命名空间的 Provider registry 显式声明相同 `pipeline_id`、descriptor、Schema 和机器可读示例；当前 V1 路径是 `src/agent/app/nodes/png_to_shader_v1/integrations/node_lab/registry.py`。
 3. 若 Node 只消费 JSON-safe State 并返回 JSON-safe partial State，可用 `DirectNodeExecutor` 绑定 callable。当前 V1 的 15 个非模型 descriptor 统一由 `DeterministicNodeExecutor` 负责 Artifact hydration、依赖生命周期、副作用门禁和输出投影，五个模型 descriptor 统一由 `ModelRoleExecutor` 提供 fixture/mock/real binding；不要把 descriptor 数量误写成独立 Adapter 数量。
-4. 不修改 `src/agent/app/lab/` 或 `agent.app.services.node_lab`。一致性测试会要求 Provider descriptor 与生产 Graph 节点集合完全相等，且所有声明的 execution mode 都有 Executor。
+4. Pipeline 若提供独立 capability、fixture 或内置 benchmark，分别装配自己的 `CapabilityRegistry`/Executor、`FixtureRegistry` 和 `SuiteRegistry`；不要把领域 Adapter 放入 `src/nodelab/`。新 manifest 应写入所属 `pipeline_id`。
+5. 不修改 `src/nodelab/`。一致性测试应要求 Provider descriptor 与生产 Graph 节点集合完全相等、所有声明模式都有 Executor，并验证 Node/capability/manifest 的 Pipeline 作用域一致。
 
-这里的“解耦”是指 Harness 不感知 Node 实现；Node Lab 仍会通过 Provider 调用真实生产 Node，以保证它测试的是生产语义，而不是第二套模拟实现。
+这里的“解耦”是指 Harness 不感知 Node 实现。`create_node_lab_application()` 仅在未传 Provider 时兼容装配 V1；显式传入新 Provider 后，capability、fixture 和 suite 默认为空，不会静默继承 V1。Node Lab 仍通过 Provider 调用真实生产 Node，以保证测试的是生产语义，而不是第二套模拟实现。
 
 `prepare_measurement_seed` 应从已经包含规范化 `reference_artifact_id` 和 `target_measurements` 的父步骤执行；它把完整 GLSL、Author 和 provenance 留在私有 Artifact，只公开 ID/hash/摘要。随后从该步骤执行 `materialize_candidate`，得到的 `CandidateRecord` 必须保持 `parent_candidate_id=null`、`origin=deterministic` 和 `generator_version=measurement_affine_seed_v1`，即使父快照中已经存在 model current candidate，也不能把 seed 接到其后。
 

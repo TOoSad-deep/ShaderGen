@@ -13,7 +13,7 @@ backend 产品 API
 
 backend 诊断 API（仅显式开启）/ CLI / benchmark / tests
   -> agent.app.services.node_lab
-  -> agent.app.lab
+  -> nodelab
   -> agent.app.nodes.png_to_shader_v1.integrations.node_lab（Provider + Executor binding）
      -> production Node factory / routing / Prompt / Parser
 
@@ -59,7 +59,7 @@ Agent 只负责编排、LLM Gateway、Prompt 策略、运行时状态和公共�
 - `src/agent/app/states/ARCHITECTURE.md`：State 和 Context 规则。
 - `src/agent/app/nodes/ARCHITECTURE.md`：Node 工厂和依赖规则。
 - `src/agent/app/nodes/png_to_shader_v1/ARCHITECTURE.md`：V1 模型、确定性 Node 和 Node Lab Provider 子架构。
-- `src/agent/app/lab/ARCHITECTURE.md`：transport-free Node Lab Harness 内核和安全边界。
+- `src/nodelab/ARCHITECTURE.md`：transport-free Node Lab Harness 内核和安全边界。
 - `src/agent/app/benchmarks/ARCHITECTURE.md`：离线 Agent benchmark、真实模型预算和证据边界。
 - `src/agent/app/prompts/ARCHITECTURE.md`：Prompt YAML 和加载规则。
 - `src/agent/app/parsers/ARCHITECTURE.md`：模型输出解析规则。

@@ -8,7 +8,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-NODE_LAB_PIPELINE_ID = "png_to_shader_v1"
+DEFAULT_NODE_LAB_PIPELINE_ID = "node_lab"
 NODE_LAB_RUN_SCHEMA = "node_lab_run_v1"
 NODE_LAB_STEP_REQUEST_SCHEMA = "node_lab_execution_request_v1"
 NODE_LAB_STEP_RESPONSE_SCHEMA = "node_lab_execution_response_v1"
@@ -120,7 +120,7 @@ class NodeDescriptor(NodeLabModel):
     schema_version: Literal["node_lab_node_descriptor_v1"] = (
         "node_lab_node_descriptor_v1"
     )
-    pipeline_id: Identifier = NODE_LAB_PIPELINE_ID
+    pipeline_id: Identifier
     node_id: Identifier
     category: Identifier
     summary: NonEmptyText
@@ -154,7 +154,7 @@ class CapabilityDescriptor(NodeLabModel):
     schema_version: Literal["node_lab_capability_descriptor_v1"] = (
         "node_lab_capability_descriptor_v1"
     )
-    pipeline_id: Identifier = NODE_LAB_PIPELINE_ID
+    pipeline_id: Identifier
     capability_id: Identifier
     summary: NonEmptyText
     requires_browser: bool = False
@@ -192,7 +192,7 @@ class LabRunRecord(NodeLabModel):
     """持久化的 LabRun 元数据."""
 
     schema_version: Literal["node_lab_run_v1"] = "node_lab_run_v1"
-    pipeline_id: Identifier = NODE_LAB_PIPELINE_ID
+    pipeline_id: Identifier = DEFAULT_NODE_LAB_PIPELINE_ID
     lab_run_id: Identifier
     project_id: Identifier | None = None
     created_at: NonEmptyText
@@ -299,7 +299,7 @@ class StepExecutionResponse(NodeLabModel):
     schema_version: Literal["node_lab_execution_response_v1"] = (
         "node_lab_execution_response_v1"
     )
-    pipeline_id: Identifier = NODE_LAB_PIPELINE_ID
+    pipeline_id: Identifier = DEFAULT_NODE_LAB_PIPELINE_ID
     lab_run_id: Identifier
     step_id: Identifier
     base_step_id: Identifier | None
@@ -350,7 +350,7 @@ class CapabilityExecutionResponse(NodeLabModel):
     schema_version: Literal["node_lab_capability_response_v1"] = (
         "node_lab_capability_response_v1"
     )
-    pipeline_id: Identifier = NODE_LAB_PIPELINE_ID
+    pipeline_id: Identifier = DEFAULT_NODE_LAB_PIPELINE_ID
     lab_run_id: Identifier
     capability_execution_id: Identifier
     capability_id: Identifier

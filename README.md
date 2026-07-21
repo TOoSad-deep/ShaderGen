@@ -23,6 +23,7 @@ ShaderGen/
 │   └── sql/         # 后端启动时按文件名顺序执行的手写 SQL
 ├── src/
 │   ├── agent/       # LangGraph Agent 包，内部入口为 agent.app.*
+│   ├── nodelab/     # Pipeline 无关的进程内调试、证据与 benchmark Harness
 │   └── shaderforge/ # 确定性领域核心：契约、测量、校验、渲染、评分、制品
 ├── tests/           # Python 单元测试和集成测试
 ├── docs/            # 架构、决策、功能状态
@@ -109,7 +110,7 @@ SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=false
 
 F09 M5 的确定性 AI-off smoke 可直接运行；真实 benchmark 会产生按量模型调用，必须使用显式命令和硬预算。报告、逐例失败证据和盲评页面写入 `output/benchmarks/png-to-shader-v1/`。最新 gate、run、比例、证据 hash 和验证基线只在 `PROGRESS.md`、`docs/FEATURES.md` 与 `docs/evidence/registry.json` 维护。
 
-Node Lab 模块使用三项独立门禁：`make benchmark-node-lab-ai-off` 覆盖 capability、真实 node target、scenario/pipeline、Renderer cold/warm 和 direct-vs-HTTP transport；`make benchmark-node-lab-model` 用固定 fixture 离线检查五个模型角色；`make test-node-lab-ui` 用假 API 验收工作台。H02 的当前状态与证据见 `docs/FEATURES.md`。模型报告按角色聚合 Parser/Schema/binding/timeout、latency、token、费用和 requested/actual model；中断可恢复但仍留在分母，样本不足 20 时 p95 为 `null`。真实模型诊断必须运行 `SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=true uv run python scripts/run_node_lab_model_benchmark.py --execution-mode real --allow-model-calls`，并受 manifest 的调用、provider 输出 token、总 token、时间和费用硬预算限制。三类 CLI 只向 stdout 输出 suite/status/report path 单行 JSON，case 失败返回非零。所有 Node Lab 报告都不覆盖 M5 证据。
+Node Lab 是可注入 Pipeline Provider 的通用 Harness；当前默认 Provider 仍是 PNG-to-Shader V1。该模块使用三项独立门禁：`make benchmark-node-lab-ai-off` 覆盖 capability、真实 node target、scenario/pipeline、Renderer cold/warm 和 direct-vs-HTTP transport；`make benchmark-node-lab-model` 用固定 fixture 离线检查五个模型角色；`make test-node-lab-ui` 用假 API 验收工作台。H02 的当前状态与证据见 `docs/FEATURES.md`。模型报告按角色聚合 Parser/Schema/binding/timeout、latency、token、费用和 requested/actual model；中断可恢复但仍留在分母，样本不足 20 时 p95 为 `null`。真实模型诊断必须运行 `SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=true uv run python scripts/run_node_lab_model_benchmark.py --execution-mode real --allow-model-calls`，并受 manifest 的调用、provider 输出 token、总 token、时间和费用硬预算限制。三类 CLI 只向 stdout 输出 suite/status/report path 单行 JSON，case 失败返回非零。所有 Node Lab 报告都不覆盖 M5 证据。
 
 人工学习可使用 `/lab` 页面、Swagger 或 `scripts/run_node_lab_cli.py`；生产 Provider 提供机器可读 descriptor 和输入示例，步骤列表可重建 `base_step_id` DAG，Artifact 列表只返回同一 LabRun 的私有 descriptor。启动 Backend 必须使用 `make dev-node-lab` 或在进程导入前设置 `SHADERGEN_NODE_LAB_ENABLED=true`；默认关闭。私有 LabRun/Artifact 默认写入 `output/node-lab/http`，HTTP batch 报告默认写入 `output/benchmarks/node-lab-http`，分别可用 `SHADERGEN_NODE_LAB_ROOT` 与 `SHADERGEN_NODE_LAB_BATCH_ROOT` 覆盖。完整教程见 `docs/NODE_LAB_GUIDE.md`。
 

@@ -1,7 +1,7 @@
 """PNG-to-Shader V1 生产模型 Node 的 Node Lab 受控适配层.
 
 本模块位于 Service 边界，允许复用生产 Node、Prompt、Parser 和有界预算包装器；
-``agent.app.lab`` 内核因此继续保持对 Node 和具体 Gateway 的零依赖。
+``nodelab`` 内核因此继续保持对 Node 和具体 Gateway 的零依赖。
 """
 
 from __future__ import annotations
@@ -30,11 +30,6 @@ from agent.app.contracts.png_to_shader_v1 import (
     VisualAnalysis,
     VisualReview,
 )
-from agent.app.lab.models import (
-    NodeExecutionResult,
-    NodeLabError,
-    ensure_json_object,
-)
 from agent.app.nodes.png_to_shader_v1.model import (
     AUTHOR_PROMPTS,
     VISUAL_ANALYSIS_PROMPT,
@@ -48,6 +43,11 @@ from agent.app.nodes.png_to_shader_v1.model import (
 )
 from agent.app.nodes.png_to_shader_v1.model import bounded as bounded_model
 from agent.app.prompts.prompt_loader import PromptDefinition
+from nodelab.models import (
+    NodeExecutionResult,
+    NodeLabError,
+    ensure_json_object,
+)
 from shaderforge.contracts import BudgetPolicy, QualityPreset, budget_for_preset
 
 ROOT = Path(__file__).resolve().parents[7]

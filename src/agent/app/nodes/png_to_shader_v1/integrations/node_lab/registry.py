@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from agent.app.lab.models import (
+from nodelab.models import (
     ExecutionMode,
     ImplementationStatus,
     NodeDescriptor,
     NodeInputExample,
 )
+
+PIPELINE_ID = "png_to_shader_v1"
 
 
 @dataclass(frozen=True)
@@ -971,6 +973,7 @@ def build_png_to_shader_v1_descriptors() -> tuple[NodeDescriptor, ...]:
     return tuple(
         [
             NodeDescriptor(
+                pipeline_id=PIPELINE_ID,
                 node_id=spec.node_id,
                 category=spec.category,
                 summary=spec.summary,

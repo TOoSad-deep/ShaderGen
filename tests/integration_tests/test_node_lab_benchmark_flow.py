@@ -10,8 +10,6 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import scripts.run_node_lab_transport_benchmark as transport_benchmark
-from agent.app.lab.runner import NodeLabApplication
-from agent.app.lab.store import NodeLabStore
 from agent.app.services.node_lab import create_node_lab_application
 from backend.app.api.routes.node_lab import router as node_lab_router
 from backend.app.services.node_lab import NodeLabBackendService
@@ -151,7 +149,7 @@ async def test_transport_interruption_is_preserved_in_resumed_denominator(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    application = NodeLabApplication(store=NodeLabStore(tmp_path / "lab"))
+    application = create_node_lab_application(root=tmp_path / "lab")
 
     class InterruptOnce:
         def __init__(self) -> None:

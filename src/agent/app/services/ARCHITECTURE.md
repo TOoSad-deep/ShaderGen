@@ -6,7 +6,7 @@
 
 - `png_to_shader_v1.py`：暴露服务端自动 render/evaluate/review/refine 用例、V1 Memory 清理和固定 Artifact 白名单读取。
 - `node_lab.py`：暴露 Node Lab 的 transport-free Application API，并仅把公共 `NodeProvider` 注入通用 Harness；不再导入具体 Node factory、routing、节点 ID 集合或模式分支。HTTP/CLI/测试必须复用此入口。
-- `agent.app.nodes.png_to_shader_v1.integrations.node_lab`：属于 V1 生产 Node 命名空间的对外集成包；维护 20 个 descriptor，分别描述 15 个非模型节点和五个模型节点。Provider 由 `DeterministicNodeExecutor` 为前者提供 deterministic binding，由 `ModelRoleExecutor` 为后者提供 fixture/mock/real binding；它同时声明 routing capability 和 benchmark 源文件。
+- `agent.app.nodes.png_to_shader_v1.integrations.node_lab`：属于 V1 生产 Node 命名空间的对外集成包；维护 20 个 descriptor、八个 capability、V1 Fixture、三个 AI-off suite 和对应 Executor。Provider 由 `DeterministicNodeExecutor` 为 15 个非模型节点提供 deterministic binding，由 `ModelRoleExecutor` 为五个模型节点提供 fixture/mock/real binding；`capability_executor.py` 独占 ShaderForge/Renderer 适配。
 - `errors.py`：保存公共用例使用的安全 persistence 异常。
 
 五角色 fixture/real benchmark 属于离线 `agent.app.benchmarks.model_roles`，不属于本 Service 边界。
@@ -20,11 +20,11 @@
 - `PngToShaderV1Service.invoke()`：与 Graph 共享 run 级 Renderer registry；`finalize` 负责正常关闭，Service `finally` 对 Graph 外异常执行限时、幂等兜底，清理失败只记录安全异常类型且不覆盖业务结果。
 - `PngToShaderV1Service.clear_memory()`：删除 V1 checkpoint、旧 Graph 遗留的裸 project thread 和项目 Store Memory；兼容清理不恢复旧 Graph 运行入口。
 - `PngToShaderV1Service.read_public_artifact()`：只解析 `final-render`、`metrics`、`manifest`，不接收文件路径。
-- `create_node_lab_application()`：为显式诊断用的 Backend、CLI、benchmark 或测试创建独立 Harness 生命周期；默认注入 PNG-to-Shader Provider，也可注入其他实现同一协议的 Provider。
+- `create_node_lab_application()`：为显式诊断用的 Backend、CLI、benchmark 或测试创建独立 Harness 生命周期；无显式 Provider 时兼容装配 PNG-to-Shader V1。传入其他 Provider 时，capability/Fixture/suite 默认为空，必须由该 Pipeline 显式注入，不能继承 V1 语义。
 - `create_default_model_node_lab_application()`：只在 Agent 公共组合根按服务端开关装配具体 Gateway，Backend 不依赖 `agent.app.llms`。
-- `describe_nodes()`、`describe_capabilities()`、`create_lab_run()`、`execute_step()`、`execute_capability()`：访问带机器可读示例的 20 节点与八个确定性能力 allowlist，并执行 transport-free Lab 步骤。
+- `describe_nodes()`、`describe_capabilities()`、`create_lab_run()`、`execute_step()`、`execute_capability()`：访问当前 Pipeline 的动态 allowlist，并执行 transport-free Lab 步骤；默认 V1 仍返回 20 节点与八个确定性能力。
 - `validate_suite()`、`run_suite()`：校验冻结 manifest 并生成逐 attempt 证据和报告，不经过 FastAPI。
-- `describe_suites()`、`validate_registered_suite()`、`run_registered_suite()`：只解析三个仓库内固定 AI-off suite id，供 HTTP batch 使用，不接受客户端路径。
+- `describe_suites()`、`validate_registered_suite()`、`run_registered_suite()`：只解析当前 Application 的 `SuiteRegistry`；默认 V1 注册三个仓库内固定 AI-off suite，HTTP 始终不接受客户端路径。
 - `list_steps()`、`get_step()`：返回完整步骤或可重建 `base_step_id` DAG 的安全摘要。
 - `upload_artifact()`、`list_artifacts()`、`read_artifact()`：仅通过同一 LabRun 的不透明 id 保存、列出和读取私有实验产物。
 
@@ -42,3 +42,4 @@
 - 后端只依赖 service 的公共函数和结果类型。
 - Node Lab Route 和 CLI 只能调用 `agent.app.services.node_lab`；不得复制 Registry、Fixture 解析、State diff、fingerprint 或 Artifact 规则。
 - Node Lab Service 不得维护 descriptor、`SUPPORTED_NODE_IDS` 或逐节点 dispatch。新 Node 由生产 Provider 声明 descriptor/binding；JSON-safe Node 可用通用 `DirectNodeExecutor`，有 Artifact、Renderer、Memory 或模型依赖的 Node 由 Provider 提供专用 Executor。当前 V1 的 15 个非模型节点统一绑定 `DeterministicNodeExecutor`，五个模型节点统一绑定 `ModelRoleExecutor`，不能把 20 个 descriptor 误写成 20 个独立 Adapter。Provider descriptor 必须与生产 Graph 节点集合一致，且每个声明模式都必须有精确或通用 Executor，否则 Application 构造失败。
+- Node、capability 与 suite Registry 必须属于同一 `pipeline_id`。新 Pipeline 的 benchmark manifest 应显式写入该 id；显式不匹配时必须在首个 attempt 前拒绝。

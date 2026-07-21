@@ -23,7 +23,7 @@ import yaml  # type: ignore[import-untyped]
 from pydantic import Field, field_validator, model_validator
 from typing_extensions import Self
 
-from agent.app.lab.models import (
+from nodelab.models import (
     CapabilityExecutionRequest,
     Identifier,
     LabRunCreateRequest,
@@ -33,7 +33,7 @@ from agent.app.lab.models import (
 )
 from shaderforge.store import RunArtifactStore
 
-ROOT = Path(__file__).resolve().parents[4]
+ROOT = Path(__file__).resolve().parents[2]
 _SUITE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _MAX_CASES = 100
 _MAX_REPETITIONS = 20
@@ -248,6 +248,7 @@ class BenchmarkManifest(NodeLabModel):
     """Node Lab 版本化 AI-off suite manifest."""
 
     schema_version: Literal["node_lab_benchmark_manifest_v1"]
+    pipeline_id: Identifier | None = None
     suite_id: Identifier
     repetitions: int = Field(default=1, ge=1, le=_MAX_REPETITIONS)
     warmups: int = Field(default=0, ge=0, le=_MAX_WARMUPS)
@@ -292,6 +293,7 @@ class ValidatedBenchmarkSuite:
         """返回不暴露绝对路径的校验摘要."""
         return {
             "schema_version": self.manifest.schema_version,
+            "pipeline_id": self.manifest.pipeline_id,
             "suite_id": self.manifest.suite_id,
             "manifest_sha256": self.manifest_sha256,
             "case_count": len(self.manifest.cases),
@@ -391,15 +393,8 @@ def source_environment(
     """冻结影响 Node Lab deterministic 行为的源码与执行环境摘要."""
     source_paths = sorted(
         {
-            *Path(ROOT / "src/agent/app/lab").glob("*.py"),
+            *Path(ROOT / "src/nodelab").glob("*.py"),
             ROOT / "src/agent/app/services/node_lab.py",
-            ROOT / "src/shaderforge/public.py",
-            *Path(ROOT / "src/shaderforge/analysis").glob("*.py"),
-            *Path(ROOT / "src/shaderforge/contracts").glob("*.py"),
-            *Path(ROOT / "src/shaderforge/validation").glob("*.py"),
-            *Path(ROOT / "src/shaderforge/rendering").glob("*.py"),
-            *Path(ROOT / "src/shaderforge/evaluation").glob("*.py"),
-            *Path(ROOT / "src/shaderforge/store").glob("*.py"),
             *(
                 path if path.is_absolute() else ROOT / path
                 for path in extra_source_paths
@@ -548,19 +543,19 @@ async def _execute_for_attempt(
     application: Any,
     request: CapabilityExecutionRequest,
     *,
-    renderer: Any | None,
-    warm_render_calls: list[int],
+    resource: Any | None,
+    warm_resource_calls: list[int],
 ) -> Any:
     """按 suite 生命周期选择 cold 或 warm Application API 入口."""
-    if renderer is None:
+    if resource is None:
         return await application.execute_capability(request)
-    launch_count = 1 if warm_render_calls[0] == 0 else 0
-    response = await application.execute_capability_with_renderer(
+    usage_count = 1 if warm_resource_calls[0] == 0 else 0
+    response = await application.execute_capability_with_resource(
         request,
-        renderer=renderer,
-        browser_launch_count=launch_count,
+        resource=resource,
+        resource_usage_count=usage_count,
     )
-    warm_render_calls[0] += 1
+    warm_resource_calls[0] += 1
     return response
 
 
@@ -675,8 +670,8 @@ async def _execute_attempt(
                     capability_id=case.capability_id,
                     inputs=inputs,
                 ),
-                renderer=renderer,
-                warm_render_calls=warm_render_calls,
+                resource=renderer,
+                warm_resource_calls=warm_render_calls,
             )
         else:
             assert case.node_id is not None
@@ -750,8 +745,8 @@ async def _execute_attempt(
                     capability_id=step.capability_id,
                     inputs=inputs,
                 ),
-                renderer=renderer,
-                warm_render_calls=warm_render_calls,
+                resource=renderer,
+                warm_resource_calls=warm_render_calls,
             )
             response_target = {
                 "target_type": "capability",
@@ -919,10 +914,12 @@ async def run_benchmark_suite(
         return ensure_json_object(json.loads(report_path.read_bytes()))
 
     async with AsyncExitStack() as stack:
-        renderer = None
-        warm_render_calls = [0]
+        resource = None
+        warm_resource_calls = [0]
         if suite.manifest.renderer_lifecycle == "warm_per_suite":
-            renderer = await stack.enter_async_context(application.renderer_session())
+            resource = await stack.enter_async_context(
+                application.benchmark_resource_session()
+            )
             completed_warmups = [
                 (case, attempt_id)
                 for case, attempt_id, warmup in planned
@@ -961,8 +958,8 @@ async def run_benchmark_suite(
                     context=context,
                     case=case,
                     attempt_root=attempt_root,
-                    renderer=renderer,
-                    warm_render_calls=warm_render_calls,
+                    renderer=resource,
+                    warm_render_calls=warm_resource_calls,
                 )
             except (asyncio.CancelledError, KeyboardInterrupt) as exc:
                 _write_interruption(
@@ -1035,6 +1032,7 @@ async def run_benchmark_suite(
     report = {
         "schema_version": "node_lab_benchmark_report_v1",
         "suite_run_id": run_id,
+        "pipeline_id": suite.manifest.pipeline_id,
         "suite_id": suite.manifest.suite_id,
         "manifest_sha256": suite.manifest_sha256,
         "config_sha256": config_sha256,
@@ -1098,6 +1096,7 @@ def compare_benchmark_reports(
         baseline.get("source_fingerprint") == candidate.get("source_fingerprint")
         and baseline.get("environment_fingerprint")
         == candidate.get("environment_fingerprint")
+        and baseline.get("pipeline_id") == candidate.get("pipeline_id")
         and baseline.get("suite_id") == candidate.get("suite_id")
     )
     result: dict[str, Any] = {
