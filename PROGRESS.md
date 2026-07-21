@@ -1,6 +1,6 @@
 # 进度
 
-最后更新：2026-07-16
+最后更新：2026-07-21
 
 > 本文件是有界的当前交接页，不是逐会话追加日志。功能状态以 `docs/FEATURES.md` 为准，长期取舍以 `docs/DECISIONS.md` 为准，完整旧记录见 `docs/progress/archive/`。
 
@@ -13,6 +13,7 @@
 - 仓库结构边界已加固：五模型角色离线 benchmark 与在线 Agent Service 分离，共享测试样本归入 `tests/fixtures`，轻量包导入不再 eager-load 浏览器/Runner/V1 契约；前端统一通过 API client 访问后端，Node Lab 只对选中步骤加载完整明细。
 - 正式 run `m5-20260715T023445Z` 的自动质量检查 12/12 通过，但独立人工盲评 final/initial/tie 为 `3/4/3`，final 偏好率 `30%` 低于冻结的 `50%` 门槛；最终 gate 为 `failed`，F09 继续 active、灰度 no-go。
 - V2–V5 实施方案已完成拆分后正式 Review，形成总纲、四个版本方案和 Review 报告；结论为 Conditional Go，仅允许在 F09 M6.2 证据冻结后进入 V2.0 契约冻结，不代表 F02–F05 或异步产品能力已经实现。
+- 新增并完成《PNG 转无贴图 GLSL Agent—最小骨架（快速版）》实施前修订：`png_to_shader_min` 定位为 F09 下与现有产品 V1 并行的技术验证图，采用 scene JSON、参数化模板、prepared Renderer 和 CMA-ES；当前尚未实现、注册或接入产品，现有 V1 代码、API、UI、Node Lab、benchmark 与历史证据均保持不变。
 
 ## 当前 active 功能
 
@@ -20,13 +21,15 @@
 
 ## 下一步
 
-- 执行 `F09 M6.2 人类偏好对齐`：在 Node Lab 中优先诊断 topology、实例数量、轮廓/镂空、高光/阴影语义层保留，以及 Selector 的结构感知不足。
-- 重点解释 deterministic affine seed 为何在自动 objective 上晋升，却在 `rimmed_disk`、`arc_highlight_orb`、`dual_disks`、`pink_gel` 上被人工选择 initial；不得加入 benchmark case、manifest、golden 或 gate 特判。
-- 离线回归完成后，必须使用新 suite-run-id、完整硬预算重新运行真实模型 M5，并进行新一轮独立盲评；不得复用当前人工结果宣称修复通过。
-- M6.2 诊断与证据冻结后，按 `human_doc/png-to-shader-v2-v5-plan/` 从 V2.0 开始：先冻结 TargetHypothesis、RequestConstraintSet、Artifact、Genome Hash、Candidate、State/Budget Schema、golden fixture 和数据 Manifest；不得跳过 V2.0 同时启动 Intent Prompt、Compiler 或新 Graph。
+- 按快速版 M0 先冻结 scene/patch、State、typed uniform、轻量 MAE、预算和 12 节点/3 路由契约；实现前不得把方案中的 CLI 技术验证误称为产品切换。
+- 先为现有 Renderer 增加保持 V1 兼容的 prepared program/typed uniform 能力，并在目标分辨率通过 100 次渲染性能门禁；未通过时不进入 2000 draw 的 CMA-ES 实现。
+- M0 通过后按 M1–M6 依次交付模板与兜底 scene、确定性感知、Initial Author、基础优化、特征优化、Refine 外环和 CLI；普通测试只使用 Fake Gateway，真实模型必须显式开启并受 6 次调用/2000 draw 硬预算。
+- 现有 `png_to_shader_v1` 在独立 M7 完成 Backend、Frontend、账本、Artifact、生命周期和 E2E 切换前继续作为唯一产品路径；V2–V5 详细方案保持目标架构输入，但其实施顺序需在最小骨架证据形成后重新确认。
 
 ## 未解决缺口
 
+- 快速版当前只有修订后的计划，没有代码和验收证据；现有 Renderer 不支持 prepared program、任意 typed uniform 或无 PNG 编码的像素热路径，2000 draw/15 分钟目标尚未由性能数据证明。
+- 快速版 Definition of Done 只覆盖 Graph/CLI，不覆盖产品 API、Frontend、Memory、Node Lab 和 benchmark 迁移；未完成独立 M7 前不得删除旧 V1 垂直切片或修改其冻结失败证据。
 - 自动 objective 尚不能充分保护人类偏好的视觉拓扑、实例数量和高光/阴影层次，这是 F09 当前的质量发布阻塞项。
 - 正式 M5 与 Node Lab real-model 的完整报告仍位于被忽略的本地 `output/benchmarks/`；`docs/evidence/registry.json` 已登记摘要、字节数和 SHA-256，但耐久性仍为 `partial`。在完整脱敏证据进入 Git LFS、Release 或不可变对象存储前，不能仅凭本地路径独立复验。
 - 服务端仍是阻塞式 API；浏览器停止等待不等于服务端取消。端到端 deadline、任务化/cancel、outbox/reaper、多 worker 分布式锁和真实发生顺序事件属于后续可靠性设计，不与 M6.2 混写。
@@ -34,6 +37,7 @@
 
 ## 当前验证基线
 
+- 2026-07-21 仅修订快速版方案、当前交接页和决策记录；`make docs-check`、`git diff --check`、进度页体量/重要变更数量及 Markdown 尾随空白检查通过。未修改运行时代码、Graph 注册或功能状态，未运行真实模型。
 - 2026-07-16 当前工作树在 `UV_LOCKED=1` 下通过 `make check`：414 个 Python 单元测试、`docs-check`、LangGraph validate（1 个 Graph）与 Frontend production build 均成功；Integration 为 27 passed、1 skipped，全仓 Ruff、`mypy --strict src backend` 与 `git diff --check` 通过。未运行真实模型。
 - 数据库和浏览器追加验收通过：`make test-memory-postgres` 为 1 passed；产品 `npm --prefix frontend run e2e:procedural-v1` 与 Node Lab `make test-node-lab-ui` 均通过，使用隔离资源且没有真实模型调用。
 - `H02` 权威验收命令 `make benchmark-node-lab-ai-off`、`make benchmark-node-lab-model`、`make test-node-lab-ui` 均通过；本次离线五角色 run id 为 `node-lab-model-78520d334d0a`。这些结果只覆盖 AI-off、离线 fixture 和页面流程，不构成真实模型质量证明。
@@ -44,11 +48,11 @@
 
 ## 最近重要变更
 
+- 2026-07-21：完成 PNG-to-Shader 最小骨架快速版的实施前修订，修正为 12 节点/3 路由，补齐 prepared Renderer 性能门禁、轻量 MAE、State/Artifact、安全失败和可选产品切换边界；现有 V1 继续承担产品路径。
 - 2026-07-16：完成 V2–V5 实施方案的拆分后正式 Review，关闭多假设、ConstraintSet、版本化 State、SearchJournal、SelectionSnapshot、双 fencing 和可重复量化协议等设计缺口；结论仅允许从 V2.0 契约冻结开始实施。
 - 2026-07-16：完成跨模块结构修复：离线 benchmark 脱离在线 Service，共享 Fixture 脱离 unit test 层级，前端统一 API client 并消除 Node Lab 步骤 N+1 请求；新增依赖方向、直接 fetch、惰性导入和生命周期回归门禁。
 - 2026-07-16：完成第二批 Harness 加固：主 CI 改为锁文件安装并执行完整门禁，普通 Integration 移除模型凭据；包根改为按领域惰性导出，Backend SQL/许可证打包歧义消除，Backend 配置冻结与资源补偿清理覆盖初始化、取消和关闭失败。
 - 2026-07-16：完成第一批仓库 Harness 治理：历史阶段总结迁入归档，Graph/Lab/State 事实错误、Validator/Renderer 契约漂移和 benchmark 预算失真已修复；manifest 改为严格校验，并新增证据 registry、live/archive、命令/路径、导入边界及 Graph 双向一致性门禁。
-- 2026-07-15：将全部 PNG-to-Shader V1 Node 工厂及支持实现收拢到单一功能命名空间，并按 model、deterministic、Node Lab integration 明确依赖方向；Graph 的 20 个 Node ID、边、路由和安全语义不变。
 
 ## 历史索引
 

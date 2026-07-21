@@ -373,3 +373,10 @@
 - 决策：后续 PNG-to-Shader 演进采用 `human_doc/png-to-shader-v2-v5-plan/` 中已正式 Review 的总纲与四版本方案：V2 建立 TargetHypothesis、RequestConstraintSet、Intent IR、Effect Genome 和 Deterministic Compiler；V3 在固定拓扑上建立版本化 Oracle、SelectionKey、SearchJournal 和确定性参数搜索；V4 只在结构停滞后通过受限 GenomePatch、版本化 shortlist、Pairwise/HITL 和 staging SelectionSnapshot 改变结构或偏好；V5 再引入 Async Run、Ledger、Checkpoint/NodeCommit、RunJob/RendererJob 双 fencing、SSE、取消和恢复。Review 结论为 Conditional Go，仅允许先实施 V2.0 Schema、Hash、Artifact Adapter、golden fixture、数据 Manifest 和 State 恢复契约；不得跳过 V2.0 并行启动 Prompt、Compiler、Search 或新 Graph。
 - 原因：第一稿在多测量假设、ConstraintSet 集合级身份、跨版本 State、Search 恢复、evaluation revision 原子发布、Renderer 幂等与 durable 副作用等位置存在可编码性断层；把 V2–V5 合成一个大任务会迫使后续版本依赖仍在变化的根契约。正式 Review 已将事实、推断、约束、Genome、Evidence、选择语义和持久化边界拆成可独立冻结的版本层，并为质量、人工评测和恢复建立可重复判定协议。
 - 影响：当前 F09 仍是唯一 `active` 功能，F02–F05 及异步产品能力继续为 `not_started`；本决策和方案文档不改变现有 V1 Graph、API、RenderContract、`current_best`、checkpoint 或发布 gate。F09 M6.2 证据冻结后，首个实现 PR 只交付 V2.0 契约和测试资产；后续每个增量必须满足总纲的一次一个 active 功能、版本化 Manifest、V1 只读兼容和对应退出门槛。
+
+## D048 - 最小 scene/template/optimization Graph 先并行验证，不提前替换 V1 产品链路
+
+- 日期：2026-07-21
+- 决策：在 F09 内新增 `png_to_shader_min` 技术验证路线，以严格 scene JSON 作为唯一可编辑 Shader 表示，由模板生成参数化 WebGL1 GLSL，LLM 只生成初始 scene 和单个 typed patch，数值拟合交给节点内 CMA-ES。该路线先完成 prepared Renderer/typed uniform 与轻量 MAE 性能门禁，再按 12 节点、3 个纯路由函数实现 Graph/CLI。最小图与现有 `png_to_shader_v1` 并行注册；在独立产品切换里程碑完成前，V1 继续作为唯一 Backend/Frontend 产品路径。
+- 原因：V1 的自由 GLSL 路线已通过自动事实门禁但人工偏好率只有 30%，结构与数值耦合使确定性优化难以介入；scene/template 路线可以把模型结构决策与数值搜索分离。但当前 Renderer 每次重新编译并编码 PNG，不支持任意 uniform 热路径，且快速版只定义 CLI 验收，尚不足以安全替换 API、UI、Memory、Node Lab 和 benchmark。
+- 影响：D047 的 V2–V5 仍是目标架构输入，但在进入其大范围契约实施前先形成这条有界技术证据；快速版不改变 F09 的 `active` 状态，不把 F02–F05 标为已开始。现有 V1 代码、发布 gate、历史 benchmark 和失败证据不得因最小图开发而删除或覆盖。只有 M7 通过 Backend integration、浏览器 E2E、生命周期、Artifact 和文档门禁后，才能另行决定下线 V1。
