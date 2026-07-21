@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from agent.app.contracts.llm import LLMGateway
 from agent.app.graphs.png_to_shader_min_graph import (
     PNG_TO_SHADER_MIN_RECURSION_LIMIT,
     build_png_to_shader_min_graph,
@@ -13,6 +14,7 @@ from agent.app.graphs.png_to_shader_min_graph import (
     png_to_shader_min_renderer_registry,
 )
 from agent.app.nodes.png_to_shader_min import MinRendererRegistry
+from agent.app.nodes.png_to_shader_min.model_author import effective_llm_budget
 from shaderforge.store import LocalArtifactStore
 
 
@@ -59,7 +61,11 @@ class PngToShaderMinResult:
 
 _PUBLIC_ARTIFACTS = {
     "final-render": ("final/render.png", "image/png", "final-render.png"),
-    "metrics": ("final/metrics.json", "application/json; charset=utf-8", "metrics.json"),
+    "metrics": (
+        "final/metrics.json",
+        "application/json; charset=utf-8",
+        "metrics.json",
+    ),
     "manifest": (
         "final/manifest.json",
         "application/json; charset=utf-8",
@@ -76,11 +82,16 @@ class PngToShaderMinService:
         graph: Any,
         artifacts: LocalArtifactStore,
         renderers: MinRendererRegistry,
+        *,
+        llm_budget: int = 0,
+        refine_budget: int = 0,
     ) -> None:
-        """绑定同一组合根中的 Graph、Artifact 和 Renderer。."""
+        """绑定同一组合根中的 Graph、Artifact、Renderer 和保守模型预算。."""
         self.graph = graph
         self.artifacts = artifacts
         self.renderers = renderers
+        self.llm_budget = effective_llm_budget(llm_budget)
+        self.refine_budget = max(0, int(refine_budget))
 
     async def generate(
         self,
@@ -91,7 +102,7 @@ class PngToShaderMinService:
         run_id: str,
         instruction: str = "",
     ) -> PngToShaderMinResult:
-        """以保守预算执行确定性 scene_mvp 完整链路。."""
+        """以显式 scene_mvp 的小批 draw 与有界模型预算执行完整链路。."""
         try:
             state = await self.graph.ainvoke(
                 {
@@ -100,9 +111,9 @@ class PngToShaderMinService:
                     "image": image,
                     "content_type": content_type,
                     "instruction": instruction,
-                    "render_budget": 5,
-                    "llm_budget": 0,
-                    "refine_budget": 0,
+                    "render_budget": 40,
+                    "llm_budget": self.llm_budget,
+                    "refine_budget": self.refine_budget,
                     "target_mae": 0.08,
                 },
                 {"recursion_limit": PNG_TO_SHADER_MIN_RECURSION_LIMIT},
@@ -151,21 +162,35 @@ class PngToShaderMinService:
 
 
 def create_png_to_shader_min_service(
-    *, artifact_store: LocalArtifactStore | None = None
+    *,
+    artifact_store: LocalArtifactStore | None = None,
+    gateway: LLMGateway | None = None,
+    llm_budget: int = 0,
+    refine_budget: int = 0,
 ) -> PngToShaderMinService:
-    """创建测试或独立运行使用的最小服务。."""
+    """创建测试或独立运行使用的最小服务组合根。."""
     artifacts = artifact_store or png_to_shader_min_artifact_store
     renderers = MinRendererRegistry()
     graph = build_png_to_shader_min_graph(
-        artifact_store=artifacts, renderer_registry=renderers
+        artifact_store=artifacts,
+        renderer_registry=renderers,
+        gateway=gateway,
     )
-    return PngToShaderMinService(graph, artifacts, renderers)
+    return PngToShaderMinService(
+        graph,
+        artifacts,
+        renderers,
+        llm_budget=llm_budget,
+        refine_budget=refine_budget,
+    )
 
 
 default_png_to_shader_min_service = PngToShaderMinService(
     png_to_shader_min_graph,
     png_to_shader_min_artifact_store,
     png_to_shader_min_renderer_registry,
+    llm_budget=6,
+    refine_budget=1,
 )
 
 

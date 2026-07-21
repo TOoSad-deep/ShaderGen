@@ -67,11 +67,12 @@
 | 改动范围 | 追加命令 |
 |---|---|
 | 产品上传、生成、结果或 Shader 预览 | `npm --prefix frontend run e2e:procedural-v1` |
+| scene_mvp 模式、运行摘要或 min_pipeline 字段展示 | `npm --prefix frontend run e2e:scene-mvp` |
 | project 切换、Memory 状态或清理 | `npm --prefix frontend run e2e:memory` |
 | `/lab` 页面、Node Lab API 封装或 DAG/Artifact 交互 | `npm --prefix frontend run e2e:node-lab` |
 
-跨多个范围时运行对应命令的并集；纯样式或与某条流程无关的局部组件改动不强制运行全部三条 E2E，但必须说明选择依据。
+跨多个范围时运行对应命令的并集；纯样式或与某条流程无关的局部组件改动不强制运行全部 E2E，但必须说明选择依据。
 
 - 涉及后端接口字段时，同时检查 `frontend/src/api/` 类型和 `backend/app/schemas/` 是否一致。
-- 三条 E2E 默认分别使用隔离端口 `15173/18088`、`15174/18089` 和 `15175/18090`，不会复用或终止开发中的 `5173/8088` 服务；需要并行运行时可通过脚本内对应 `SHADERGEN_*_E2E_*_PORT` 环境变量覆盖。Node Lab 页面 E2E 只连接假 API，不调用模型、Renderer、Memory 或产品 run。
+- 四条 E2E 默认分别使用隔离端口 `15173/18088`、`15176/18091`、`15174/18089` 和 `15175/18090`，不会复用或终止开发中的 `5173/8088` 服务；需要并行运行时可通过脚本内对应 `SHADERGEN_*_E2E_*_PORT` 环境变量覆盖。Node Lab 页面 E2E 只连接假 API，不调用模型、Renderer、Memory 或产品 run；scene_mvp E2E 同样只连接本地假 API，覆盖质量达标与未达标两种响应。
 - 前端目录、组件约定、API 封装或样式规则变化时，同步更新本文档。

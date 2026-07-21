@@ -2,21 +2,44 @@
 
 from __future__ import annotations
 
-import copy
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
+from langchain_core.messages import SystemMessage
 from PIL import Image
 
+from agent.app.contracts.llm import LLMGateway
+from agent.app.contracts.png_to_shader_min import (
+    MinAuthorPatch,
+    apply_min_author_patch,
+)
+from agent.app.messages.png_to_shader_v1 import (
+    labeled_image_parts,
+    multimodal_human_message,
+    text_part,
+)
+from agent.app.nodes.png_to_shader_min.model_author import (
+    MIN_AUTHOR_INITIAL_PROMPT,
+    MIN_AUTHOR_REFINE_PROMPT,
+    effective_llm_budget,
+    invoke_min_author,
+    remaining_llm_calls,
+)
+from agent.app.parsers.png_to_shader_min import (
+    min_author_patch_json_schema,
+    parse_min_author_patch,
+    parse_min_scene,
+)
 from shaderforge.evaluation import rgb_mae
 from shaderforge.generation import (
     bake_min_uniforms,
     materialize_min_shader,
 )
+from shaderforge.optimization import propose_min_scene_candidates
 from shaderforge.public import MinScene, perceive_min_target
 from shaderforge.rendering import (
     PREPARED_RENDERER_PATH,
@@ -147,7 +170,12 @@ def _raw_rgb_array(rgb_bytes: bytes, width: int, height: int) -> np.ndarray:
     expected = width * height * 3
     if len(rgb_bytes) != expected:
         raise ValueError(f"prepared RGB 长度应为 {expected}，实际为 {len(rgb_bytes)}。")
-    return np.frombuffer(rgb_bytes, dtype=np.uint8).reshape(height, width, 3).astype(np.float32) / 255.0
+    return (
+        np.frombuffer(rgb_bytes, dtype=np.uint8)
+        .reshape(height, width, 3)
+        .astype(np.float32)
+        / 255.0
+    )
 
 
 def _encode_rgb_png(rgb_bytes: bytes, width: int, height: int) -> bytes:
@@ -209,8 +237,9 @@ async def _evaluate_scene(
 def make_min_nodes(
     artifacts: LocalArtifactStore,
     registry: MinRendererRegistry,
+    gateway: LLMGateway,
 ) -> dict[str, Callable[..., Any]]:
-    """创建共享 Artifact/Renderer 边界的九个工作节点和三个决定节点。."""
+    """创建共享 Gateway/Artifact/Renderer 边界的九个工作节点和三个决定节点。."""
 
     async def initialize_run(state: dict[str, Any]) -> dict[str, Any]:
         project_id, run_id = str(state["project_id"]), str(state["run_id"])
@@ -223,13 +252,18 @@ def make_min_nodes(
             "status": "running",
             "render_count": int(state.get("render_count", 0)),
             "render_budget": int(state.get("render_budget", 8)),
-            "llm_call_count": int(state.get("llm_call_count", 0)),
-            "llm_budget": int(state.get("llm_budget", 0)),
+            "llm_call_count": min(
+                effective_llm_budget(state.get("llm_budget", 0)),
+                max(0, int(state.get("llm_call_count", 0))),
+            ),
+            "llm_budget": effective_llm_budget(state.get("llm_budget", 0)),
             "refine_count": 0,
             "refine_budget": int(state.get("refine_budget", 0)),
             "target_mae": float(state.get("target_mae", 0.08)),
             "feature_queue": ("rim", "shadow"),
-            "trace": _trace(state, "initialize_run", f"输入已登记：{reference.sha256[:12]}"),
+            "trace": _trace(
+                state, "initialize_run", f"输入已登记：{reference.sha256[:12]}"
+            ),
         }
 
     async def perceive_target(state: dict[str, Any]) -> dict[str, Any]:
@@ -247,12 +281,77 @@ def make_min_nodes(
         }
 
     async def author_initial(state: dict[str, Any]) -> dict[str, Any]:
+        fallback = MinScene.model_validate(state["scene"])
+        remaining = remaining_llm_calls(state)
+        if remaining <= 0:
+            return {
+                "phase": "author_initial",
+                "scene": fallback.model_dump(mode="json"),
+                "trace": _trace(
+                    state,
+                    "author_initial",
+                    "模型预算为 0，使用确定性感知 scene。",
+                    author_source="perception_fallback",
+                ),
+            }
+        schema = MinScene.model_json_schema(mode="validation")
+        content = [
+            text_part("perception", state.get("perception", {})),
+            text_part("fallback_scene", fallback),
+            text_part("user_instruction", state.get("instruction", "")),
+            text_part("expected_json_schema", schema),
+            *labeled_image_parts(
+                "reference_image",
+                state["image"],
+                state.get("content_type", "image/png"),
+            ),
+        ]
+        result = await invoke_min_author(
+            gateway=gateway,
+            messages=[
+                SystemMessage(content=MIN_AUTHOR_INITIAL_PROMPT.prompt),
+                multimodal_human_message(content),
+            ],
+            prompt=MIN_AUTHOR_INITIAL_PROMPT,
+            schema=schema,
+            parser=lambda text: parse_min_scene(
+                text,
+                expected_width=fallback.canvas.width,
+                expected_height=fallback.canvas.height,
+            ),
+            remaining_calls=remaining,
+            max_output_tokens=1800,
+        )
+        call_count = int(state.get("llm_call_count", 0)) + result.call_count
+        if not isinstance(result.value, MinScene):
+            return {
+                "phase": "author_initial",
+                "scene": fallback.model_dump(mode="json"),
+                "llm_call_count": call_count,
+                "author_model": result.model_ref,
+                "author_error": result.error_code,
+                "trace": _trace(
+                    state,
+                    "author_initial",
+                    "模型调用或严格解析失败，安全回退到感知 scene。",
+                    author_source="perception_fallback",
+                    model_calls=result.call_count,
+                    error_code=result.error_code,
+                ),
+            }
         return {
             "phase": "author_initial",
+            "scene": result.value.model_dump(mode="json"),
+            "llm_call_count": call_count,
+            "author_model": result.model_ref,
+            "author_error": None,
             "trace": _trace(
                 state,
                 "author_initial",
-                "快速贯通版使用确定性感知 scene；模型 Author 接口保留为后续增量。",
+                "完整 MinScene 已通过严格模型契约。",
+                author_source="model",
+                model_calls=result.call_count,
+                repaired=result.repaired,
             ),
         }
 
@@ -280,23 +379,32 @@ def make_min_nodes(
                     state, "render_and_evaluate", str(outcome["error"]), status="failed"
                 ),
             }
-        best = {
+        candidate = {
             "scene": scene.model_dump(mode="json"),
             "mae": outcome["mae"],
             "glsl": outcome["glsl"],
             "render": outcome["image"],
         }
+        previous = state.get("current_best")
+        accepted = not isinstance(previous, dict) or float(candidate["mae"]) < float(
+            previous["mae"]
+        )
+        best = candidate if accepted else previous
+        assert isinstance(best, dict)
         return {
             "phase": "render",
             "render_count": outcome["render_count"],
-            "current_glsl": outcome["glsl"],
-            "current_render": outcome["image"],
+            "scene": best["scene"],
+            "current_glsl": best["glsl"],
+            "current_render": best["render"],
             "current_mae": outcome["mae"],
-            "current_best_mae": outcome["mae"],
+            "current_best_mae": best["mae"],
             "current_best": best,
             "error": None,
             "trace": _trace(
-                state, "render_and_evaluate", f"MAE={outcome['mae']:.6f}"
+                state,
+                "render_and_evaluate",
+                f"{'accepted' if accepted else 'rejected'}，候选 MAE={outcome['mae']:.6f}，best MAE={best['mae']:.6f}",
             ),
         }
 
@@ -304,31 +412,34 @@ def make_min_nodes(
         baseline = dict(state["current_best"])
         best = baseline
         render_count = int(state["render_count"])
-        for multiplier in (0.96, 1.04):
-            if render_count >= int(state["render_budget"]):
-                break
-            data = copy.deepcopy(baseline["scene"])
-            axes = data["object"]["primitive"]["axes"]
-            data["object"]["primitive"]["axes"] = [
-                max(0.03, float(value) * multiplier) for value in axes
-            ]
-            candidate = MinScene.model_validate(data)
+        baseline_scene = MinScene.model_validate(baseline["scene"])
+        proposals = propose_min_scene_candidates(
+            baseline_scene,
+            stage="base",
+            remaining_draw_budget=max(0, int(state["render_budget"]) - render_count),
+            batch_size=24,
+        )
+        accepted_parameter: str | None = None
+        for proposal in proposals:
             outcome = await _evaluate_scene(
                 {**state, "render_count": render_count},
-                candidate,
+                proposal.scene,
                 registry,
                 capture_png=False,
             )
             render_count = outcome["render_count"]
             if outcome["success"] and float(outcome["mae"]) < float(best["mae"]):
                 best = {
-                    "scene": candidate.model_dump(mode="json"),
+                    "scene": proposal.scene.model_dump(mode="json"),
                     "mae": outcome["mae"],
                     "glsl": outcome["glsl"],
                     "render": _encode_rgb_png(
-                        outcome["rgb"], candidate.canvas.width, candidate.canvas.height
+                        outcome["rgb"],
+                        proposal.scene.canvas.width,
+                        proposal.scene.canvas.height,
                     ),
                 }
+                accepted_parameter = proposal.parameter.path
         improved = float(best["mae"]) < float(baseline["mae"])
         return {
             "phase": "base",
@@ -342,30 +453,178 @@ def make_min_nodes(
                 state,
                 "optimize_base",
                 f"{'accepted' if improved else 'rolled_back'}，MAE={best['mae']:.6f}",
+                candidates_evaluated=render_count - int(state["render_count"]),
+                accepted_parameter=accepted_parameter,
             ),
         }
 
     async def optimize_feature(state: dict[str, Any]) -> dict[str, Any]:
         queue = list(state.get("feature_queue", ()))
-        feature = queue.pop(0) if queue else "none"
+        feature_type = queue.pop(0) if queue else "none"
+        baseline = dict(state["current_best"])
+        best = baseline
+        render_count = int(state["render_count"])
+        baseline_scene = MinScene.model_validate(baseline["scene"])
+        feature = next(
+            (
+                item
+                for item in baseline_scene.object.features
+                if item.id == feature_type or item.type == feature_type
+            ),
+            None,
+        )
+        proposals = (
+            propose_min_scene_candidates(
+                baseline_scene,
+                stage="feature",
+                feature_id=feature.id,
+                remaining_draw_budget=max(
+                    0, int(state["render_budget"]) - render_count
+                ),
+                batch_size=4,
+            )
+            if feature is not None
+            else ()
+        )
+        accepted_parameter: str | None = None
+        for proposal in proposals:
+            outcome = await _evaluate_scene(
+                {**state, "render_count": render_count},
+                proposal.scene,
+                registry,
+                capture_png=False,
+            )
+            render_count = outcome["render_count"]
+            if outcome["success"] and float(outcome["mae"]) < float(best["mae"]):
+                best = {
+                    "scene": proposal.scene.model_dump(mode="json"),
+                    "mae": outcome["mae"],
+                    "glsl": outcome["glsl"],
+                    "render": _encode_rgb_png(
+                        outcome["rgb"],
+                        proposal.scene.canvas.width,
+                        proposal.scene.canvas.height,
+                    ),
+                }
+                accepted_parameter = proposal.parameter.path
+        improved = float(best["mae"]) < float(baseline["mae"])
         return {
             "phase": "feature",
+            "scene": best["scene"],
+            "current_best": best,
+            "current_best_mae": best["mae"],
+            "current_glsl": best["glsl"],
+            "current_render": best["render"],
+            "render_count": render_count,
             "feature_queue": tuple(queue),
             "trace": _trace(
                 state,
                 "optimize_feature",
-                f"{feature} 使用感知初值，本轮无额外搜索。",
+                f"{feature_type} {'accepted' if improved else 'rolled_back'}，MAE={best['mae']:.6f}",
+                candidates_evaluated=render_count - int(state["render_count"]),
+                accepted_parameter=accepted_parameter,
             ),
         }
 
     async def author_refine(state: dict[str, Any]) -> dict[str, Any]:
+        best = state.get("current_best")
+        refine_count = int(state.get("refine_count", 0)) + 1
+        if not isinstance(best, dict):
+            return {
+                "phase": "refine",
+                "refine_count": refine_count,
+                "trace": _trace(
+                    state,
+                    "author_refine",
+                    "缺少 current_best，拒绝生成候选。",
+                    status="failed",
+                ),
+            }
+        best_scene = MinScene.model_validate(best["scene"])
+        remaining = remaining_llm_calls(state)
+        if remaining <= 0:
+            return {
+                "phase": "refine",
+                "scene": best_scene.model_dump(mode="json"),
+                "refine_count": refine_count,
+                "trace": _trace(
+                    state,
+                    "author_refine",
+                    "模型预算已耗尽，保留 current_best。",
+                    author_source="current_best",
+                ),
+            }
+        schema = min_author_patch_json_schema()
+        content = [
+            text_part("current_best_scene", best_scene),
+            text_part("current_best_mae", best.get("mae")),
+            text_part("user_instruction", state.get("instruction", "")),
+            text_part("expected_json_schema", schema),
+            *labeled_image_parts(
+                "reference_image",
+                state["image"],
+                state.get("content_type", "image/png"),
+            ),
+        ]
+        render = best.get("render")
+        if isinstance(render, bytes):
+            content.extend(
+                labeled_image_parts("current_best_render", render, "image/png")
+            )
+        result = await invoke_min_author(
+            gateway=gateway,
+            messages=[
+                SystemMessage(content=MIN_AUTHOR_REFINE_PROMPT.prompt),
+                multimodal_human_message(content),
+            ],
+            prompt=MIN_AUTHOR_REFINE_PROMPT,
+            schema=schema,
+            parser=parse_min_author_patch,
+            remaining_calls=remaining,
+            max_output_tokens=500,
+        )
+        call_count = int(state.get("llm_call_count", 0)) + result.call_count
+        candidate: MinScene | None = None
+        error_code = result.error_code
+        if result.value is not None:
+            try:
+                candidate = apply_min_author_patch(
+                    best_scene,
+                    cast(MinAuthorPatch, result.value),
+                )
+            except (TypeError, ValueError) as exc:
+                error_code = f"patch_apply_failed:{type(exc).__name__}"
+        if candidate is None:
+            return {
+                "phase": "refine",
+                "scene": best_scene.model_dump(mode="json"),
+                "llm_call_count": call_count,
+                "refine_count": refine_count,
+                "author_model": result.model_ref,
+                "author_error": error_code,
+                "trace": _trace(
+                    state,
+                    "author_refine",
+                    "Patch 无效或调用失败，保留 current_best。",
+                    author_source="current_best",
+                    model_calls=result.call_count,
+                    error_code=error_code,
+                ),
+            }
         return {
             "phase": "refine",
-            "refine_count": int(state.get("refine_count", 0)) + 1,
+            "scene": candidate.model_dump(mode="json"),
+            "llm_call_count": call_count,
+            "refine_count": refine_count,
+            "author_model": result.model_ref,
+            "author_error": None,
             "trace": _trace(
                 state,
                 "author_refine",
-                "快速贯通版未启用真实模型，保留 current_best。",
+                "已从 current_best 派生一个 typed patch 候选，等待真实渲染选择。",
+                author_source="model_patch",
+                model_calls=result.call_count,
+                repaired=result.repaired,
             ),
         }
 
@@ -378,7 +637,9 @@ def make_min_nodes(
                 "status": "failed",
                 "stop_reason": state.get("error") or "no_valid_render",
                 "final_result": {},
-                "trace": _trace(state, "finalize", "没有有效渲染结果。", status="failed"),
+                "trace": _trace(
+                    state, "finalize", "没有有效渲染结果。", status="failed"
+                ),
             }
         scene = MinScene.model_validate(best["scene"])
         materialized = materialize_min_shader(scene)
@@ -443,9 +704,7 @@ def make_min_nodes(
                 "target_reached": target_reached,
                 "prepare_duration_ms": renderer_metrics["prepare_duration_ms"],
                 "uniform_render_count": renderer_metrics["uniform_render_count"],
-                "uniform_render_p95_ms": renderer_metrics[
-                    "uniform_render_p95_ms"
-                ],
+                "uniform_render_p95_ms": renderer_metrics["uniform_render_p95_ms"],
                 "scene": best["scene"],
                 "trace": trace,
             },
@@ -469,10 +728,9 @@ def make_min_nodes(
             return {"next_action": "finalize", "stop_reason": "render_budget_exhausted"}
         if state.get("feature_queue"):
             return {"next_action": "optimize_feature", "stop_reason": "continue"}
-        if (
-            int(state.get("llm_call_count", 0)) < int(state.get("llm_budget", 0))
-            and int(state.get("refine_count", 0)) < int(state.get("refine_budget", 0))
-        ):
+        if int(state.get("llm_call_count", 0)) < int(
+            state.get("llm_budget", 0)
+        ) and int(state.get("refine_count", 0)) < int(state.get("refine_budget", 0)):
             return {"next_action": "author_refine", "stop_reason": "continue"}
         return {"next_action": "finalize", "stop_reason": "bounded_mvp_complete"}
 

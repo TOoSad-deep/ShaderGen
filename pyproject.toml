@@ -76,6 +76,7 @@ packages = [
     "shaderforge.contracts",
     "shaderforge.evaluation",
     "shaderforge.generation",
+    "shaderforge.optimization",
     "shaderforge.perception",
     "shaderforge.rendering",
     "shaderforge.validation",

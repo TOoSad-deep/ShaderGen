@@ -2,15 +2,22 @@ from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
+from langchain_core.messages import AIMessage
 from PIL import Image, ImageDraw
 
+from agent.app.contracts.llm import LLMResponse
+from agent.app.contracts.png_to_shader_min import apply_min_author_patch
 from agent.app.graphs.png_to_shader_min_graph import build_png_to_shader_min_graph
 from agent.app.graphs.png_to_shader_min_routing import (
     route_after_base,
     route_after_feature,
     route_after_render,
 )
-from agent.app.nodes.png_to_shader_min import MinRendererRegistry
+from agent.app.nodes.png_to_shader_min import MinRendererRegistry, make_min_nodes
+from agent.app.parsers.png_to_shader_min import (
+    MinAuthorParseError,
+    parse_min_author_patch,
+)
 from shaderforge.generation import bake_min_uniforms, materialize_min_shader
 from shaderforge.perception import perceive_min_target
 from shaderforge.scene import AddFeaturePatch, Feature, MinScene, apply_scene_patch
@@ -78,6 +85,53 @@ class _FakePrepared:
         self.closed = True
 
 
+class _FakeGateway:
+    def __init__(self, *responses: str | Exception) -> None:
+        self.responses = list(responses)
+        self.calls = 0
+
+    async def ainvoke(self, _messages, _options):
+        self.calls += 1
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return LLMResponse(
+            message=AIMessage(content=response),
+            text=response,
+            reasoning_content=None,
+            model_ref="fake:min-author",
+            requested_model_ref="fake:min-author",
+            latency_ms=1,
+        )
+
+
+def _author_state(*, llm_budget: int = 2) -> dict[str, object]:
+    image = _pink_orb_png()
+    perception = perceive_min_target(image)
+    scene = perception.fallback_scene.model_dump(mode="json")
+    return {
+        "project_id": "author-project",
+        "run_id": "author-run",
+        "image": image,
+        "content_type": "image/png",
+        "instruction": "保留粉色主体",
+        "perception": perception.summary,
+        "target_rgb": perception.target_rgb,
+        "scene": scene,
+        "llm_budget": llm_budget,
+        "llm_call_count": 0,
+        "refine_count": 0,
+        "refine_budget": 3,
+        "trace": (),
+        "current_best": {
+            "scene": scene,
+            "mae": 0.2,
+            "glsl": "best-glsl",
+            "render": image,
+        },
+    }
+
+
 def test_scene_template_and_patch_are_strict_and_valid_webgl1() -> None:
     perception = perceive_min_target(_pink_orb_png())
     scene = perception.fallback_scene
@@ -96,6 +150,151 @@ def test_scene_template_and_patch_are_strict_and_valid_webgl1() -> None:
     assert "texture2D(" not in source
     assert "iResolution.xy" in materialized.shadertoy_source
     assert "uniform vec3 u_bg" not in materialized.shadertoy_source
+
+
+def test_min_author_patch_parser_requires_one_whitelisted_typed_patch() -> None:
+    patch = parse_min_author_patch(
+        '{"operation":"replace","path":"/object/color_field/model","value":"solid"}'
+    )
+    scene = perceive_min_target(_pink_orb_png()).fallback_scene
+
+    assert apply_min_author_patch(scene, patch).object.color_field.model == "solid"
+    with pytest.raises(MinAuthorParseError):
+        parse_min_author_patch(
+            '[{"operation":"replace","path":"/object/color_field/model","value":"solid"}]'
+        )
+    with pytest.raises(MinAuthorParseError):
+        parse_min_author_patch(
+            '{"operation":"replace","path":"/canvas/width","value":32}'
+        )
+    with pytest.raises(MinAuthorParseError):
+        parse_min_author_patch(
+            '{"operation":"replace","operation":"add","path":"/object/features","value":NaN}'
+        )
+
+
+@pytest.mark.anyio
+async def test_min_author_initial_accepts_complete_strict_scene(tmp_path) -> None:
+    state = _author_state()
+    data = dict(state["scene"])  # type: ignore[arg-type]
+    data["object"] = dict(data["object"])
+    data["object"]["color_field"] = dict(data["object"]["color_field"])
+    data["object"]["color_field"]["model"] = "solid"
+    scene = MinScene.model_validate(data)
+    gateway = _FakeGateway(scene.model_dump_json())
+    nodes = make_min_nodes(
+        LocalArtifactStore(tmp_path),
+        MinRendererRegistry(_FakeRenderer),  # type: ignore[arg-type]
+        gateway,
+    )
+
+    update = await nodes["author_initial"](state)
+
+    assert update["scene"]["object"]["color_field"]["model"] == "solid"
+    assert update["llm_call_count"] == 1
+    assert update["author_error"] is None
+    assert gateway.calls == 1
+
+
+@pytest.mark.anyio
+async def test_min_author_initial_failure_falls_back_to_perception(tmp_path) -> None:
+    state = _author_state()
+    gateway = _FakeGateway("not-json", RuntimeError("provider down"))
+    nodes = make_min_nodes(
+        LocalArtifactStore(tmp_path),
+        MinRendererRegistry(_FakeRenderer),  # type: ignore[arg-type]
+        gateway,
+    )
+
+    update = await nodes["author_initial"](state)
+
+    assert update["scene"] == state["scene"]
+    assert update["llm_call_count"] == 2
+    assert str(update["author_error"]).startswith("llm_repair_failed:")
+    assert gateway.calls == 2
+
+
+@pytest.mark.anyio
+async def test_min_author_refine_rejects_illegal_patch_and_keeps_best(tmp_path) -> None:
+    state = _author_state()
+    illegal = '{"operation":"replace","path":"/canvas/width","value":32}'
+    gateway = _FakeGateway(illegal, illegal)
+    nodes = make_min_nodes(
+        LocalArtifactStore(tmp_path),
+        MinRendererRegistry(_FakeRenderer),  # type: ignore[arg-type]
+        gateway,
+    )
+
+    update = await nodes["author_refine"](state)
+
+    assert update["scene"] == state["current_best"]["scene"]  # type: ignore[index]
+    assert update["llm_call_count"] == 2
+    assert update["refine_count"] == 1
+    assert update["author_error"] == "invalid_min_author_patch_json"
+
+
+@pytest.mark.anyio
+async def test_refine_candidate_cannot_overwrite_better_current_best(tmp_path) -> None:
+    state = _author_state(llm_budget=1)
+    state["current_best"] = {
+        **state["current_best"],  # type: ignore[dict-item]
+        "mae": 0.0,
+    }
+    gateway = _FakeGateway(
+        '{"operation":"replace","path":"/object/color_field/model","value":"solid"}'
+    )
+    registry = MinRendererRegistry(_FakeRenderer)  # type: ignore[arg-type]
+    nodes = make_min_nodes(LocalArtifactStore(tmp_path), registry, gateway)
+    refined = await nodes["author_refine"](state)
+    render_state = {
+        **state,
+        **refined,
+        "render_count": 0,
+        "render_budget": 1,
+    }
+
+    update = await nodes["render_and_evaluate"](render_state)
+
+    assert update["current_best"] == state["current_best"]
+    assert update["current_best_mae"] == 0.0
+    assert update["scene"] == state["current_best"]["scene"]  # type: ignore[index]
+
+
+@pytest.mark.anyio
+async def test_min_author_total_calls_including_repairs_never_exceed_six(
+    tmp_path,
+) -> None:
+    state = _author_state(llm_budget=99)
+    gateway = _FakeGateway(*("invalid" for _ in range(6)))
+    nodes = make_min_nodes(
+        LocalArtifactStore(tmp_path),
+        MinRendererRegistry(_FakeRenderer),  # type: ignore[arg-type]
+        gateway,
+    )
+
+    for node_name in ("author_initial", "author_refine", "author_refine"):
+        state.update(await nodes[node_name](state))
+    no_budget_update = await nodes["author_refine"](state)
+
+    assert state["llm_call_count"] == 6
+    assert no_budget_update.get("llm_call_count", 6) == 6
+    assert gateway.calls == 6
+
+
+@pytest.mark.anyio
+async def test_min_author_zero_budget_never_calls_gateway(tmp_path) -> None:
+    state = _author_state(llm_budget=0)
+    gateway = _FakeGateway(RuntimeError("must not be called"))
+    nodes = make_min_nodes(
+        LocalArtifactStore(tmp_path),
+        MinRendererRegistry(_FakeRenderer),  # type: ignore[arg-type]
+        gateway,
+    )
+
+    update = await nodes["author_initial"](state)
+
+    assert update["scene"] == state["scene"]
+    assert gateway.calls == 0
 
 
 def test_min_routing_rejects_unknown_action() -> None:
@@ -165,7 +364,41 @@ async def test_min_graph_writes_trace_and_final_artifacts(tmp_path) -> None:
 
 
 @pytest.mark.anyio
-async def test_min_graph_prepares_once_and_reuses_program_for_candidates(tmp_path) -> None:
+async def test_min_graph_builder_injects_fake_gateway_for_model_author(
+    tmp_path,
+) -> None:
+    image = _pink_orb_png()
+    data = perceive_min_target(image).fallback_scene.model_dump(mode="json")
+    data["object"]["color_field"]["model"] = "solid"
+    gateway = _FakeGateway(MinScene.model_validate(data).model_dump_json())
+    graph = build_png_to_shader_min_graph(
+        artifact_store=LocalArtifactStore(tmp_path),
+        renderer_registry=MinRendererRegistry(_FakeRenderer),  # type: ignore[arg-type]
+        gateway=gateway,
+    )
+
+    result = await graph.ainvoke(
+        {
+            "project_id": "project-model",
+            "run_id": "run-model",
+            "image": image,
+            "content_type": "image/png",
+            "render_budget": 1,
+            "llm_budget": 1,
+            "refine_budget": 0,
+            "target_mae": 1.0,
+        }
+    )
+
+    assert gateway.calls == 1
+    assert result["llm_call_count"] == 1
+    assert result["final_result"]["scene"]["object"]["color_field"]["model"] == "solid"
+
+
+@pytest.mark.anyio
+async def test_min_graph_prepares_once_and_reuses_program_for_candidates(
+    tmp_path,
+) -> None:
     _FakeRenderer.instances.clear()
     artifacts = LocalArtifactStore(tmp_path)
     graph = build_png_to_shader_min_graph(
@@ -194,3 +427,5 @@ async def test_min_graph_prepares_once_and_reuses_program_for_candidates(tmp_pat
     assert renderer.closed is True
     assert result["final_result"]["uniform_render_count"] == 3
     assert result["final_result"]["target_reached"] is False
+    base_trace = next(item for item in result["trace"] if item["phase"] == "optimize_base")
+    assert base_trace["candidates_evaluated"] == 2

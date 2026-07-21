@@ -1,4 +1,4 @@
-.PHONY: all setup setup-memory-postgres dev dev-agent dev-backend dev-node-lab dev-frontend check docs-check format lint test tests test_watch integration_tests test-memory-postgres test-node-lab-ui benchmark-ai-off benchmark-node-lab-ai-off benchmark-node-lab-model benchmark-png-to-shader benchmark-gate docker_tests help extended_tests
+.PHONY: all setup setup-memory-postgres dev dev-agent dev-backend dev-node-lab dev-frontend check docs-check format lint test tests test_watch integration_tests test-memory-postgres test-node-lab-ui test-scene-mvp-ui benchmark-ai-off benchmark-node-lab-ai-off benchmark-node-lab-model benchmark-png-to-shader benchmark-gate docker_tests help extended_tests
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -44,6 +44,9 @@ test-memory-postgres:
 
 test-node-lab-ui:
 	npm --prefix frontend run e2e:node-lab
+
+test-scene-mvp-ui:
+	npm --prefix frontend run e2e:scene-mvp
 
 benchmark-ai-off:
 	uv run python scripts/run_png_to_shader_v1_benchmark.py --mode ai-off
@@ -130,6 +133,7 @@ help:
 	@echo 'docs-check                   - verify harness docs and architecture boundaries'
 	@echo 'test-memory-postgres         - verify Shader Memory against PostgreSQL'
 	@echo 'test-node-lab-ui             - verify the Node Lab workbench in isolated Chromium'
+	@echo 'test-scene-mvp-ui             - verify the scene_mvp pipeline summary in isolated Chromium'
 	@echo 'benchmark-ai-off             - run the 10-case renderer/oracle smoke without model calls'
 	@echo 'benchmark-node-lab-ai-off    - run Node Lab capability/node/pipeline/cold/warm/transport AI-off benchmarks'
 	@echo 'benchmark-node-lab-model     - run the five Node Lab model roles with offline fixtures'

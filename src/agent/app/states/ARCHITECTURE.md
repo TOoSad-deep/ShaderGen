@@ -29,5 +29,5 @@
 ## `PngToShaderMinState` 边界
 
 - 轻量字段：`project_id`、`phase`、`status`、`stop_reason`、draw/LLM/Refine 计数与预算、`target_mae`、`current_best_mae`、`feature_queue`。
-- `UntrackedValue`：`run_id`、输入图片、确定性感知和目标 RGB、工作 scene、物化模板、当前 GLSL/render/MAE、不可被失败候选覆盖的 `current_best`、路由动作、阶段 trace 与 final manifest/result。
-- 当前快速贯通产品配置固定 `llm_budget=0`，模型节点结构仍在 Graph 中，但普通请求不会调用真实模型。
+- `UntrackedValue`：`run_id`、输入图片、确定性感知和目标 RGB、工作 scene、物化模板、当前 GLSL/render/MAE、不可被失败候选覆盖的 `current_best`、Author 实际模型/安全错误码、路由动作、阶段 trace 与 final manifest/result。
+- `llm_budget` 在初始化时硬限制到 `0..6`，语义调用和结构修复共用 `llm_call_count`；显式 `scene_mvp` 产品模式使用上限 6，供应商/配置错误会回退到确定性 scene，不覆盖 `current_best`。

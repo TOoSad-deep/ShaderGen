@@ -28,7 +28,7 @@
 - `BackendSettings` 在应用组合根一次性读取根目录 `.env`，并把数据库、日志、CORS 与 Node Lab 开关作为不可变配置注入 lifespan、Router 和 Service；底层数据库或 Node Lab 模块不得再次读取环境变量。`SHADERGEN_CORS_ORIGINS` 使用逗号分隔的显式 Origin，禁止通配符 `*`。
 - `POST /api/shader/generate` 在数据库连接池可用时，会写入 `agent_runs`、`agent_events` 和 `agent_logs`。
 - `procedural_v1` 把模式、质量档位和补充约束写入 run input，把停止原因、current_best、评分和公开 Artifact URL 写入 run result；Graph 返回的每个阶段事件与 `current_best_updated` 逐项写入 `agent_events`。
-- `scene_mvp` 复用同一 project/run 总账，不新增数据库表；run input 记录模式与补充约束，run result 记录状态、停止原因、MAE、draw/LLM 计数、scene、阶段 trace、公开 Artifact URL 及 `prepared_uniforms_v1` 的目标/准备/绘制摘要，阶段 trace 同步写入 `agent_events`。当 `llm_call_count=0` 时不伪造默认 `model_call` 事件。
+- `scene_mvp` 复用同一 project/run 总账，不新增数据库表；显式选择该实验模式后使用 40 draw、最多 6 次模型调用和 1 轮 Refine 的有界预算，模型失败回退确定性感知 scene。run input 记录模式与补充约束，run result 记录状态、停止原因、MAE、draw/LLM 计数、scene、阶段 trace、公开 Artifact URL 及 `prepared_uniforms_v1` 的目标/准备/绘制摘要，阶段 trace 同步写入 `agent_events`。当 `llm_call_count=0` 时不伪造默认 `model_call` 事件。
 - 生成终态的模型调用、阶段事件、Agent 日志和 `agent_runs` 更新使用同一个 asyncpg 显式事务；任一步失败必须整体回滚。事务先 `FOR UPDATE` 锁定 run：相同终态重放直接 no-op，不同终态重放显式报冲突，禁止静默覆盖。
 - `agent_events.reasoning_content` 只允许保存节点显式 opt-in 捕获的思维链；V1 默认不捕获、不打印 reasoning，对外 API 永不返回该字段。
 - `agent_runs.project_id` 关联一次运行与 Shader 项目；清除 Memory 不删除过程账本。

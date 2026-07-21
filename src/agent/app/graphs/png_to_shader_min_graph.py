@@ -7,11 +7,13 @@ from typing import Any, cast
 
 from langgraph.graph import END, START, StateGraph
 
+from agent.app.contracts.llm import LLMGateway
 from agent.app.graphs.png_to_shader_min_routing import (
     route_after_base,
     route_after_feature,
     route_after_render,
 )
+from agent.app.llms.gateway import LangChainLLMGateway
 from agent.app.nodes.png_to_shader_min import MinRendererRegistry, make_min_nodes
 from agent.app.states.agent_state import PngToShaderMinState
 from shaderforge.rendering import PlaywrightWebGL1Renderer
@@ -46,17 +48,20 @@ PNG_TO_SHADER_MIN_RECURSION_LIMIT = 64
 #                                                               v
 #                                                          finalize -> END
 #
-# current_best 只在真实渲染且 MAE 改善后更新；失败候选不能覆盖它。Renderer 正常由
-# finalize 关闭，Graph 外异常由 Agent Service finally 使用同一 registry 幂等兜底。
+# Model Author 只通过 Builder 注入的 LLMGateway 调用；current_best 只在真实渲染且
+# MAE 改善后更新，失败/非法 patch 候选不能覆盖它。Renderer 正常由 finalize 关闭，
+# Graph 外异常由 Agent Service finally 使用同一 registry 幂等兜底。
 def build_png_to_shader_min_graph(
     *,
     artifact_store: LocalArtifactStore | None = None,
     renderer_registry: MinRendererRegistry | None = None,
+    gateway: LLMGateway | None = None,
 ) -> Any:
-    """装配可注入 Artifact 和 Renderer 的 12 节点最小 Graph。."""
+    """装配可注入 Gateway、Artifact 和 Renderer 的 12 节点最小 Graph。."""
     artifacts = artifact_store or LocalArtifactStore(DEFAULT_MIN_ARTIFACT_ROOT)
     registry = renderer_registry or MinRendererRegistry(PlaywrightWebGL1Renderer)
-    nodes = make_min_nodes(artifacts, registry)
+    model_gateway = gateway or LangChainLLMGateway()
+    nodes = make_min_nodes(artifacts, registry, model_gateway)
     graph = cast(Any, StateGraph(PngToShaderMinState))
     for name in (
         "initialize_run",
@@ -112,9 +117,11 @@ def build_png_to_shader_min_graph(
 
 png_to_shader_min_artifact_store = LocalArtifactStore(DEFAULT_MIN_ARTIFACT_ROOT)
 png_to_shader_min_renderer_registry = MinRendererRegistry(PlaywrightWebGL1Renderer)
+png_to_shader_min_gateway = LangChainLLMGateway()
 png_to_shader_min_graph = build_png_to_shader_min_graph(
     artifact_store=png_to_shader_min_artifact_store,
     renderer_registry=png_to_shader_min_renderer_registry,
+    gateway=png_to_shader_min_gateway,
 )
 
 
@@ -123,6 +130,7 @@ __all__ = [
     "PNG_TO_SHADER_MIN_RECURSION_LIMIT",
     "build_png_to_shader_min_graph",
     "png_to_shader_min_artifact_store",
+    "png_to_shader_min_gateway",
     "png_to_shader_min_graph",
     "png_to_shader_min_renderer_registry",
 ]

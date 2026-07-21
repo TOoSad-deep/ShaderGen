@@ -105,6 +105,8 @@ class PngToShaderMinState(TypedDict, total=False):
     current_render: Annotated[bytes, UntrackedValue]
     current_mae: Annotated[float, UntrackedValue]
     current_best: Annotated[dict[str, Any], UntrackedValue]
+    author_model: Annotated[str | None, UntrackedValue]
+    author_error: Annotated[str | None, UntrackedValue]
     next_action: Annotated[str, UntrackedValue]
     trace: Annotated[tuple[dict[str, Any], ...], UntrackedValue]
     final_result: Annotated[dict[str, Any], UntrackedValue]

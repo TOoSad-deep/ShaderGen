@@ -410,3 +410,17 @@
 - 决策：`scene_mvp` 在同一 run 内按模板源码、尺寸和 typed uniform schema 形成唯一 prepared program 签名，只静态校验、编译和链接一次；每个候选必须完整上传白名单内的 `float`、`vec2`、`vec3` 值集并直接读取左上角行序 RGB。未接受候选不编码 PNG；首个有效候选和最终接受候选保留 PNG，最终 WebGL1 GLSL 继续把 uniform 烘焙为常量，以兼容旧 `render()` 和独立预览。prepared 对象只由 run registry 持有，不进入 LangGraph State。
 - 原因：后续数值优化需要高频 draw，原有每候选重新编译、链接和 PNG base64 编码会把 Renderer 开销混入搜索预算。固定模板配合严格 uniform 全量上传既能缩短热路径，也能避免缺失值沿用上一帧；保留自包含最终 GLSL 则不把运行时 prepared 生命周期泄漏到 Artifact 和前端。
 - 影响：公开 `scene_mvp` 摘要、账本、metrics、manifest 和 finalize trace 固定增加 `renderer_path=prepared_uniforms_v1`、目标 MAE、是否达标、prepare 耗时、uniform draw 数及 P95。192x192 粉球 100 draw 探针必须显式运行并满足总耗时不超过 45 秒、P95 不超过 450 ms 和无陈旧帧；通过该先决门禁不等于 CMA-ES、2000 draw 生产预算或质量发布门禁已经完成。D051 的确定性 fallback、V1 默认路径和 F09 no-go 继续有效。
+
+## D053 - scene_mvp Model Author 只产出完整 scene 或单个 typed patch
+
+- 日期：2026-07-21
+- 决策：保持 `png_to_shader_min` 的 12 节点、直接边、条件边和路由结果不变，由 Graph Builder 复用 `LLMGateway`/`LangChainLLMGateway` 注入 Author。Initial 只有在 `llm_budget>0` 时调用模型并严格解析与参考图画布绑定的完整 MinScene；调用、结构修复或解析失败回退到确定性感知 scene。Refine 只接受恰好一个 Pydantic 联合类型 patch，白名单固定为 `/object/features` 的 add/remove 和 `/object/color_field/model` 的 replace，候选必须从 `current_best.scene` 派生，不能直接更新 best。
+- 原因：scene/template 路线需要先验证模型结构变更的最小安全面；允许任意 JSON Patch、多个操作或从工作 scene 连续派生会扩大模板不变量、prepared program 和 best 单调性的风险。完整 Initial 加单个 typed Refine 可把模型职责限制在结构选择，真实 Renderer/MAE 继续拥有接受权。
+- 影响：语义调用和最多一次同模型结构修复共用 run 级 6 次硬上限；显式 `scene_mvp` 产品模式使用该上限并限制 1 轮 Refine，未配置密钥或供应商失败时回退确定性感知 scene。普通测试只注入 Fake Gateway。Refine 的工作候选必须经真实渲染且 MAE 严格改善才能覆盖 `current_best`；非法 patch、供应商异常、解析失败和较差候选全部保留原 best。此增量不改变 F09 active/no-go、V1 默认产品路径或 M7 切换门禁。
+
+## D054 - scene_mvp 先接入小预算确定性参数搜索
+
+- 日期：2026-07-21
+- 决策：`optimize_base` 和 `optimize_feature` 通过 `shaderforge.optimization` 使用固定顺序、单参数、严格白名单的数值邻域候选。base 覆盖主体 center/axes、背景与径向渐变参数；feature 覆盖现有 rim/shadow 等特征的 center/axes/color/intensity。候选按剩余 draw 预算截断，单批硬上限 24，产品 `scene_mvp` 整 run 暂用 40 draw；所有候选串行真实渲染，只有 MAE 严格下降才更新 `current_best`。
+- 原因：prepared 性能门禁已经通过，但直接进入 2000 draw CMA-ES 会同时放大算法、预算和请求时延风险。小批确定性搜索足以先验证参数接线、预算记账、回滚与可观测 trace，并保持实现可读和故障范围有限。
+- 影响：`scene_mvp` 不再只有轴长两个占位微调，基础和 feature 节点都会产生真实 uniform draw；accepted parameter 与候选数写入 trace。该实现不是 CMA-ES、没有随机/并行搜索，也不构成质量发布证据；后续扩大到 2000 draw 必须作为独立增量重新验证时延、取消和 benchmark。

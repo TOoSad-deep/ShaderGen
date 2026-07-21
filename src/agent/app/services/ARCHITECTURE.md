@@ -5,7 +5,7 @@
 ## 当前服务
 
 - `png_to_shader_v1.py`：暴露服务端自动 render/evaluate/review/refine 用例、V1 Memory 清理和固定 Artifact 白名单读取。
-- `png_to_shader_min.py`：执行最小 scene Graph，返回 scene/MAE/draw/LLM/trace 摘要，并读取相同三种 final Artifact；Graph 外异常由共享 Renderer registry 兜底清理。
+- `png_to_shader_min.py`：组合 `scene_mvp` Graph、`LLMGateway`、Artifact 和 Renderer，返回 scene/MAE/draw/LLM/trace 摘要，并读取相同三种 final Artifact；显式产品模式默认使用 40 draw、最多 6 次模型调用和 1 轮 Refine，独立调用方可注入 Fake Gateway 或收紧预算，Graph 外异常由共享 Renderer registry 兜底清理。
 - `node_lab.py`：暴露 Node Lab 的 transport-free Application API，并仅把公共 `NodeProvider` 注入通用 Harness；不再导入具体 Node factory、routing、节点 ID 集合或模式分支。HTTP/CLI/测试必须复用此入口。
 - `agent.app.nodes.png_to_shader_v1.integrations.node_lab`：属于 V1 生产 Node 命名空间的对外集成包；维护 20 个 descriptor，分别描述 15 个非模型节点和五个模型节点。Provider 由 `DeterministicNodeExecutor` 为前者提供 deterministic binding，由 `ModelRoleExecutor` 为后者提供 fixture/mock/real binding；它同时声明 routing capability 和 benchmark 源文件。
 - `errors.py`：保存公共用例使用的安全 persistence 异常。

@@ -1,6 +1,6 @@
 # PNG 转无贴图 GLSL Agent — 最小骨架（快速版）
 
-> 状态：快速贯通实施中，2026-07-21。当前已落地严格 scene、确定性感知、模板、prepared WebGL1 uniform 热路径、RGB MAE、12 节点/3 路由、Artifact/trace，以及显式 `scene_mvp` Backend/Frontend 入口；模型 Author 与 CMA-ES 仍未实现。
+> 状态：快速贯通实施中，2026-07-21。当前已落地严格 scene、确定性感知、Model Author、模板、prepared WebGL1 uniform 热路径、40 draw 小预算确定性参数搜索、RGB MAE、12 节点/3 路由、Artifact/trace，以及显式 `scene_mvp` Backend/Frontend 入口；CMA-ES/2000 draw 仍未实现。
 >
 > 目标：用 1–2 周验证一条可端到端运行的最小技术路径——一个注册进 `langgraph.json` 的 LangGraph Agent，输入单主体粉球类 PNG，自动产出无贴图 GLSL、真实 WebGL1 渲染图和 MAE 报告。
 >
@@ -151,12 +151,12 @@ class PngToShaderMinState(TypedDict, total=False):
     status: str                 # running / done / failed
     stop_reason: str
     render_count: int
-    render_budget: int          # 默认上限 2000
+    render_budget: int          # 当前产品上限 40；CMA 目标上限 2000
     llm_call_count: int
     llm_budget: int             # 默认上限 6，包含结构修复调用
     refine_count: int
-    refine_budget: int          # 默认上限 5
-    target_mae: float           # 默认 0.05
+    refine_budget: int          # 当前产品上限 1；目标上限 5
+    target_mae: float           # 当前产品目标 0.08；目标值 0.05
     current_best_mae: float
     feature_queue: tuple[str, ...]
 

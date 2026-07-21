@@ -6,7 +6,7 @@
 
 - `png_to_shader_v1_graph.py`：现有产品 Graph，入口对象为 `png_to_shader_v1_graph`；执行 PNG-to-Shader V1 有界闭环。
 - `png_to_shader_v1_routing.py`：M3 可独立单测的纯预算、停止和下一步路由规则。
-- `png_to_shader_min_graph.py`：`scene_mvp` 最小技术链路，入口对象为 `png_to_shader_min_graph`；保留 12 节点骨架，当前使用确定性感知 scene 和有界轻量微调。
+- `png_to_shader_min_graph.py`：`scene_mvp` 最小技术链路，入口对象为 `png_to_shader_min_graph`；保留 12 节点骨架，Builder 注入 Gateway，当前使用严格 Model Author、确定性 fallback 和有界轻量微调。
 - `png_to_shader_min_routing.py`：最小图的 3 个纯路由函数。
 
 ## Graph 规则
@@ -167,6 +167,8 @@ flowchart TD
 | 同上 | 同上 | `author_refine` | `author_refine` | feature queue 已空且仍可 Refine |
 | 同上 | 同上 | `finalize` | `finalize` | 达标或预算结束 |
 
-- 黄色节点构成最小图的 `current_best` 安全边界。`render_and_evaluate` 产生首个真实候选；基础微调只在 MAE 严格改善时提交，未接受候选只返回原始 RGB，不编码 PNG；特征占位步骤不覆盖 best；`finalize` 只固化 best scene、自包含 GLSL、PNG、MAE、prepared 性能摘要、manifest 和阶段 trace。
-- 快速贯通版的 `author_initial` 使用确定性感知 fallback，产品默认 `llm_budget=0`，不会调用真实模型；`author_refine` 和回边保留为后续模型增量的结构接口。
+- 黄色节点构成最小图的 `current_best` 安全边界。`render_and_evaluate` 产生或验证 Author 候选；基础与特征优化都只在 MAE 严格改善时提交，未接受候选只返回原始 RGB，不编码 PNG；`finalize` 只固化 best scene、自包含 GLSL、PNG、MAE、prepared 性能摘要、manifest 和阶段 trace。
+- `author_initial` 通过注入的 `LLMGateway` 请求完整 MinScene，调用或严格解析失败则使用确定性感知 fallback；`author_refine` 只接受一个 path/operation/value 白名单 patch，并且永远从 `current_best.scene` 派生候选。语义调用与最多一次结构修复共用 run 级 6 次硬上限；显式 `scene_mvp` 产品模式启用该预算并限制 1 轮 Refine。
+- `optimize_base` 与 `optimize_feature` 使用固定顺序、白名单、边界裁剪的小批确定性候选；单批最多 24 个，并按剩余 40 draw run 预算截断，不实现随机搜索或 CMA-ES。
+- Refine patch 只产生待评估工作 scene，不能直接写 `current_best`；随后 `render_and_evaluate` 仅在真实 RGB MAE 严格改善时提交，否则回滚工作 scene，非法输出、调用异常和较差候选均保留原 best。
 - 同一 run 的固定模板通过 `prepared_uniforms_v1` 只编译/链接一次，候选只热更新 typed uniform；最终导出 GLSL 仍烘焙常量，可由旧 `render()` 独立执行。prepared 对象只存在 run registry，`finalize` 与 Service `finally` 共用幂等关闭；CMA-ES 仍未实现。
