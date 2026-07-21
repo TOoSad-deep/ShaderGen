@@ -75,6 +75,10 @@ def test_get_qwen_model_passes_dashscope_thinking_config(monkeypatch) -> None:
     qwen_model = model_family_module("qwen")
 
     monkeypatch.setenv("DASHSCOPE_API_KEY", "fake-key")
+    monkeypatch.setenv(
+        "DASHSCOPE_BASE_URL",
+        "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    )
     monkeypatch.setattr(qwen_model, "SHADER_GEN_QWEN_ENABLE_THINKING", False)
     monkeypatch.setattr(qwen_model, "SHADER_GEN_QWEN_OUTPUT_THINKING", True)
 

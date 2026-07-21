@@ -325,7 +325,7 @@ def _scene_value(value: Any) -> dict[str, Any] | None:
     if model_dump is not None:
         return cast(dict[str, Any], model_dump(mode="json"))
     if is_dataclass(value) and not isinstance(value, type):
-        return cast(dict[str, Any], asdict(value))
+        return asdict(value)
     raise TypeError("scene_mvp scene 必须是结构化对象。")
 
 
@@ -343,7 +343,7 @@ def _scene_trace(value: Any) -> list[dict[str, Any]]:
             trace.append(cast(dict[str, Any], model_dump(mode="json")))
             continue
         if is_dataclass(item) and not isinstance(item, type):
-            trace.append(cast(dict[str, Any], asdict(item)))
+            trace.append(asdict(item))
             continue
         raise TypeError("scene_mvp trace 必须由结构化阶段记录组成。")
     return trace
@@ -385,7 +385,7 @@ async def execute_shader_generation(
     else:
         glsl_model_name = vision_model_name = "scene_mvp"
     run_started = False
-    result = None
+    result: Any = None
     logger.info(
         "shader.generate.started run_id=%s project_id=%s generation_mode=%s "
         "quality_preset=%s image_bytes=%s database_enabled=%s",
@@ -428,6 +428,8 @@ async def execute_shader_generation(
                     service=dependencies.procedural_service,
                 )
             else:
+                if dependencies.min_service is None:
+                    raise RuntimeError("scene_mvp service 未就绪。")
                 result = await generate_scene_shader_from_image(
                     command.image,
                     command.content_type,
@@ -626,6 +628,8 @@ async def execute_shader_generation(
                 run_id
             ):
                 raise ValueError("scene_mvp 返回的 project_id/run_id 与请求不一致。")
+            if result.renderer_path != "prepared_uniforms_v1":
+                raise ValueError("scene_mvp 返回了未知 Renderer 路径。")
             scene = _scene_value(result.scene)
             trace = _scene_trace(result.trace)
             response = ShaderResponse(
@@ -649,6 +653,12 @@ async def execute_shader_generation(
                     ),
                     render_count=int(result.render_count),
                     llm_call_count=int(result.llm_call_count),
+                    renderer_path="prepared_uniforms_v1",
+                    target_mae=float(result.target_mae),
+                    target_reached=bool(result.target_reached),
+                    prepare_duration_ms=float(result.prepare_duration_ms),
+                    uniform_render_count=int(result.uniform_render_count),
+                    uniform_render_p95_ms=float(result.uniform_render_p95_ms),
                     scene=scene,
                     trace=trace,
                 ),
@@ -695,6 +705,12 @@ async def execute_shader_generation(
             "current_best_mae": result.current_best_mae,
             "render_count": int(result.render_count),
             "llm_call_count": int(result.llm_call_count),
+            "renderer_path": str(result.renderer_path),
+            "target_mae": float(result.target_mae),
+            "target_reached": bool(result.target_reached),
+            "prepare_duration_ms": float(result.prepare_duration_ms),
+            "uniform_render_count": int(result.uniform_render_count),
+            "uniform_render_p95_ms": float(result.uniform_render_p95_ms),
             "scene": scene,
             "trace": trace,
             "final_render_url": f"{artifact_base}/final-render",
@@ -716,13 +732,18 @@ async def execute_shader_generation(
         logger.info(
             "shader.generate.succeeded run_id=%s project_id=%s "
             "generation_mode=scene_mvp stop_reason=%s failure_stage=none "
-            "render_count=%s llm_call_count=%s current_best_mae=%s duration_ms=%.2f",
+            "render_count=%s llm_call_count=%s current_best_mae=%s "
+            "renderer_path=%s uniform_render_count=%s uniform_render_p95_ms=%.2f "
+            "duration_ms=%.2f",
             run_id,
             project_id,
             result.stop_reason,
             result.render_count,
             result.llm_call_count,
             result.current_best_mae,
+            result.renderer_path,
+            result.uniform_render_count,
+            result.uniform_render_p95_ms,
             (time.perf_counter() - command.started_at) * 1000,
         )
         return response

@@ -28,16 +28,50 @@ def _pink_orb_png() -> bytes:
 
 
 class _FakeRenderer:
-    closed = False
+    instances: list["_FakeRenderer"] = []
 
-    async def render(self, _source: str, width: int, height: int):
-        image = Image.new("RGB", (width, height), "white")
-        buffer = BytesIO()
-        image.save(buffer, format="PNG")
+    def __init__(self) -> None:
+        self.closed = False
+        self.prepare_calls = 0
+        self.prepared = _FakePrepared()
+        self.instances.append(self)
+
+    async def prepare(self, _source, width, height, _uniform_schema):
+        self.prepare_calls += 1
+        self.prepared.width = width
+        self.prepared.height = height
+        return self.prepared
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _FakePrepared:
+    def __init__(self) -> None:
+        self.closed = False
+        self.width = 0
+        self.height = 0
+        self.prepare_duration_ms = 3.5
+        self.render_durations_ms: tuple[float, ...] = ()
+
+    @property
+    def render_count(self) -> int:
+        return len(self.render_durations_ms)
+
+    async def render_uniforms(self, _values, *, capture_png=False):
+        self.render_durations_ms = (*self.render_durations_ms, 1.25)
+        rgb = Image.new("RGB", (self.width, self.height), "white").tobytes()
+        image_bytes = None
+        if capture_png:
+            image = Image.frombytes("RGB", (self.width, self.height), rgb)
+            buffer = BytesIO()
+            image.save(buffer, format="PNG")
+            image_bytes = buffer.getvalue()
         return SimpleNamespace(
             success=True,
-            image_bytes=buffer.getvalue(),
-            compile=SimpleNamespace(draw_error=None),
+            rgb_bytes=rgb,
+            image_bytes=image_bytes,
+            draw_error=None,
         )
 
     async def close(self) -> None:
@@ -94,9 +128,69 @@ async def test_min_graph_writes_trace_and_final_artifacts(tmp_path) -> None:
 
     assert result["status"] == "completed"
     assert result["render_count"] == 1
+    assert result["final_result"]["renderer_path"] == "prepared_uniforms_v1"
+    assert result["final_result"]["uniform_render_count"] == 1
+    assert result["final_result"]["target_reached"] is True
     assert [item["phase"] for item in result["trace"]][-1] == "finalize"
+    final_trace = result["trace"][-1]
+    assert {
+        key: final_trace[key]
+        for key in (
+            "renderer_path",
+            "target_mae",
+            "target_reached",
+            "prepare_duration_ms",
+            "uniform_render_count",
+            "uniform_render_p95_ms",
+        )
+    } == {
+        "renderer_path": "prepared_uniforms_v1",
+        "target_mae": 1.0,
+        "target_reached": True,
+        "prepare_duration_ms": 3.5,
+        "uniform_render_count": 1,
+        "uniform_render_p95_ms": 1.25,
+    }
     run = artifacts.resolve_run("run-1")
     assert run.read_bytes("final/render.png")
     assert b'"schema_version":"png_to_shader_min_manifest_v1"' in run.read_bytes(
         "final/manifest.json"
     )
+    metrics = run.read_bytes("final/metrics.json")
+    assert b'"renderer_path":"prepared_uniforms_v1"' in metrics
+    assert b'"uniform_render_p95_ms":1.25' in metrics
+    manifest = run.read_bytes("final/manifest.json")
+    assert b'"renderer_path":"prepared_uniforms_v1"' in manifest
+    assert b'"target_reached":true' in manifest
+
+
+@pytest.mark.anyio
+async def test_min_graph_prepares_once_and_reuses_program_for_candidates(tmp_path) -> None:
+    _FakeRenderer.instances.clear()
+    artifacts = LocalArtifactStore(tmp_path)
+    graph = build_png_to_shader_min_graph(
+        artifact_store=artifacts,
+        renderer_registry=MinRendererRegistry(_FakeRenderer),  # type: ignore[arg-type]
+    )
+
+    result = await graph.ainvoke(
+        {
+            "project_id": "project-hot",
+            "run_id": "run-hot",
+            "image": _pink_orb_png(),
+            "content_type": "image/png",
+            "render_budget": 3,
+            "llm_budget": 0,
+            "refine_budget": 0,
+            "target_mae": 0.0,
+        }
+    )
+
+    assert len(_FakeRenderer.instances) == 1
+    renderer = _FakeRenderer.instances[0]
+    assert renderer.prepare_calls == 1
+    assert renderer.prepared.render_count == 3
+    assert renderer.prepared.closed is True
+    assert renderer.closed is True
+    assert result["final_result"]["uniform_render_count"] == 3
+    assert result["final_result"]["target_reached"] is False

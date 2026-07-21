@@ -47,6 +47,12 @@ class PngToShaderMinResult:
     current_best_mae: float
     render_count: int
     llm_call_count: int
+    renderer_path: str
+    target_mae: float
+    target_reached: bool
+    prepare_duration_ms: float
+    uniform_render_count: int
+    uniform_render_p95_ms: float
     scene: dict[str, Any]
     trace: tuple[dict[str, Any], ...]
 
@@ -121,6 +127,12 @@ class PngToShaderMinService:
             current_best_mae=float(final["current_best_mae"]),
             render_count=int(final["render_count"]),
             llm_call_count=int(final["llm_call_count"]),
+            renderer_path=str(final["renderer_path"]),
+            target_mae=float(final["target_mae"]),
+            target_reached=bool(final["target_reached"]),
+            prepare_duration_ms=float(final["prepare_duration_ms"]),
+            uniform_render_count=int(final["uniform_render_count"]),
+            uniform_render_p95_ms=float(final["uniform_render_p95_ms"]),
             scene=dict(final["scene"]),
             trace=tuple(final["trace"]),
         )

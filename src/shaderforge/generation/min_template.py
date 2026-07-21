@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, cast
 
 from shaderforge.scene import Feature, MinScene
 
@@ -144,11 +144,15 @@ def _bake_uniforms_in_source(
     for name, spec in schema.items():
         value = values[name]
         if spec.type == "float":
-            literal = f"{float(value):.8f}"
+            literal = f"{cast(float, value):.8f}"
         else:
-            items = ", ".join(f"{float(item):.8f}" for item in value)  # type: ignore[arg-type]
+            vector = cast(tuple[float, ...], value)
+            items = ", ".join(f"{item:.8f}" for item in vector)
             literal = f"{spec.type}({items})"
-        source = source.replace(f"uniform {spec.type} {name};", f"const {spec.type} {name} = {literal};")
+        source = source.replace(
+            f"uniform {spec.type} {name};",
+            f"const {spec.type} {name} = {literal};",
+        )
     return source
 
 

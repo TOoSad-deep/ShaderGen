@@ -6,7 +6,7 @@ import asyncio
 import inspect
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 
 from agent.app.services import png_to_shader_min, png_to_shader_v1
 
@@ -120,7 +120,10 @@ def read_shader_run_artifact(
         if min_service is None:
             raise
         try:
-            return min_service.read_public_artifact(run_id, artifact_name)
+            return cast(
+                png_to_shader_min.MinPublicArtifact,
+                min_service.read_public_artifact(run_id, artifact_name),
+            )
         except Exception as exc:
             if isinstance(exc, (FileNotFoundError, ValueError)) or (
                 type(exc).__name__ == "PublicArtifactNotFoundError"

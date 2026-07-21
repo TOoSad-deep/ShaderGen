@@ -9,7 +9,7 @@ F09 已完成 M0 契约层、M1 最小事实层和 M3 所需的确定性候选�
 - `contracts/`：`webgl1_static_no_texture_v1`、问题域、停止原因、质量档位、预算和候选接受策略；
 - `analysis/`：PNG 解码、白底 alpha 合成、主体 bbox/置信度、调色板、代表像素、边缘与 ROI 测量；
 - `validation/`：WebGL1 GLSL ES 1.00 无贴图静态校验和数值风险诊断；
-- `rendering/`：项目自有 Playwright/Chromium WebGL1 编译、链接、渲染、PNG 导出和运行时元数据；
+- `rendering/`：项目自有 Playwright/Chromium WebGL1 编译、链接、渲染、PNG 导出、prepared typed uniform/RGB 热路径和运行时元数据；
 - `evaluation/`：sRGB RMSE/MAE、边缘、几何、代表像素、ROI 与保护区域 Basic Oracle，以及 CandidateRecord/current_best 纯选择器；
 - `generation/`：从 normalized reference 与 TargetMeasurements 生成无模型、无贴图的 affine/solid ellipse Shader seed 及稳定 provenance；
 - `scene.py`：`scene_mvp` 的严格、版本化单主体 scene 与 typed patch 契约；
@@ -19,7 +19,7 @@ F09 已完成 M0 契约层、M1 最小事实层和 M3 所需的确定性候选�
 - `store/`：`LocalArtifactStore` 负责 project/run 映射与隔离，run 级 `RunArtifactStore` 负责路径安全、原子写入和完整性读取。
 - `benchmark/`：M5 固定数据集加载、AI-off baseline、版本化质量门禁和匿名 A/B 盲评包。
 
-三个模型角色和自动修订 Graph 已在 `src/agent/app/` 的 M2/M3 实现并调用上述公共能力；M4 已通过 Agent Service、Backend 白名单 API 和前端双端复核接入产品路径。并行的 `scene_mvp` 已快速贯通确定性感知、scene、模板、真实 Renderer、MAE、Artifact 和阶段 trace，但暂未启用模型 Author、prepared program 或 CMA-ES。M5 已实现 benchmark harness、AI-off smoke、自动门禁与盲评包，最终发布状态仍取决于固定 10 例真实模型结果和独立人工盲评。
+三个模型角色和自动修订 Graph 已在 `src/agent/app/` 的 M2/M3 实现并调用上述公共能力；M4 已通过 Agent Service、Backend 白名单 API 和前端双端复核接入产品路径。并行的 `scene_mvp` 已贯通确定性感知、scene、固定模板、同 run 一次编译的 prepared Renderer、原始 RGB MAE、Artifact 和阶段 trace，但暂未启用模型 Author 或 CMA-ES。M5 已实现 benchmark harness、AI-off smoke、自动门禁与盲评包，最终发布状态仍取决于固定 10 例真实模型结果和独立人工盲评。
 
 ## 公共入口
 

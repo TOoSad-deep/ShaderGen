@@ -1,6 +1,6 @@
 # PNG 转无贴图 GLSL Agent — 最小骨架（快速版）
 
-> 状态：快速贯通实施中，2026-07-21。当前已落地严格 scene、确定性感知、模板、真实 WebGL1 渲染、RGB MAE、12 节点/3 路由、Artifact/trace，以及显式 `scene_mvp` Backend/Frontend 入口；模型 Author、prepared program 与 CMA-ES 仍未实现。
+> 状态：快速贯通实施中，2026-07-21。当前已落地严格 scene、确定性感知、模板、prepared WebGL1 uniform 热路径、RGB MAE、12 节点/3 路由、Artifact/trace，以及显式 `scene_mvp` Backend/Frontend 入口；模型 Author 与 CMA-ES 仍未实现。
 >
 > 目标：用 1–2 周验证一条可端到端运行的最小技术路径——一个注册进 `langgraph.json` 的 LangGraph Agent，输入单主体粉球类 PNG，自动产出无贴图 GLSL、真实 WebGL1 渲染图和 MAE 报告。
 >

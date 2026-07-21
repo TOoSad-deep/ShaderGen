@@ -39,6 +39,12 @@ class ShaderMinPipelineSummary(BaseModel):
     mae: float | None = None
     render_count: int = 0
     llm_call_count: int = 0
+    renderer_path: Literal["prepared_uniforms_v1"]
+    target_mae: float
+    target_reached: bool
+    prepare_duration_ms: float
+    uniform_render_count: int
+    uniform_render_p95_ms: float
     scene: dict[str, Any] | None = None
     trace: list[dict[str, Any]] = Field(default_factory=list)
 

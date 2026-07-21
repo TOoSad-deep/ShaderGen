@@ -506,6 +506,32 @@ body {
   margin-bottom: 16px;
 }
 
+.scene-mvp-panel .score-grid + .score-grid {
+  margin-top: 8px;
+}
+
+.target-status {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.target-status.is-reached {
+  color: #15803d;
+}
+
+.target-status.is-missed {
+  color: #b45309;
+}
+
+.renderer-path {
+  margin: 10px 0 0;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}
+
 .scene-mvp-details {
   margin-top: 10px;
 }

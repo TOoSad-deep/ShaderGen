@@ -167,6 +167,6 @@ flowchart TD
 | 同上 | 同上 | `author_refine` | `author_refine` | feature queue 已空且仍可 Refine |
 | 同上 | 同上 | `finalize` | `finalize` | 达标或预算结束 |
 
-- 黄色节点构成最小图的 `current_best` 安全边界。`render_and_evaluate` 产生首个真实候选；基础微调只在 MAE 严格改善时提交，特征占位步骤不覆盖 best；`finalize` 只固化 best scene、GLSL、PNG、MAE、manifest 和阶段 trace。
+- 黄色节点构成最小图的 `current_best` 安全边界。`render_and_evaluate` 产生首个真实候选；基础微调只在 MAE 严格改善时提交，未接受候选只返回原始 RGB，不编码 PNG；特征占位步骤不覆盖 best；`finalize` 只固化 best scene、自包含 GLSL、PNG、MAE、prepared 性能摘要、manifest 和阶段 trace。
 - 快速贯通版的 `author_initial` 使用确定性感知 fallback，产品默认 `llm_budget=0`，不会调用真实模型；`author_refine` 和回边保留为后续模型增量的结构接口。
-- 当前 typed uniform 由模板生成后烘焙为常量并交给稳定 V1 Renderer。prepared program/只编译一次热路径和 CMA-ES 尚未完成，不得把当前轻量微调表述为性能版优化器。
+- 同一 run 的固定模板通过 `prepared_uniforms_v1` 只编译/链接一次，候选只热更新 typed uniform；最终导出 GLSL 仍烘焙常量，可由旧 `render()` 独立执行。prepared 对象只存在 run registry，`finalize` 与 Service `finally` 共用幂等关闭；CMA-ES 仍未实现。

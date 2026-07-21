@@ -18,6 +18,15 @@ export interface MinPipelineSummary {
   llm_call_count?: number | null;
   scene?: unknown;
   trace?: MinPipelineTracePhase[] | null;
+  // 质量目标：区分“流程完成”与“质量达标”
+  target_mae?: number | null;
+  target_reached?: boolean | null;
+  // prepared 渲染路径与 prepare 阶段耗时
+  renderer_path?: string | null;
+  prepare_duration_ms?: number | null;
+  // prepared 后复用 uniform 的热渲染统计
+  uniform_render_count?: number | null;
+  uniform_render_p95_ms?: number | null;
 }
 
 export interface ShaderScore {

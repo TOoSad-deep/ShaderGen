@@ -3,28 +3,51 @@
 from __future__ import annotations
 
 import copy
+import math
 from collections.abc import Callable
+from dataclasses import dataclass
+from io import BytesIO
 from typing import Any
 
-from shaderforge.evaluation import decode_rgb, rgb_mae
+import numpy as np
+from PIL import Image
+
+from shaderforge.evaluation import rgb_mae
 from shaderforge.generation import (
     bake_min_uniforms,
     materialize_min_shader,
 )
 from shaderforge.public import MinScene, perceive_min_target
-from shaderforge.rendering import PlaywrightWebGL1Renderer
+from shaderforge.rendering import (
+    PREPARED_RENDERER_PATH,
+    PlaywrightWebGL1Renderer,
+    PreparedWebGL1Renderer,
+)
 from shaderforge.store import LocalArtifactStore
 
 RendererFactory = Callable[[], PlaywrightWebGL1Renderer]
 
 
 def _trace(
-    state: dict[str, Any], phase: str, message: str, *, status: str = "completed"
+    state: dict[str, Any],
+    phase: str,
+    message: str,
+    *,
+    status: str = "completed",
+    **details: Any,
 ) -> tuple[dict[str, Any], ...]:
     return (
         *tuple(state.get("trace", ())),
-        {"phase": phase, "status": status, "message": message},
+        {"phase": phase, "status": status, "message": message, **details},
     )
+
+
+@dataclass(frozen=True)
+class _PreparedEntry:
+    """一个 run 内固定的 prepared program 及其不变签名."""
+
+    signature: tuple[Any, ...]
+    prepared: PreparedWebGL1Renderer
 
 
 class MinRendererRegistry:
@@ -34,6 +57,7 @@ class MinRendererRegistry:
         """保存惰性 Renderer 工厂。."""
         self._factory = factory
         self._renderers: dict[tuple[str, str], PlaywrightWebGL1Renderer] = {}
+        self._prepared: dict[tuple[str, str], _PreparedEntry] = {}
 
     def get(self, project_id: str, run_id: str) -> PlaywrightWebGL1Renderer:
         """获取或创建指定 run 的 Renderer。."""
@@ -44,40 +68,140 @@ class MinRendererRegistry:
             self._renderers[key] = renderer
         return renderer
 
+    async def prepare(
+        self,
+        project_id: str,
+        run_id: str,
+        fragment_source: str,
+        width: int,
+        height: int,
+        uniform_schema: dict[str, Any],
+    ) -> PreparedWebGL1Renderer:
+        """为 run 惰性准备唯一 program，后续候选只复用它."""
+        key = (project_id, run_id)
+        signature = (
+            fragment_source,
+            width,
+            height,
+            tuple(sorted((name, spec.type) for name, spec in uniform_schema.items())),
+        )
+        entry = self._prepared.get(key)
+        if entry is not None:
+            if entry.signature != signature:
+                raise RuntimeError("scene_mvp run 内 prepared program 签名发生了变化。")
+            return entry.prepared
+        renderer = self.get(project_id, run_id)
+        prepared = await renderer.prepare(
+            fragment_source,
+            width,
+            height,
+            uniform_schema,
+        )
+        self._prepared[key] = _PreparedEntry(signature, prepared)
+        return prepared
+
+    def metrics(self, project_id: str, run_id: str) -> dict[str, float | int | str]:
+        """返回 run 内 prepared 路径的公开可观测摘要."""
+        entry = self._prepared.get((project_id, run_id))
+        if entry is None:
+            return {
+                "renderer_path": PREPARED_RENDERER_PATH,
+                "prepare_duration_ms": 0.0,
+                "uniform_render_count": 0,
+                "uniform_render_p95_ms": 0.0,
+            }
+        durations = sorted(entry.prepared.render_durations_ms)
+        p95 = (
+            durations[max(0, math.ceil(len(durations) * 0.95) - 1)]
+            if durations
+            else 0.0
+        )
+        return {
+            "renderer_path": PREPARED_RENDERER_PATH,
+            "prepare_duration_ms": entry.prepared.prepare_duration_ms,
+            "uniform_render_count": entry.prepared.render_count,
+            "uniform_render_p95_ms": p95,
+        }
+
     async def close(self, project_id: str, run_id: str) -> None:
         """幂等关闭指定 run 的 Renderer。."""
+        prepared_entry = self._prepared.pop((project_id, run_id), None)
         renderer = self._renderers.pop((project_id, run_id), None)
+        first_error: Exception | None = None
+        if prepared_entry is not None:
+            try:
+                await prepared_entry.prepared.close()
+            except Exception as exc:
+                first_error = exc
         if renderer is not None:
-            await renderer.close()
+            try:
+                await renderer.close()
+            except Exception as exc:
+                first_error = first_error or exc
+        if first_error is not None:
+            raise first_error
+
+
+def _raw_rgb_array(rgb_bytes: bytes, width: int, height: int) -> np.ndarray:
+    """把 Renderer 原始 RGB bytes 视图转为 MAE 使用的 float32 数组."""
+    expected = width * height * 3
+    if len(rgb_bytes) != expected:
+        raise ValueError(f"prepared RGB 长度应为 {expected}，实际为 {len(rgb_bytes)}。")
+    return np.frombuffer(rgb_bytes, dtype=np.uint8).reshape(height, width, 3).astype(np.float32) / 255.0
+
+
+def _encode_rgb_png(rgb_bytes: bytes, width: int, height: int) -> bytes:
+    """仅在候选被接受时把已返回的 RGB 编码为 PNG."""
+    _raw_rgb_array(rgb_bytes, width, height)
+    image = Image.frombytes("RGB", (width, height), rgb_bytes)
+    buffer = BytesIO()
+    image.save(buffer, format="PNG")
+    return buffer.getvalue()
 
 
 async def _evaluate_scene(
     state: dict[str, Any],
     scene: MinScene,
     registry: MinRendererRegistry,
+    *,
+    capture_png: bool,
 ) -> dict[str, Any]:
     if int(state.get("render_count", 0)) >= int(state.get("render_budget", 0)):
         raise RuntimeError("render_budget_exhausted")
     materialized = materialize_min_shader(scene)
     glsl = bake_min_uniforms(materialized)
-    renderer = registry.get(str(state["project_id"]), str(state["run_id"]))
-    result = await renderer.render(glsl, scene.canvas.width, scene.canvas.height)
+    prepared = await registry.prepare(
+        str(state["project_id"]),
+        str(state["run_id"]),
+        materialized.webgl1_source,
+        scene.canvas.width,
+        scene.canvas.height,
+        materialized.uniform_schema,
+    )
+    result = await prepared.render_uniforms(
+        materialized.uniform_values,
+        capture_png=capture_png,
+    )
     count = int(state.get("render_count", 0)) + 1
-    if not result.success or result.image_bytes is None:
+    if not result.success or result.rgb_bytes is None:
         return {
             "success": False,
             "render_count": count,
             "glsl": glsl,
             "materialized": materialized,
-            "error": result.compile.draw_error or "render_failed",
+            "error": result.draw_error or "render_failed",
         }
-    mae = rgb_mae(state["target_rgb"], decode_rgb(result.image_bytes))
+    mae = rgb_mae(
+        state["target_rgb"],
+        _raw_rgb_array(result.rgb_bytes, scene.canvas.width, scene.canvas.height),
+    )
     return {
         "success": True,
         "render_count": count,
         "glsl": glsl,
         "materialized": materialized,
         "image": result.image_bytes,
+        "rgb": result.rgb_bytes,
         "mae": mae,
     }
 
@@ -146,7 +270,7 @@ def make_min_nodes(
 
     async def render_and_evaluate(state: dict[str, Any]) -> dict[str, Any]:
         scene = MinScene.model_validate(state["scene"])
-        outcome = await _evaluate_scene(state, scene, registry)
+        outcome = await _evaluate_scene(state, scene, registry, capture_png=True)
         if not outcome["success"]:
             return {
                 "phase": "render",
@@ -190,7 +314,10 @@ def make_min_nodes(
             ]
             candidate = MinScene.model_validate(data)
             outcome = await _evaluate_scene(
-                {**state, "render_count": render_count}, candidate, registry
+                {**state, "render_count": render_count},
+                candidate,
+                registry,
+                capture_png=False,
             )
             render_count = outcome["render_count"]
             if outcome["success"] and float(outcome["mae"]) < float(best["mae"]):
@@ -198,7 +325,9 @@ def make_min_nodes(
                     "scene": candidate.model_dump(mode="json"),
                     "mae": outcome["mae"],
                     "glsl": outcome["glsl"],
-                    "render": outcome["image"],
+                    "render": _encode_rgb_png(
+                        outcome["rgb"], candidate.canvas.width, candidate.canvas.height
+                    ),
                 }
         improved = float(best["mae"]) < float(baseline["mae"])
         return {
@@ -257,14 +386,30 @@ def make_min_nodes(
         run.write_text("final/webgl1.glsl", str(best["glsl"]))
         run.write_text("final/shadertoy.glsl", materialized.shadertoy_source)
         run.write_bytes("final/render.png", best["render"], content_type="image/png")
+        renderer_metrics = registry.metrics(project_id, run_id)
+        target_mae = float(state.get("target_mae", 0.08))
+        target_reached = float(best["mae"]) <= target_mae
         metrics = {
             "metric_version": "rgb_mae_v1",
             "mae": float(best["mae"]),
             "render_count": int(state.get("render_count", 0)),
             "llm_call_count": int(state.get("llm_call_count", 0)),
+            **renderer_metrics,
+            "target_mae": target_mae,
+            "target_reached": target_reached,
         }
         run.write_json("final/metrics.json", metrics)
-        trace = _trace(state, "finalize", f"已固化 final，MAE={best['mae']:.6f}")
+        trace = _trace(
+            state,
+            "finalize",
+            f"已固化 final，MAE={best['mae']:.6f}",
+            renderer_path=renderer_metrics["renderer_path"],
+            target_mae=target_mae,
+            target_reached=target_reached,
+            prepare_duration_ms=renderer_metrics["prepare_duration_ms"],
+            uniform_render_count=renderer_metrics["uniform_render_count"],
+            uniform_render_p95_ms=renderer_metrics["uniform_render_p95_ms"],
+        )
         manifest = {
             "schema_version": "png_to_shader_min_manifest_v1",
             "project_id": project_id,
@@ -293,6 +438,14 @@ def make_min_nodes(
                 "current_best_mae": float(best["mae"]),
                 "render_count": int(state.get("render_count", 0)),
                 "llm_call_count": int(state.get("llm_call_count", 0)),
+                "renderer_path": renderer_metrics["renderer_path"],
+                "target_mae": target_mae,
+                "target_reached": target_reached,
+                "prepare_duration_ms": renderer_metrics["prepare_duration_ms"],
+                "uniform_render_count": renderer_metrics["uniform_render_count"],
+                "uniform_render_p95_ms": renderer_metrics[
+                    "uniform_render_p95_ms"
+                ],
                 "scene": best["scene"],
                 "trace": trace,
             },

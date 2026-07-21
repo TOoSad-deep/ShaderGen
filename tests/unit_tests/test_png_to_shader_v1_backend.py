@@ -141,6 +141,12 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
             current_best_mae=0.03125,
             render_count=3,
             llm_call_count=1,
+            renderer_path="prepared_uniforms_v1",
+            target_mae=0.08,
+            target_reached=True,
+            prepare_duration_ms=12.5,
+            uniform_render_count=3,
+            uniform_render_p95_ms=4.25,
             scene={
                 "schema_version": "png_to_shader_min_scene_v1",
                 "canvas": {
@@ -208,6 +214,12 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
         "mae": 0.03125,
         "render_count": 3,
         "llm_call_count": 1,
+        "renderer_path": "prepared_uniforms_v1",
+        "target_mae": 0.08,
+        "target_reached": True,
+        "prepare_duration_ms": 12.5,
+        "uniform_render_count": 3,
+        "uniform_render_p95_ms": 4.25,
         "scene": {
             "schema_version": "png_to_shader_min_scene_v1",
             "canvas": {
@@ -241,6 +253,8 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
     success = calls["success"]
     assert isinstance(success, dict)
     assert success["result_summary"]["current_best_mae"] == 0.03125
+    assert success["result_summary"]["renderer_path"] == "prepared_uniforms_v1"
+    assert success["result_summary"]["target_reached"] is True
     assert success["record_default_model_call"] is False
     assert [event["stage"] for event in success["events"]] == [
         "bootstrap",

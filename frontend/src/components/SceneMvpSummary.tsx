@@ -14,6 +14,12 @@ function formatMae(value: number | null | undefined): string {
   return typeof value === "number" && Number.isFinite(value) ? value.toFixed(4) : "—";
 }
 
+function formatMs(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? `${Math.round(value)} ms`
+    : "—";
+}
+
 function formatSceneJson(scene: unknown): string {
   if (scene === undefined || scene === null) return "（本次响应未返回 scene）";
   if (typeof scene === "string") return scene;
@@ -26,16 +32,32 @@ function formatSceneJson(scene: unknown): string {
 
 export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSummaryProps) {
   const trace = Array.isArray(minPipeline?.trace) ? minPipeline.trace : [];
+  // 质量达标只来自后端 target_reached；缺省（旧响应）时不展示结论，避免误报。
+  const targetReached =
+    typeof minPipeline?.target_reached === "boolean" ? minPipeline.target_reached : null;
+  const rendererPath =
+    typeof minPipeline?.renderer_path === "string" && minPipeline.renderer_path.trim()
+      ? minPipeline.renderer_path
+      : null;
   return (
     <section className="scene-mvp-panel" aria-label="scene_mvp 运行摘要">
       <div className="panel-header">
         <h2>scene_mvp 最小管线</h2>
         <span>run_id: {runId}</span>
       </div>
+      {targetReached !== null ? (
+        <p className={`target-status ${targetReached ? "is-reached" : "is-missed"}`}>
+          {targetReached ? "质量达标" : "流程完成，质量未达标"}
+        </p>
+      ) : null}
       <div className="score-grid">
         <div className="score-primary">
           <span>MAE</span>
           <strong>{formatMae(minPipeline?.mae)}</strong>
+        </div>
+        <div>
+          <span>目标 MAE</span>
+          <strong>{formatMae(minPipeline?.target_mae)}</strong>
         </div>
         <div>
           <span>渲染次数</span>
@@ -50,6 +72,25 @@ export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSumm
           <strong>{stopReason || "—"}</strong>
         </div>
       </div>
+      <div className="score-grid">
+        <div>
+          <span>prepare 耗时</span>
+          <strong>{formatMs(minPipeline?.prepare_duration_ms)}</strong>
+        </div>
+        <div>
+          <span>uniform 热渲染次数</span>
+          <strong>{formatCount(minPipeline?.uniform_render_count)}</strong>
+        </div>
+        <div>
+          <span>uniform 热渲染 P95</span>
+          <strong>{formatMs(minPipeline?.uniform_render_p95_ms)}</strong>
+        </div>
+      </div>
+      {rendererPath ? (
+        <p className="renderer-path" title={rendererPath}>
+          prepared 渲染路径：{rendererPath}
+        </p>
+      ) : null}
       {trace.length ? (
         <details className="scene-mvp-details">
           <summary>阶段追踪（{trace.length}）</summary>

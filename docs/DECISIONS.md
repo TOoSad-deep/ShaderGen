@@ -403,3 +403,10 @@
 - 决策：在保留 `procedural_v1` 默认路径的同时，增加显式 `scene_mvp` 模式并同步接入 Graph、Agent Service、Backend、Artifact API 和 Frontend。首个可运行增量保留快速版的 12 节点/3 路由结构，但用确定性感知 fallback 完成 Initial Author，模型预算固定为 0；typed uniform 先确定性烘焙为常量并复用现有 Renderer，基础优化仅做少量有界微调，不引入 CMA 依赖。
 - 原因：本阶段目标是尽快验证 scene → 模板 → 真实 Renderer → MAE → Artifact → HTTP → UI 的职责和追踪链路。prepared program、模型结构输出和 CMA-ES 同时落地会扩大故障面，也不符合当前“避免过度设计和过度优化”的实施要求。
 - 影响：`scene_mvp` 必须明确标记为实验路径，不能把当前轻量微调表述为 CMA-ES 或性能门禁已经完成；V1、Memory、Node Lab、既有 benchmark 和冻结失败证据全部保留。后续优先补 prepared program，再决定是否引入模型 Author 与 CMA-ES；F09 继续 `active`，发布 gate 仍为 no-go。
+
+## D052 - scene_mvp 使用同 run prepared uniform 热路径
+
+- 日期：2026-07-21
+- 决策：`scene_mvp` 在同一 run 内按模板源码、尺寸和 typed uniform schema 形成唯一 prepared program 签名，只静态校验、编译和链接一次；每个候选必须完整上传白名单内的 `float`、`vec2`、`vec3` 值集并直接读取左上角行序 RGB。未接受候选不编码 PNG；首个有效候选和最终接受候选保留 PNG，最终 WebGL1 GLSL 继续把 uniform 烘焙为常量，以兼容旧 `render()` 和独立预览。prepared 对象只由 run registry 持有，不进入 LangGraph State。
+- 原因：后续数值优化需要高频 draw，原有每候选重新编译、链接和 PNG base64 编码会把 Renderer 开销混入搜索预算。固定模板配合严格 uniform 全量上传既能缩短热路径，也能避免缺失值沿用上一帧；保留自包含最终 GLSL 则不把运行时 prepared 生命周期泄漏到 Artifact 和前端。
+- 影响：公开 `scene_mvp` 摘要、账本、metrics、manifest 和 finalize trace 固定增加 `renderer_path=prepared_uniforms_v1`、目标 MAE、是否达标、prepare 耗时、uniform draw 数及 P95。192x192 粉球 100 draw 探针必须显式运行并满足总耗时不超过 45 秒、P95 不超过 450 ms 和无陈旧帧；通过该先决门禁不等于 CMA-ES、2000 draw 生产预算或质量发布门禁已经完成。D051 的确定性 fallback、V1 默认路径和 F09 no-go 继续有效。

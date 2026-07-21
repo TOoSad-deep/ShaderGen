@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from PIL import Image, UnidentifiedImageError
@@ -78,7 +78,9 @@ def perceive_min_target(image_bytes: bytes) -> MinPerception:
     object_pixels = rgb[mask]
     inner = _color(np.percentile(object_pixels, 82, axis=0))
     outer = _color(np.percentile(object_pixels, 28, axis=0))
-    primitive_type = "circle" if abs(axes[0] - axes[1]) < 0.12 else "ellipse"
+    primitive_type: Literal["circle", "ellipse"] = (
+        "circle" if abs(axes[0] - axes[1]) < 0.12 else "ellipse"
+    )
 
     scene = MinScene(
         canvas=Canvas(width=width, height=height, background=_color(background)),

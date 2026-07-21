@@ -8,6 +8,7 @@
 - 使用测量 bbox 构造抗锯齿 ellipse mask，并把 affine 系数固化进 WebGL1 GLSL；
 - 前景低置信、bbox 缺失、component 不足或拟合病态时，回退到 palette solid ellipse；
 - 输出稳定 generator version、输入/测量/GLSL hash、策略、拟合像素数、RMSE、系数和 fallback 原因。
+- `png_to_shader_min_template_v1` 从严格 scene 生成固定 WebGL1 uniform 模板、typed schema/值集和自包含导出版；运行评估使用 prepared uniform，最终 `webgl1.glsl` 仍把 uniform 烘焙为常量。
 
 ## 输入契约
 
