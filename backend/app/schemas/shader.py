@@ -1,12 +1,12 @@
 """Shader API schema."""
 
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 MemoryStatus = Literal["durable", "ephemeral", "degraded"]
-GenerationMode = Literal["procedural_v1"]
+GenerationMode = Literal["procedural_v1", "scene_mvp"]
 QualityPresetName = Literal["fast", "balanced", "high"]
 
 
@@ -33,8 +33,18 @@ class ShaderScore(BaseModel):
     diagnostics: list[str]
 
 
+class ShaderMinPipelineSummary(BaseModel):
+    """scene_mvp 最小流水线的公开运行摘要."""
+
+    mae: float | None = None
+    render_count: int = 0
+    llm_call_count: int = 0
+    scene: dict[str, Any] | None = None
+    trace: list[dict[str, Any]] = Field(default_factory=list)
+
+
 class ShaderResponse(BaseModel):
-    """PNG-to-Shader V1 生成响应."""
+    """PNG-to-Shader 产品生成响应."""
 
     project_id: UUID
     run_id: UUID
@@ -52,6 +62,7 @@ class ShaderResponse(BaseModel):
     metrics_url: str | None = None
     manifest_url: str | None = None
     score: ShaderScore | None = None
+    min_pipeline: ShaderMinPipelineSummary | None = None
     review: ShaderReview | None = None
 
 

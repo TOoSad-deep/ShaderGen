@@ -264,8 +264,9 @@ async def record_shader_generation_success(
     events: Iterable[Mapping[str, Any]] | None = None,
     logs: Iterable[Mapping[str, Any]] | None = None,
     result_summary: dict[str, Any] | None = None,
+    record_default_model_call: bool = True,
 ) -> None:
-    """写入 Shader 生成成功后的事件、日志和状态."""
+    """写入 Shader 生成成功后的事件、日志和状态；确定性管线可禁用模型事件补记."""
     try:
         seq = 1
         wrote_model_call = False
@@ -286,7 +287,7 @@ async def record_shader_generation_success(
             )
             seq += 1
             wrote_model_call = True
-        if not wrote_model_call:
+        if not wrote_model_call and record_default_model_call:
             event_rows.append(
                 (
                     run_id,

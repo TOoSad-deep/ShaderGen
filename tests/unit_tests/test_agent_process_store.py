@@ -238,6 +238,48 @@ async def test_agent_process_store_records_shader_success(caplog) -> None:
 
 
 @pytest.mark.anyio
+async def test_scene_mvp_success_does_not_fabricate_model_call_event() -> None:
+    pool = FakePool()
+    run_id = uuid4()
+
+    await record_shader_generation_success(
+        pool,
+        run_id=run_id,
+        model_name="scene_mvp",
+        glsl_chars=42,
+        events=(
+            {
+                "stage": "render_and_evaluate",
+                "event_type": "scene_mvp_completed",
+                "payload": {"duration_ms": 4.0},
+            },
+        ),
+        result_summary={
+            "generation_mode": "scene_mvp",
+            "llm_call_count": 0,
+        },
+        record_default_model_call=False,
+    )
+
+    event_rows = [
+        arguments
+        for query, arguments in pool.connection.executed
+        if "INSERT INTO agent_events" in query
+    ]
+    assert [arguments[3] for arguments in event_rows] == ["scene_mvp_completed"]
+    update_args = next(
+        arguments
+        for query, arguments in pool.connection.executed
+        if "UPDATE agent_runs" in query
+    )
+    assert json.loads(update_args[2]) == {
+        "generation_mode": "scene_mvp",
+        "llm_call_count": 0,
+        "glsl_chars": 42,
+    }
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     "failing_statement",
     ("INSERT INTO agent_events", "INSERT INTO agent_logs", "UPDATE agent_runs"),

@@ -6,10 +6,22 @@ from shaderforge.generation.measurement_affine import (
     MeasurementSeedProvenance,
     build_measurement_affine_seed,
 )
+from shaderforge.generation.min_template import (
+    MIN_TEMPLATE_VERSION,
+    MaterializedMinShader,
+    UniformSpec,
+    bake_min_uniforms,
+    materialize_min_shader,
+)
 
 __all__ = [
+    "MIN_TEMPLATE_VERSION",
     "MEASUREMENT_AFFINE_SEED_VERSION",
     "MeasurementAffineSeed",
     "MeasurementSeedProvenance",
+    "MaterializedMinShader",
+    "UniformSpec",
+    "bake_min_uniforms",
     "build_measurement_affine_seed",
+    "materialize_min_shader",
 ]

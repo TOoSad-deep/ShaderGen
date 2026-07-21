@@ -8,7 +8,7 @@
 - `app/api/router.py`：聚合后端 HTTP 路由。
 - `app/api/routes/`：HTTP 路由。只做请求解析、边界校验、调用 service、返回响应。
 - `app/services/`：后端编排逻辑。可以调用 `src/agent/` 或后续 `src/shaderforge/`，但不要把大型领域算法写在这里。
-- `app/services/shader_generation.py`：`POST /api/shader/generate` 的 V1 用例服务；统一负责项目锁、V1 模型选择、Agent 调用、生成总账、失败分类和公开响应契约。
+- `app/services/shader_generation.py`：`POST /api/shader/generate` 的产品用例服务；统一负责项目锁、`procedural_v1|scene_mvp` 分流、Agent 调用、生成总账、失败分类和公开响应契约。
 - `app/schemas/`：请求和响应数据结构。API 契约稳定后放这里，避免散落在 route 文件。
 - `app/database/session.py`：数据库连接生命周期、schema 初始化和健康检查查询。
 - `app/database/agent_memory.py`：LangGraph psycopg saver/store 生命周期、健康检查和独立 setup；只返回中立的 Memory 资源，不反向创建 Agent service。
@@ -28,6 +28,7 @@
 - `BackendSettings` 在应用组合根一次性读取根目录 `.env`，并把数据库、日志、CORS 与 Node Lab 开关作为不可变配置注入 lifespan、Router 和 Service；底层数据库或 Node Lab 模块不得再次读取环境变量。`SHADERGEN_CORS_ORIGINS` 使用逗号分隔的显式 Origin，禁止通配符 `*`。
 - `POST /api/shader/generate` 在数据库连接池可用时，会写入 `agent_runs`、`agent_events` 和 `agent_logs`。
 - `procedural_v1` 把模式、质量档位和补充约束写入 run input，把停止原因、current_best、评分和公开 Artifact URL 写入 run result；Graph 返回的每个阶段事件与 `current_best_updated` 逐项写入 `agent_events`。
+- `scene_mvp` 复用同一 project/run 总账，不新增数据库表；run input 记录模式与补充约束，run result 记录状态、停止原因、MAE、draw/LLM 计数、scene、阶段 trace 和公开 Artifact URL，阶段 trace 同步写入 `agent_events`。当 `llm_call_count=0` 时不伪造默认 `model_call` 事件。
 - 生成终态的模型调用、阶段事件、Agent 日志和 `agent_runs` 更新使用同一个 asyncpg 显式事务；任一步失败必须整体回滚。事务先 `FOR UPDATE` 锁定 run：相同终态重放直接 no-op，不同终态重放显式报冲突，禁止静默覆盖。
 - `agent_events.reasoning_content` 只允许保存节点显式 opt-in 捕获的思维链；V1 默认不捕获、不打印 reasoning，对外 API 永不返回该字段。
 - `agent_runs.project_id` 关联一次运行与 Shader 项目；清除 Memory 不删除过程账本。
@@ -51,10 +52,11 @@
 - `POST /api/shader/generate` route 只把校验后的输入和应用生命周期依赖组装为 command/dependencies，调用 `execute_shader_generation()`，再把稳定用例错误映射为现有 FastAPI error envelope；不得重新承载锁、Agent 分流、账本或响应契约编排。
 - route 不写 Prompt、不直接调用模型、不实现搜索/评分/渲染算法。
 - route 捕获外部调用异常时，应返回明确的 HTTP 错误；日志记录内部细节，响应给用户的信息保持可理解。
-- `POST /api/shader/generate` 只执行 PNG-to-Shader V1，接收可选 `project_id`、可选且只能为 `procedural_v1` 的 `generation_mode`、`quality_preset=fast|balanced|high` 和最长 2,000 字的 `instruction`；未提供 project 时创建 UUID，未提供 mode 时默认 V1。
+- `POST /api/shader/generate` 接收可选 `project_id`、`generation_mode=procedural_v1|scene_mvp`、`quality_preset=fast|balanced|high` 和最长 2,000 字的 `instruction`；未提供 project 时创建 UUID，未提供 mode 时继续默认 `procedural_v1`。`quality_preset` 只影响 V1，`scene_mvp` 响应中为 `null`。
 - V1 generate 响应包含 `run_id`、质量档位、视觉修订次数、停止原因、候选 id、`unscored_fallback`、规范化 render 尺寸、评分及 final-render/metrics/manifest URL。WebGL 有效但 evaluator 不可用的降级结果仍返回 GLSL 与 final-render，同时明确 `unscored_fallback=true`、`score=null`、`metrics_url=null`，禁止伪造评分。请求边界错误返回类型化 400/413/422；Renderer、模型供应商或运行账本不可用返回 503；全局或模型阶段超时返回 504；模型响应错误返回 502；内部 pipeline 不变量错误返回 500；编译修复耗尽仍返回类型化 422。任何失败响应都不返回 reasoning 或原始异常。
+- `scene_mvp` 响应复用 `ShaderResponse`，并额外返回 `min_pipeline` 摘要：`mae`、`render_count`、`llm_call_count`、最终 scene 与阶段 trace；`score`、`review` 和 V1 候选字段保持空值。应用 lifespan 注入并在退出时清理最小流水线 service 状态。
 - 成功 run 必须先通过完整 `ShaderResponse` 契约构造，再写入 `status=succeeded`；响应契约失败使用 `shader.generate.response_contract_failed`，并把过程账本标记为 failed，禁止出现“账本成功但 HTTP 500”。
-- `GET /api/shader/runs/{run_id}/artifacts/{artifact_name}` 只接受 `final-render`、`metrics`、`manifest` 三个固定名字；未知名字和不存在的 run 统一返回 404，不接受 filesystem path。
+- `GET /api/shader/runs/{run_id}/artifacts/{artifact_name}` 只接受 `final-render`、`metrics`、`manifest` 三个固定名字，并依次从 V1 与最小流水线 Artifact store 查找；未知名字和不存在的 run 统一返回 404，不接受 filesystem path。
 - `DELETE /api/shader/projects/{project_id}/memory` 删除 checkpoint thread 和 Store Memory，不删除审计账本。
 - 单进程内同一 `project_id` 并发请求立即返回 `409 project_busy`。
 - V1 checkpoint 使用稳定的 `png-to-shader-v1:{project_id}` thread 命名；清除项目记忆会清除该 checkpoint、旧 Graph 遗留的裸 `{project_id}` checkpoint 和项目 Store Memory，但不删除过程账本或 Artifact。

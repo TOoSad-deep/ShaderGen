@@ -7,6 +7,7 @@ import {
   generateShader,
   resolveShaderApiUrl,
   ShaderApiError,
+  type GenerationMode,
   type MemoryStatus,
   type QualityPreset,
   type ShaderApiFailure,
@@ -14,6 +15,7 @@ import {
 } from "./api/shader";
 import { FailureDetails } from "./components/FailureDetails";
 import { RunProgress } from "./components/RunProgress";
+import { SceneMvpSummary } from "./components/SceneMvpSummary";
 import { ScoreSummary } from "./components/ScoreSummary";
 import {
   ShaderPreview,
@@ -78,6 +80,7 @@ export function App() {
   const [fileInfo, setFileInfo] = useState("");
   const [glsl, setGlsl] = useState("");
   const [qualityPreset, setQualityPreset] = useState<QualityPreset>("balanced");
+  const [generationMode, setGenerationMode] = useState<GenerationMode>("procedural_v1");
   const [instruction, setInstruction] = useState("");
   const [runResult, setRunResult] = useState<ShaderResponse | null>(null);
   const [compatibility, setCompatibility] = useState<ClientCompatibilityReport | null>(null);
@@ -182,6 +185,7 @@ export function App() {
       const result = await generateShader(selectedFile, {
         projectId: projectId ?? undefined,
         qualityPreset,
+        generationMode,
         instruction: instruction.trim(),
         signal: controller.signal,
       });
@@ -280,6 +284,8 @@ export function App() {
   }
 
   const review = runResult?.review ?? null;
+  const isSceneMvp =
+    runResult?.generation_mode === "scene_mvp" || Boolean(runResult?.min_pipeline);
   const serverRenderUrl = runResult?.final_render_url
     ? resolveShaderApiUrl(runResult.final_render_url)
     : null;
@@ -325,9 +331,19 @@ export function App() {
         <section className="run-config" aria-label="生成配置">
           <label>
             <span>生成模式</span>
-            <strong>程序化闭环 V1</strong>
+            <select
+              aria-label="生成模式"
+              value={generationMode}
+              disabled={loading}
+              onChange={(event) => setGenerationMode(event.target.value as GenerationMode)}
+            >
+              <option value="procedural_v1">程序化闭环 V1</option>
+              <option value="scene_mvp">场景最小管线 MVP</option>
+            </select>
             <small className="experimental-note">
-              实验功能：当前质量门禁未通过，可能超时或无法生成可运行 Shader。
+              {generationMode === "procedural_v1"
+                ? "实验功能：当前质量门禁未通过，可能超时或无法生成可运行 Shader。"
+                : "实验功能：scene_mvp 最小管线，返回 MAE、渲染/LLM 计数、场景 JSON 与阶段追踪。"}
             </small>
           </label>
           <label>
@@ -387,6 +403,14 @@ export function App() {
           result={runResult}
           compatibility={compatibility}
         />
+
+        {isSceneMvp && runResult ? (
+          <SceneMvpSummary
+            runId={runResult.run_id}
+            stopReason={runResult.stop_reason}
+            minPipeline={runResult.min_pipeline}
+          />
+        ) : null}
 
         <section className={`panels ${serverRenderUrl ? "has-server-render" : ""}`}>
           <div className="panel">

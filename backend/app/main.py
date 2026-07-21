@@ -22,7 +22,11 @@ from backend.app.database.agent_memory import close_agent_memory, open_agent_mem
 from backend.app.database.session import close_database_pool, open_database_pool
 from backend.app.middleware.request_logging import build_request_logging_middleware
 from backend.app.schemas.shader import ShaderGenerationErrorDetail
-from backend.app.services.shader import ProjectLockRegistry
+from backend.app.services.shader import (
+    ProjectLockRegistry,
+    close_png_to_shader_min_service,
+    get_default_png_to_shader_min_service,
+)
 
 logger = logging.getLogger("backend.app")
 
@@ -30,6 +34,7 @@ logger = logging.getLogger("backend.app")
 def _clear_runtime_state(app: FastAPI) -> None:
     """清空只在单次应用生命周期内有效的依赖."""
     app.state.png_to_shader_v1_service = None
+    app.state.png_to_shader_min_service = None
     app.state.project_locks = None
     app.state.node_lab_service = None
 
@@ -42,6 +47,7 @@ def build_lifespan(settings: BackendSettings) -> Lifespan[FastAPI]:
         logger.info("backend.startup")
         app.state.project_locks = ProjectLockRegistry()
         app.state.png_to_shader_v1_service = None
+        app.state.png_to_shader_min_service = None
         app.state.agent_memory = None
         app.state.db_pool = None
         app.state.node_lab_service = None
@@ -58,6 +64,13 @@ def build_lifespan(settings: BackendSettings) -> Lifespan[FastAPI]:
                     checkpointer=memory.checkpointer,
                     store=memory.store,
                     memory_status=memory.memory_status,
+                )
+                app.state.png_to_shader_min_service = (
+                    get_default_png_to_shader_min_service()
+                )
+                cleanup.push_async_callback(
+                    close_png_to_shader_min_service,
+                    app.state.png_to_shader_min_service,
                 )
                 yield
         finally:

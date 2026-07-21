@@ -4,8 +4,10 @@
 
 ## 当前图
 
-- `png_to_shader_v1_graph.py`：唯一对外 Graph，入口对象为 `png_to_shader_v1_graph`；执行 PNG-to-Shader V1 有界闭环。
+- `png_to_shader_v1_graph.py`：现有产品 Graph，入口对象为 `png_to_shader_v1_graph`；执行 PNG-to-Shader V1 有界闭环。
 - `png_to_shader_v1_routing.py`：M3 可独立单测的纯预算、停止和下一步路由规则。
+- `png_to_shader_min_graph.py`：`scene_mvp` 最小技术链路，入口对象为 `png_to_shader_min_graph`；保留 12 节点骨架，当前使用确定性感知 scene 和有界轻量微调。
+- `png_to_shader_min_routing.py`：最小图的 3 个纯路由函数。
 
 ## Graph 规则
 
@@ -120,3 +122,51 @@ flowchart TD
 - 唯一例外是 Evaluator 超时或失败后的 `unscored_fallback`：候选必须已经通过静态 Validator、真实 WebGL compile/draw 并具有校验过 hash 的 render Artifact；它可作为 `completed_with_best_effort` 返回，但没有 score/metrics，不进入 Selector、Critic 或长期策略 Memory，API/UI 也不得称为 `current_best`。
 - 已知模型供应商/结构化输出错误可以沿图安全 finalize 并保留已有 best；未知编程错误或不变量破坏必须越过 Graph，由 Backend 返回类型化 500，禁止伪装为 422 质量失败。
 - V1 Builder 是 run 级组合根：Renderer registry 按 project/run 隔离复用，正常路径由 `finalize` 关闭；Builder 与 Agent Service 共享同一 registry，Service 在 `invoke()` 的 `finally` 中再次幂等关闭，覆盖未知编程错误或不变量破坏越过 Graph 的路径。外层兜底不是 Graph Node，不改变节点、边、路由或终止语义。M4 已通过独立 Agent Service 把该图接入 Backend persistence 生命周期，Graph 本身仍不依赖 FastAPI 或数据库连接池。
+
+## `png_to_shader_min_graph` 快速贯通骨架
+
+<!-- graph-diagram:png_to_shader_min_graph:start -->
+```mermaid
+flowchart TD
+    START([START])
+    END([END])
+    START --> initialize_run[initialize_run]
+    initialize_run --> perceive_target[perceive_target]
+    perceive_target --> author_initial[author_initial]
+    author_initial --> materialize_shader[materialize_shader]
+    materialize_shader --> render_and_evaluate[render_and_evaluate]
+    render_and_evaluate --> decide_after_render[decide_after_render]
+    decide_after_render -. optimize_base .-> optimize_base[optimize_base]
+    decide_after_render -. finalize .-> finalize[finalize]
+    optimize_base --> decide_after_base[decide_after_base]
+    decide_after_base -. optimize_feature .-> optimize_feature[optimize_feature]
+    decide_after_base -. author_refine .-> author_refine[author_refine]
+    decide_after_base -. finalize .-> finalize
+    optimize_feature --> decide_after_feature[decide_after_feature]
+    decide_after_feature -. optimize_feature .-> optimize_feature
+    decide_after_feature -. author_refine .-> author_refine
+    decide_after_feature -. finalize .-> finalize
+    author_refine --> materialize_shader
+    finalize --> END
+
+    classDef safety fill:#fff4d6,stroke:#ad7200,stroke-width:2px
+    class render_and_evaluate,optimize_base,optimize_feature,finalize safety
+```
+<!-- graph-diagram:png_to_shader_min_graph:end -->
+
+### 最小图条件路由表
+
+| 决定节点 | 路由函数 | 结果 | 下一节点 | 含义 |
+|---|---|---|---|---|
+| `decide_after_render` | `route_after_render` | `optimize_base` | `optimize_base` | 首帧真实渲染成功、MAE 未达标且仍有 draw 预算 |
+| 同上 | 同上 | `finalize` | `finalize` | 已达标、失败或预算耗尽 |
+| `decide_after_base` | `route_after_base` | `optimize_feature` | `optimize_feature` | 仍有 feature queue |
+| 同上 | 同上 | `author_refine` | `author_refine` | 特征耗尽但仍有模型与 Refine 预算 |
+| 同上 | 同上 | `finalize` | `finalize` | 达标或预算结束 |
+| `decide_after_feature` | `route_after_feature` | `optimize_feature` | `optimize_feature` | 消费下一个 feature |
+| 同上 | 同上 | `author_refine` | `author_refine` | feature queue 已空且仍可 Refine |
+| 同上 | 同上 | `finalize` | `finalize` | 达标或预算结束 |
+
+- 黄色节点构成最小图的 `current_best` 安全边界。`render_and_evaluate` 产生首个真实候选；基础微调只在 MAE 严格改善时提交，特征占位步骤不覆盖 best；`finalize` 只固化 best scene、GLSL、PNG、MAE、manifest 和阶段 trace。
+- 快速贯通版的 `author_initial` 使用确定性感知 fallback，产品默认 `llm_budget=0`，不会调用真实模型；`author_refine` 和回边保留为后续模型增量的结构接口。
+- 当前 typed uniform 由模板生成后烘焙为常量并交给稳定 V1 Renderer。prepared program/只编译一次热路径和 CMA-ES 尚未完成，不得把当前轻量微调表述为性能版优化器。

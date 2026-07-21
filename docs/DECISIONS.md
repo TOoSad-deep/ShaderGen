@@ -396,3 +396,10 @@
 - 决策：`human_doc/shaderforge-technical-architecture-aligned(1).svg` 只作为项目最初产品设计和历史背景参考，不再是当前或最终架构的覆盖性权威。本决策取代 D001。当前实现事实由代码、运行配置、`docs/ARCHITECTURE.md` 和模块旁架构文档共同记录；F09 的目标与当前实施切片分别以目标架构详细版和最小骨架快速版为准。
 - 原因：SVG 反映的是项目早期设想，后续已经形成经过验证的 V1 实现和用户明确确认的新 scene/template/optimization 方案。继续规定“冲突时以 SVG 为准”会让历史草图反向覆盖新决策和可验证事实。
 - 影响：README、AGENTS 和全局架构文档不再使用“最终架构以 SVG 为准”的表述。SVG 文件继续原样保留，不删除、不静默改写；可以用于追溯最初产品概念，但不能据此否决后续方案、决策、契约或代码。
+
+## D051 - 先用确定性 scene_mvp 贯通产品垂直切片
+
+- 日期：2026-07-21
+- 决策：在保留 `procedural_v1` 默认路径的同时，增加显式 `scene_mvp` 模式并同步接入 Graph、Agent Service、Backend、Artifact API 和 Frontend。首个可运行增量保留快速版的 12 节点/3 路由结构，但用确定性感知 fallback 完成 Initial Author，模型预算固定为 0；typed uniform 先确定性烘焙为常量并复用现有 Renderer，基础优化仅做少量有界微调，不引入 CMA 依赖。
+- 原因：本阶段目标是尽快验证 scene → 模板 → 真实 Renderer → MAE → Artifact → HTTP → UI 的职责和追踪链路。prepared program、模型结构输出和 CMA-ES 同时落地会扩大故障面，也不符合当前“避免过度设计和过度优化”的实施要求。
+- 影响：`scene_mvp` 必须明确标记为实验路径，不能把当前轻量微调表述为 CMA-ES 或性能门禁已经完成；V1、Memory、Node Lab、既有 benchmark 和冻结失败证据全部保留。后续优先补 prepared program，再决定是否引入模型 Author 与 CMA-ES；F09 继续 `active`，发布 gate 仍为 no-go。

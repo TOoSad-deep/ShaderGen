@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 
 import pytest
@@ -110,6 +111,175 @@ def test_generate_procedural_v1_contract(monkeypatch) -> None:
         "evaluation": "高光已接近。",
         "suggestions": ["rim：略微收窄（右侧边缘偏厚）"],
     }
+
+
+def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
+    calls: dict[str, object] = {}
+    project_id = uuid4()
+
+    async def fake_start(*args, **kwargs):
+        calls["start"] = kwargs
+
+    async def fake_success(*args, **kwargs):
+        calls["success"] = kwargs
+
+    async def fake_generate(image: bytes, content_type: str, **kwargs):
+        assert image == b"image"
+        assert content_type == "image/png"
+        assert kwargs["project_id"] == str(project_id)
+        assert UUID(kwargs["run_id"])
+        assert kwargs["instruction"] == "保留右侧轮廓"
+        assert kwargs["service"] is app.state.png_to_shader_min_service
+        return SimpleNamespace(
+            project_id=kwargs["project_id"],
+            run_id=kwargs["run_id"],
+            glsl="precision mediump float; void main(){gl_FragColor=vec4(1.0);}",
+            render_width=64,
+            render_height=48,
+            status="succeeded",
+            stop_reason="completed",
+            current_best_mae=0.03125,
+            render_count=3,
+            llm_call_count=1,
+            scene={
+                "schema_version": "png_to_shader_min_scene_v1",
+                "canvas": {
+                    "width": 64,
+                    "height": 48,
+                    "background": [0.0, 0.0, 0.0],
+                },
+                "object": {},
+            },
+            trace=(
+                {
+                    "phase": "bootstrap",
+                    "status": "completed",
+                    "duration_ms": 2.5,
+                },
+                {
+                    "phase": "evaluate",
+                    "status": "completed",
+                    "duration_ms": 4.0,
+                },
+            ),
+        )
+
+    monkeypatch.setattr(
+        shader_generation_service, "start_shader_generation_run", fake_start
+    )
+    monkeypatch.setattr(
+        shader_generation_service, "record_shader_generation_success", fake_success
+    )
+    monkeypatch.setattr(
+        shader_generation_service,
+        "generate_scene_shader_from_image",
+        fake_generate,
+    )
+    previous_pool = getattr(app.state, "db_pool", None)
+    previous_service = getattr(app.state, "png_to_shader_min_service", None)
+    app.state.db_pool = object()
+    app.state.png_to_shader_min_service = object()
+    try:
+        response = TestClient(app).post(
+            "/api/shader/generate",
+            files={"file": ("target.png", b"image", "image/png")},
+            data={
+                "project_id": str(project_id),
+                "generation_mode": "scene_mvp",
+                "quality_preset": "high",
+                "instruction": " 保留右侧轮廓 ",
+            },
+        )
+    finally:
+        app.state.db_pool = previous_pool
+        app.state.png_to_shader_min_service = previous_service
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["project_id"] == str(project_id)
+    assert UUID(payload["run_id"])
+    assert payload["generation_mode"] == "scene_mvp"
+    assert payload["quality_preset"] is None
+    assert payload["render_width"] == 64
+    assert payload["render_height"] == 48
+    assert payload["stop_reason"] == "completed"
+    assert payload["score"] is None
+    assert payload["min_pipeline"] == {
+        "mae": 0.03125,
+        "render_count": 3,
+        "llm_call_count": 1,
+        "scene": {
+            "schema_version": "png_to_shader_min_scene_v1",
+            "canvas": {
+                "width": 64,
+                "height": 48,
+                "background": [0.0, 0.0, 0.0],
+            },
+            "object": {},
+        },
+        "trace": [
+            {
+                "phase": "bootstrap",
+                "status": "completed",
+                "duration_ms": 2.5,
+            },
+            {
+                "phase": "evaluate",
+                "status": "completed",
+                "duration_ms": 4.0,
+            },
+        ],
+    }
+    assert payload["final_render_url"].endswith("/artifacts/final-render")
+    assert payload["metrics_url"].endswith("/artifacts/metrics")
+    assert payload["manifest_url"].endswith("/artifacts/manifest")
+    start = calls["start"]
+    assert isinstance(start, dict)
+    assert start["project_id"] == project_id
+    assert start["generation_mode"] == "scene_mvp"
+    assert start["quality_preset"] is None
+    success = calls["success"]
+    assert isinstance(success, dict)
+    assert success["result_summary"]["current_best_mae"] == 0.03125
+    assert success["record_default_model_call"] is False
+    assert [event["stage"] for event in success["events"]] == [
+        "bootstrap",
+        "evaluate",
+    ]
+
+
+def test_artifact_endpoint_falls_back_to_scene_mvp_service() -> None:
+    run_id = uuid4()
+
+    class ProceduralService:
+        def read_public_artifact(self, requested_run_id, artifact_name):
+            raise PublicArtifactNotFoundError("missing")
+
+    class MinService:
+        def read_public_artifact(self, requested_run_id, artifact_name):
+            assert requested_run_id == str(run_id)
+            assert artifact_name == "metrics"
+            return PublicArtifact(
+                data=b'{"current_best_mae":0.03125}',
+                content_type="application/json; charset=utf-8",
+                filename="metrics.json",
+            )
+
+    previous_procedural = getattr(app.state, "png_to_shader_v1_service", None)
+    previous_min = getattr(app.state, "png_to_shader_min_service", None)
+    app.state.png_to_shader_v1_service = ProceduralService()
+    app.state.png_to_shader_min_service = MinService()
+    try:
+        response = TestClient(app).get(f"/api/shader/runs/{run_id}/artifacts/metrics")
+    finally:
+        app.state.png_to_shader_v1_service = previous_procedural
+        app.state.png_to_shader_min_service = previous_min
+
+    assert response.status_code == 200
+    assert response.json() == {"current_best_mae": 0.03125}
+    assert response.headers["content-disposition"] == (
+        'inline; filename="metrics.json"'
+    )
 
 
 def test_generate_unscored_fallback_returns_shader_and_records_truthful_summary(
@@ -786,7 +956,6 @@ def test_procedural_success_persistence_error_does_not_mask_shader(
     assert "shader.generate.success_persistence_failed" in caplog.text
     assert "persistence_stage=outcome_commit" in caplog.text
     assert "PRIVATE_DATABASE_DETAIL" not in caplog.text
-
 
 
 def test_artifact_endpoint_uses_fixed_whitelist(monkeypatch) -> None:

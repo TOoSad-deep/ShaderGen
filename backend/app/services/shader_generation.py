@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, is_dataclass
 from typing import Any, cast
 from uuid import UUID
 
 from backend.app.schemas.shader import (
     GenerationMode,
     QualityPresetName,
+    ShaderMinPipelineSummary,
     ShaderResponse,
     ShaderReview,
     ShaderScore,
@@ -26,6 +27,7 @@ from backend.app.services.shader import (
     ProjectBusyError,
     ProjectLockRegistry,
     generate_procedural_shader_from_image,
+    generate_scene_shader_from_image,
     get_png_to_shader_v1_models,
 )
 
@@ -53,6 +55,7 @@ class ShaderGenerationDependencies:
 
     pool: Any
     procedural_service: Any
+    min_service: Any | None
     locks: ProjectLockRegistry
 
 
@@ -312,6 +315,61 @@ def _procedural_review(value: dict[str, Any] | None) -> ShaderReview | None:
     )
 
 
+def _scene_value(value: Any) -> dict[str, Any] | None:
+    """把 Pydantic/dataclass scene 收敛为可持久化、可公开的字典."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if model_dump is not None:
+        return cast(dict[str, Any], model_dump(mode="json"))
+    if is_dataclass(value) and not isinstance(value, type):
+        return cast(dict[str, Any], asdict(value))
+    raise TypeError("scene_mvp scene 必须是结构化对象。")
+
+
+def _scene_trace(value: Any) -> list[dict[str, Any]]:
+    """规范化最小流水线阶段 trace，避免把内部对象直接暴露给响应."""
+    if value is None:
+        return []
+    trace: list[dict[str, Any]] = []
+    for item in value:
+        if isinstance(item, dict):
+            trace.append(dict(item))
+            continue
+        model_dump = getattr(item, "model_dump", None)
+        if model_dump is not None:
+            trace.append(cast(dict[str, Any], model_dump(mode="json")))
+            continue
+        if is_dataclass(item) and not isinstance(item, type):
+            trace.append(cast(dict[str, Any], asdict(item)))
+            continue
+        raise TypeError("scene_mvp trace 必须由结构化阶段记录组成。")
+    return trace
+
+
+def _scene_trace_events(trace: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+    """把公开阶段摘要映射为过程账本事件，不写图片或完整 GLSL."""
+    events: list[dict[str, Any]] = []
+    for item in trace:
+        phase = str(item.get("phase") or item.get("stage") or "scene_mvp")
+        status = str(item.get("status") or "completed")
+        payload = {
+            key: value
+            for key, value in item.items()
+            if key not in {"phase", "stage", "status"}
+        }
+        events.append(
+            {
+                "stage": phase,
+                "event_type": f"scene_mvp_{status}",
+                "payload": payload,
+            }
+        )
+    return tuple(events)
+
+
 async def execute_shader_generation(
     command: ShaderGenerationCommand,
     dependencies: ShaderGenerationDependencies,
@@ -322,7 +380,10 @@ async def execute_shader_generation(
     generation_mode = command.generation_mode
     quality_preset = command.quality_preset
     pool = dependencies.pool
-    glsl_model_name, vision_model_name = get_png_to_shader_v1_models()
+    if generation_mode == "procedural_v1":
+        glsl_model_name, vision_model_name = get_png_to_shader_v1_models()
+    else:
+        glsl_model_name = vision_model_name = "scene_mvp"
     run_started = False
     result = None
     logger.info(
@@ -349,22 +410,34 @@ async def execute_shader_generation(
                     glsl_model_name=glsl_model_name,
                     vision_model_name=vision_model_name,
                     generation_mode=generation_mode,
-                    quality_preset=quality_preset,
+                    quality_preset=(
+                        quality_preset if generation_mode == "procedural_v1" else None
+                    ),
                     instruction=command.instruction,
                 )
                 run_started = True
 
-            result = await generate_procedural_shader_from_image(
-                command.image,
-                command.content_type,
-                project_id=str(project_id),
-                run_id=str(run_id),
-                quality_preset=quality_preset,
-                instruction=command.instruction,
-                service=dependencies.procedural_service,
-            )
+            if generation_mode == "procedural_v1":
+                result = await generate_procedural_shader_from_image(
+                    command.image,
+                    command.content_type,
+                    project_id=str(project_id),
+                    run_id=str(run_id),
+                    quality_preset=quality_preset,
+                    instruction=command.instruction,
+                    service=dependencies.procedural_service,
+                )
+            else:
+                result = await generate_scene_shader_from_image(
+                    command.image,
+                    command.content_type,
+                    project_id=str(project_id),
+                    run_id=str(run_id),
+                    instruction=command.instruction,
+                    service=dependencies.min_service,
+                )
             if result is None:
-                raise RuntimeError("procedural_v1 未返回结果。")
+                raise RuntimeError(f"{generation_mode} 未返回结果。")
     except ProjectBusyError as exc:
         duration_ms = (time.perf_counter() - command.started_at) * 1000
         logger.warning(
@@ -545,6 +618,114 @@ async def execute_shader_generation(
             retryable=is_timeout,
             stop_reason=stop_reason,
         ) from exc
+
+    if result is not None and generation_mode == "scene_mvp":
+        artifact_base = f"/api/shader/runs/{run_id}/artifacts"
+        try:
+            if str(result.project_id) != str(project_id) or str(result.run_id) != str(
+                run_id
+            ):
+                raise ValueError("scene_mvp 返回的 project_id/run_id 与请求不一致。")
+            scene = _scene_value(result.scene)
+            trace = _scene_trace(result.trace)
+            response = ShaderResponse(
+                project_id=project_id,
+                run_id=run_id,
+                glsl=str(result.glsl),
+                memory_status="ephemeral",
+                generation_mode="scene_mvp",
+                quality_preset=None,
+                stop_reason=str(result.stop_reason),
+                render_width=int(result.render_width),
+                render_height=int(result.render_height),
+                final_render_url=f"{artifact_base}/final-render",
+                metrics_url=f"{artifact_base}/metrics",
+                manifest_url=f"{artifact_base}/manifest",
+                min_pipeline=ShaderMinPipelineSummary(
+                    mae=(
+                        float(result.current_best_mae)
+                        if result.current_best_mae is not None
+                        else None
+                    ),
+                    render_count=int(result.render_count),
+                    llm_call_count=int(result.llm_call_count),
+                    scene=scene,
+                    trace=trace,
+                ),
+            )
+        except Exception as exc:
+            duration_ms = (time.perf_counter() - command.started_at) * 1000
+            diagnostics = {
+                "failure_stage": "backend_response",
+                "failure_event": "response_contract_failed",
+                "failure_error_type": type(exc).__name__,
+                "stop_reason": getattr(result, "stop_reason", None),
+                "backend_duration_ms": round(duration_ms, 2),
+            }
+            if pool is not None and run_started:
+                await _record_failure_without_masking(
+                    pool,
+                    run_id=run_id,
+                    project_id=project_id,
+                    generation_mode="scene_mvp",
+                    stop_reason=str(
+                        getattr(result, "stop_reason", "response_contract_failed")
+                    ),
+                    failure_stage="backend_response",
+                    error=exc,
+                    diagnostics=diagnostics,
+                )
+            raise _generation_error(
+                status_code=500,
+                message="生成已完成，但结果格式校验失败。",
+                code="response_contract_failed",
+                run_id=run_id,
+                stage="backend_response",
+                retryable=False,
+                stop_reason=str(getattr(result, "stop_reason", "unknown")),
+            ) from exc
+
+        events = _scene_trace_events(trace)
+        result_summary = {
+            "generation_mode": "scene_mvp",
+            "status": str(result.status),
+            "stop_reason": str(result.stop_reason),
+            "render_width": int(result.render_width),
+            "render_height": int(result.render_height),
+            "current_best_mae": result.current_best_mae,
+            "render_count": int(result.render_count),
+            "llm_call_count": int(result.llm_call_count),
+            "scene": scene,
+            "trace": trace,
+            "final_render_url": f"{artifact_base}/final-render",
+            "metrics_url": f"{artifact_base}/metrics",
+            "manifest_url": f"{artifact_base}/manifest",
+        }
+        if pool is not None:
+            await _record_success_without_masking(
+                pool,
+                run_id=run_id,
+                project_id=project_id,
+                generation_mode="scene_mvp",
+                model_name="scene_mvp",
+                glsl_chars=len(result.glsl),
+                events=events,
+                result_summary=result_summary,
+                record_default_model_call=False,
+            )
+        logger.info(
+            "shader.generate.succeeded run_id=%s project_id=%s "
+            "generation_mode=scene_mvp stop_reason=%s failure_stage=none "
+            "render_count=%s llm_call_count=%s current_best_mae=%s duration_ms=%.2f",
+            run_id,
+            project_id,
+            result.stop_reason,
+            result.render_count,
+            result.llm_call_count,
+            result.current_best_mae,
+            (time.perf_counter() - command.started_at) * 1000,
+        )
+        return response
 
     if result is not None:
         artifact_base = f"/api/shader/runs/{run_id}/artifacts"

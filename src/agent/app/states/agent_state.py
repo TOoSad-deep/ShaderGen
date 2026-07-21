@@ -74,3 +74,39 @@ class PngToShaderV1State(TypedDict, total=False):
     model_calls: Annotated[tuple[dict[str, Any], ...], UntrackedValue]
     events: Annotated[tuple[dict[str, Any], ...], UntrackedValue]
     logs: Annotated[tuple[dict[str, Any], ...], UntrackedValue]
+
+
+class PngToShaderMinState(TypedDict, total=False):
+    """scene_mvp 的轻量路由状态与 run 级大对象边界。."""
+
+    project_id: str
+    phase: str
+    status: str
+    stop_reason: str
+    render_count: int
+    render_budget: int
+    llm_call_count: int
+    llm_budget: int
+    refine_count: int
+    refine_budget: int
+    target_mae: float
+    current_best_mae: float
+    feature_queue: tuple[str, ...]
+
+    run_id: Annotated[str, UntrackedValue]
+    image: Annotated[bytes, UntrackedValue]
+    content_type: Annotated[str, UntrackedValue]
+    instruction: Annotated[str, UntrackedValue]
+    perception: Annotated[Any, UntrackedValue]
+    target_rgb: Annotated[Any, UntrackedValue]
+    scene: Annotated[dict[str, Any], UntrackedValue]
+    materialized: Annotated[Any, UntrackedValue]
+    current_glsl: Annotated[str, UntrackedValue]
+    current_render: Annotated[bytes, UntrackedValue]
+    current_mae: Annotated[float, UntrackedValue]
+    current_best: Annotated[dict[str, Any], UntrackedValue]
+    next_action: Annotated[str, UntrackedValue]
+    trace: Annotated[tuple[dict[str, Any], ...], UntrackedValue]
+    final_result: Annotated[dict[str, Any], UntrackedValue]
+    final_manifest_ref: Annotated[str, UntrackedValue]
+    error: Annotated[str | None, UntrackedValue]

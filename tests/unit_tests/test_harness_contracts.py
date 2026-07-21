@@ -174,10 +174,14 @@ def test_h01_evidence_matches_current_harness_shape() -> None:
     assert "8 个单元测试" not in h01
 
 
-def test_langgraph_registry_only_exposes_png_to_shader_v1() -> None:
+def test_langgraph_registry_exposes_v1_and_scene_mvp() -> None:
     graphs = json.loads(_read("langgraph.json"))["graphs"]
 
     assert graphs == {
+        "png_to_shader_min": (
+            "./src/agent/app/graphs/"
+            "png_to_shader_min_graph.py:png_to_shader_min_graph"
+        ),
         "png_to_shader_v1": (
             "./src/agent/app/graphs/"
             "png_to_shader_v1_graph.py:png_to_shader_v1_graph"

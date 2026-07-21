@@ -1,10 +1,11 @@
 # States 架构
 
-`src/agent/app/states/` 保存 PNG-to-Shader V1 的 LangGraph State，区分任务内 checkpoint 字段和当前调用的 `UntrackedValue` 字段。
+`src/agent/app/states/` 保存 PNG-to-Shader LangGraph State，区分任务内 checkpoint 字段和当前调用的 `UntrackedValue` 字段。
 
 ## 当前状态
 
 - `PngToShaderV1State`：M3 自动闭环状态，区分小型路由摘要和当前调用的大对象/证据。
+- `PngToShaderMinState`：`scene_mvp` 的最小 12 节点状态；checkpoint 只保留阶段、预算、停止原因和 best MAE 摘要，图片、scene、GLSL、RGB、render、trace 与 final 结果均为 `UntrackedValue`。
 
 ## State 规则
 
@@ -24,3 +25,9 @@
 - `UntrackedValue` 输出、Context 与审计：`final_result`、`final_manifest_ref`、`context_pack`、`selected_memory_ids`、`memory_status`、`model_calls`、`events`、`logs`。
 - Candidate 的可恢复真相源是 `LocalArtifactStore`，不是 checkpoint 中的大对象。M3 是同步闭环；跨进程中断恢复和异步 Run API 属于 V1.1，不能假定 `UntrackedValue` 可恢复。
 - Graph State 不保存 Renderer、Artifact Store 或 Gateway 实例；这些依赖由 Builder/运行时 registry 持有。
+
+## `PngToShaderMinState` 边界
+
+- 轻量字段：`project_id`、`phase`、`status`、`stop_reason`、draw/LLM/Refine 计数与预算、`target_mae`、`current_best_mae`、`feature_queue`。
+- `UntrackedValue`：`run_id`、输入图片、确定性感知和目标 RGB、工作 scene、物化模板、当前 GLSL/render/MAE、不可被失败候选覆盖的 `current_best`、路由动作、阶段 trace 与 final manifest/result。
+- 当前快速贯通产品配置固定 `llm_budget=0`，模型节点结构仍在 Graph 中，但普通请求不会调用真实模型。

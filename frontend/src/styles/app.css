@@ -245,6 +245,7 @@ body {
 .review-panel,
 .run-progress,
 .score-panel,
+.scene-mvp-panel,
 .failure-panel {
   background: white;
   border: 1px solid #d1d5db;
@@ -498,6 +499,64 @@ body {
 .review-panel,
 .score-panel {
   margin-top: 16px;
+}
+
+.scene-mvp-panel {
+  margin-top: 16px;
+  margin-bottom: 16px;
+}
+
+.scene-mvp-details {
+  margin-top: 10px;
+}
+
+.scene-mvp-details summary {
+  cursor: pointer;
+  color: #1d4ed8;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.scene-mvp-details pre {
+  max-height: 320px;
+  overflow: auto;
+  margin: 8px 0 0;
+  padding: 12px;
+  border-radius: 4px;
+  background: #111827;
+  color: #e5e7eb;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.scene-mvp-trace {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  color: #334155;
+  line-height: 1.7;
+}
+
+.scene-mvp-trace li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.trace-status {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.trace-status.is-ok,
+.trace-status.is-done,
+.trace-status.is-success {
+  color: #15803d;
+}
+
+.trace-status.is-failed,
+.trace-status.is-error {
+  color: #b91c1c;
 }
 
 .score-grid {

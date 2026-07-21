@@ -2,6 +2,23 @@ import { apiFetch, parseApiError, resolveApiUrl } from "./client";
 
 export type MemoryStatus = "durable" | "ephemeral" | "degraded";
 export type QualityPreset = "fast" | "balanced" | "high";
+export type GenerationMode = "procedural_v1" | "scene_mvp";
+
+export interface MinPipelineTracePhase {
+  phase: string;
+  status: string;
+  duration_ms?: number | null;
+  message?: string | null;
+}
+
+// scene_mvp 最小管线的运行摘要；后端字段可缺省，前端全部按可选处理。
+export interface MinPipelineSummary {
+  mae?: number | null;
+  render_count?: number | null;
+  llm_call_count?: number | null;
+  scene?: unknown;
+  trace?: MinPipelineTracePhase[] | null;
+}
 
 export interface ShaderScore {
   metric_version: string;
@@ -22,7 +39,7 @@ export interface ShaderResponse {
   run_id: string;
   glsl: string;
   memory_status: MemoryStatus;
-  generation_mode: "procedural_v1";
+  generation_mode: GenerationMode;
   quality_preset?: QualityPreset | null;
   iterations: number;
   stop_reason?: string | null;
@@ -33,6 +50,7 @@ export interface ShaderResponse {
   metrics_url?: string | null;
   manifest_url?: string | null;
   score?: ShaderScore | null;
+  min_pipeline?: MinPipelineSummary | null;
   unscored_fallback?: boolean;
   review?: ShaderReview | null;
 }
@@ -87,6 +105,7 @@ async function readError(response: Response, fallback: string): Promise<ShaderAp
 export interface GenerateShaderOptions {
   projectId?: string;
   qualityPreset: QualityPreset;
+  generationMode?: GenerationMode;
   instruction: string;
   signal?: AbortSignal;
 }
@@ -98,7 +117,7 @@ export async function generateShader(
   const formData = new FormData();
   formData.append("file", file);
   if (options.projectId) formData.append("project_id", options.projectId);
-  formData.append("generation_mode", "procedural_v1");
+  formData.append("generation_mode", options.generationMode ?? "procedural_v1");
   formData.append("quality_preset", options.qualityPreset);
   formData.append("instruction", options.instruction);
 

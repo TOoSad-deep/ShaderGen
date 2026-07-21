@@ -197,3 +197,51 @@ async def test_lifespan_continues_cleanup_after_memory_close_fails(
     assert app.state.db_pool is None
     assert app.state.project_locks is None
     assert app.state.png_to_shader_v1_service is None
+    assert app.state.png_to_shader_min_service is None
+
+
+@pytest.mark.anyio
+async def test_lifespan_injects_and_closes_scene_mvp_service(monkeypatch) -> None:
+    events: list[str] = []
+    min_service = object()
+
+    async def open_database(app, database_url) -> None:
+        app.state.db_pool = object()
+
+    async def close_database(app) -> None:
+        app.state.db_pool = None
+
+    async def open_memory(app, database_url):
+        resources = SimpleNamespace(
+            checkpointer=object(),
+            store=object(),
+            memory_status="ephemeral",
+        )
+        app.state.agent_memory = resources
+        return resources
+
+    async def close_memory(app) -> None:
+        app.state.agent_memory = None
+
+    async def close_min(service) -> None:
+        assert service is min_service
+        events.append("close_min")
+
+    monkeypatch.setattr(backend_main, "open_database_pool", open_database)
+    monkeypatch.setattr(backend_main, "close_database_pool", close_database)
+    monkeypatch.setattr(backend_main, "open_agent_memory", open_memory)
+    monkeypatch.setattr(backend_main, "close_agent_memory", close_memory)
+    monkeypatch.setattr(
+        backend_main, "create_png_to_shader_v1_service", lambda **kwargs: object()
+    )
+    monkeypatch.setattr(
+        backend_main, "get_default_png_to_shader_min_service", lambda: min_service
+    )
+    monkeypatch.setattr(backend_main, "close_png_to_shader_min_service", close_min)
+    app = FastAPI()
+
+    async with backend_main.build_lifespan(BackendSettings())(app):
+        assert app.state.png_to_shader_min_service is min_service
+
+    assert events == ["close_min"]
+    assert app.state.png_to_shader_min_service is None
