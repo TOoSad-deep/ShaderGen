@@ -5,16 +5,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, cast
 
-from shaderforge.scene import Feature, MinScene
+from shaderforge.scene import MAX_MIN_FEATURES, MinScene
 
-MIN_TEMPLATE_VERSION = "png_to_shader_min_template_v1"
+MIN_TEMPLATE_VERSION = "png_to_shader_min_template_v2"
+WEBGL1_MIN_FRAGMENT_UNIFORM_VECTORS = 16
+_RENDERER_ACTIVE_UNIFORM_VECTORS = 1  # u_resolution；u_image/u_time 只作兼容声明。
+
+_FEATURE_KIND = {
+    "rim": 1.0,
+    "shadow": 2.0,
+    "polar_arc": 3.0,
+    "edge_line": 4.0,
+}
 
 
 @dataclass(frozen=True)
 class UniformSpec:
     """模板接受的 typed uniform 声明。."""
 
-    type: Literal["float", "vec2", "vec3"]
+    type: Literal["float", "vec2", "vec3", "vec4"]
 
 
 @dataclass(frozen=True)
@@ -28,81 +37,160 @@ class MaterializedMinShader:
     template_version: str = MIN_TEMPLATE_VERSION
 
 
-def _feature(scene: MinScene, feature_type: str) -> Feature | None:
-    return next(
-        (item for item in scene.object.features if item.type == feature_type), None
-    )
-
-
 def _uniforms(scene: MinScene) -> dict[str, float | tuple[float, ...]]:
     primitive = scene.object.primitive
     field = scene.object.color_field
-    rim = _feature(scene, "rim")
-    shadow = _feature(scene, "shadow")
-    return {
-        "u_bg": scene.canvas.background,
-        "u_center": primitive.center,
-        "u_axes": primitive.axes,
-        "u_inner": field.inner,
-        "u_outer": field.outer,
-        "u_gradient_origin": field.origin,
-        "u_gradient_scale": field.scale,
-        "u_rim_color": rim.color if rim else field.inner,
-        "u_rim_intensity": rim.intensity if rim else 0.0,
-        "u_shadow_center": shadow.center if shadow else (0.0, -2.0),
-        "u_shadow_axes": shadow.axes if shadow else (0.1, 0.1),
-        "u_shadow_color": shadow.color if shadow else scene.canvas.background,
-        "u_shadow_intensity": shadow.intensity if shadow else 0.0,
+    values: dict[str, float | tuple[float, ...]] = {
+        "u_scene_bg_scale": (*scene.canvas.background, field.scale),
+        "u_scene_primitive": (*primitive.center, *primitive.axes),
+        "u_scene_inner_origin_x": (*field.inner, field.origin[0]),
+        "u_scene_outer_origin_y": (*field.outer, field.origin[1]),
     }
+    for index in range(MAX_MIN_FEATURES):
+        feature = (
+            scene.object.features[index]
+            if index < len(scene.object.features)
+            else None
+        )
+        prefix = f"u_feature_{index}"
+        values[f"{prefix}_meta"] = (
+            _FEATURE_KIND[feature.type] if feature else 0.0,
+            feature.intensity if feature else 0.0,
+            *(feature.center if feature else (0.0, 0.0)),
+        )
+        values[f"{prefix}_shape"] = (
+            *(feature.axes if feature else (1.0, 1.0)),
+            0.0,
+            0.0,
+        )
+        values[f"{prefix}_color"] = (
+            *(feature.color if feature else (0.0, 0.0, 0.0)),
+            0.0,
+        )
+    return values
 
 
 def _schema(values: dict[str, float | tuple[float, ...]]) -> dict[str, UniformSpec]:
     result: dict[str, UniformSpec] = {}
     for name, value in values.items():
         if isinstance(value, tuple):
-            result[name] = UniformSpec("vec2" if len(value) == 2 else "vec3")
+            if len(value) == 2:
+                result[name] = UniformSpec("vec2")
+            elif len(value) == 3:
+                result[name] = UniformSpec("vec3")
+            elif len(value) == 4:
+                result[name] = UniformSpec("vec4")
+            else:
+                raise ValueError(f"uniform {name} 使用了不支持的向量长度。")
         else:
             result[name] = UniformSpec("float")
     return result
 
 
-_WEBGL1_TEMPLATE = """precision mediump float;
+_FEATURE_UNIFORM_DECLARATIONS = "\n".join(
+    f"""uniform vec4 u_feature_{index}_meta;
+uniform vec4 u_feature_{index}_shape;
+uniform vec4 u_feature_{index}_color;"""
+    for index in range(MAX_MIN_FEATURES)
+)
+
+_FEATURE_BACKGROUND_CALLS = "\n".join(
+    f"""    background = applyFeatureBackground(background, p,
+        u_feature_{index}_meta.x, u_feature_{index}_meta.zw,
+        u_feature_{index}_shape.xy, u_feature_{index}_color.rgb,
+        u_feature_{index}_meta.y);"""
+    for index in range(MAX_MIN_FEATURES)
+)
+
+_FEATURE_BODY_CALLS = "\n".join(
+    f"""    body = applyFeatureBody(body, p, objectDistance,
+        u_feature_{index}_meta.x, u_feature_{index}_meta.zw,
+        u_feature_{index}_shape.xy, u_feature_{index}_color.rgb,
+        u_feature_{index}_meta.y);"""
+    for index in range(MAX_MIN_FEATURES)
+)
+
+_WEBGL1_TEMPLATE_BLUEPRINT = """precision mediump float;
 varying vec2 v_uv;
 uniform sampler2D u_image;
 uniform vec2 u_resolution;
 uniform float u_time;
-uniform vec3 u_bg;
-uniform vec2 u_center;
-uniform vec2 u_axes;
-uniform vec3 u_inner;
-uniform vec3 u_outer;
-uniform vec2 u_gradient_origin;
-uniform float u_gradient_scale;
-uniform vec3 u_rim_color;
-uniform float u_rim_intensity;
-uniform vec2 u_shadow_center;
-uniform vec2 u_shadow_axes;
-uniform vec3 u_shadow_color;
-uniform float u_shadow_intensity;
+uniform vec4 u_scene_bg_scale;
+uniform vec4 u_scene_primitive;
+uniform vec4 u_scene_inner_origin_x;
+uniform vec4 u_scene_outer_origin_y;
+__FEATURE_UNIFORMS__
+
+float featureKind(float kind, float expected) {
+    return 1.0 - step(0.25, abs(kind - expected));
+}
+
+vec3 applyFeatureBackground(
+    vec3 background,
+    vec2 p,
+    float kind,
+    vec2 center,
+    vec2 axes,
+    vec3 color,
+    float intensity
+) {
+    vec2 safeAxes = max(abs(axes), vec2(0.02));
+    float distanceToFeature = length((p - center) / safeAxes);
+    float footprint = exp(-pow(distanceToFeature * 0.85, 2.0));
+    float weight = featureKind(kind, 2.0) * footprint * intensity;
+    return mix(background, color, clamp(weight, 0.0, 0.8));
+}
+
+vec3 applyFeatureBody(
+    vec3 body,
+    vec2 p,
+    float objectDistance,
+    float kind,
+    vec2 center,
+    vec2 axes,
+    vec3 color,
+    float intensity
+) {
+    vec2 safeAxes = max(abs(axes), vec2(0.02));
+    vec2 featurePoint = (p - center) / safeAxes;
+    float distanceToFeature = length(featurePoint);
+    float footprint = exp(-pow(distanceToFeature * 0.85, 2.0));
+    float edgeBand = exp(-pow((objectDistance - 0.91) * 18.181818, 2.0));
+    float rimWeight = featureKind(kind, 1.0) * footprint * edgeBand;
+    float arcBand = exp(-pow((distanceToFeature - 1.0) * 9.0, 2.0));
+    float arcGate = smoothstep(-0.15, 0.25, featurePoint.y);
+    float arcWeight = featureKind(kind, 3.0) * arcBand * arcGate;
+    float lineBand = exp(-pow(featurePoint.y * 4.0, 2.0));
+    float lineExtent = 1.0 - smoothstep(0.75, 1.0, abs(featurePoint.x));
+    float lineWeight = featureKind(kind, 4.0) * lineBand * lineExtent;
+    float weight = (rimWeight + arcWeight + lineWeight) * intensity;
+    return mix(body, color, clamp(weight, 0.0, 0.9));
+}
 
 vec4 minScene(vec2 fragCoord) {
     float unit = min(u_resolution.x, u_resolution.y);
     vec2 p = (2.0 * fragCoord - u_resolution) / unit;
-    vec2 safeAxes = max(u_axes, vec2(0.02));
-    vec2 q = (p - u_center) / safeAxes;
+    vec3 backgroundColor = u_scene_bg_scale.rgb;
+    float gradientScale = u_scene_bg_scale.a;
+    vec2 objectCenter = u_scene_primitive.xy;
+    vec2 objectAxes = u_scene_primitive.zw;
+    vec3 innerColor = u_scene_inner_origin_x.rgb;
+    vec3 outerColor = u_scene_outer_origin_y.rgb;
+    vec2 gradientOrigin = vec2(
+        u_scene_inner_origin_x.a,
+        u_scene_outer_origin_y.a
+    );
+    vec2 safeAxes = max(objectAxes, vec2(0.02));
+    vec2 q = (p - objectCenter) / safeAxes;
     float objectDistance = length(q);
     float mask = 1.0 - smoothstep(0.985, 1.015, objectDistance);
 
-    vec2 gradientPoint = q - u_gradient_origin;
-    float gradient = clamp(length(gradientPoint) / max(u_gradient_scale, 0.05), 0.0, 1.0);
-    vec3 body = mix(u_inner, u_outer, smoothstep(0.0, 1.0, gradient));
-    float rim = exp(-pow((objectDistance - 0.91) * 18.181818, 2.0));
-    body = mix(body, u_rim_color, clamp(rim * u_rim_intensity, 0.0, 0.85));
-
-    vec2 shadowAxes = max(u_shadow_axes, vec2(0.02));
-    float shadowDistance = length((p - u_shadow_center) / shadowAxes);
-    float shadow = (1.0 - smoothstep(0.45, 1.25, shadowDistance)) * u_shadow_intensity;
-    vec3 background = mix(u_bg, u_shadow_color, clamp(shadow, 0.0, 0.75));
+    vec2 gradientPoint = q - gradientOrigin;
+    float gradient = clamp(length(gradientPoint) / max(gradientScale, 0.05), 0.0, 1.0);
+    vec3 body = mix(innerColor, outerColor, smoothstep(0.0, 1.0, gradient));
+    vec3 background = backgroundColor;
+__FEATURE_BACKGROUND_CALLS__
+__FEATURE_BODY_CALLS__
     return vec4(mix(background, body, mask), 1.0);
 }
 
@@ -111,11 +199,25 @@ void main() {
 }
 """
 
+_WEBGL1_TEMPLATE = (
+    _WEBGL1_TEMPLATE_BLUEPRINT.replace(
+        "__FEATURE_UNIFORMS__", _FEATURE_UNIFORM_DECLARATIONS
+    )
+    .replace("__FEATURE_BACKGROUND_CALLS__", _FEATURE_BACKGROUND_CALLS)
+    .replace("__FEATURE_BODY_CALLS__", _FEATURE_BODY_CALLS)
+)
+
 
 def materialize_min_shader(scene: MinScene) -> MaterializedMinShader:
     """从同一 scene 生成运行真相源和 Shadertoy 适配版。."""
     values = _uniforms(scene)
     schema = _schema(values)
+    active_uniform_vectors = _RENDERER_ACTIVE_UNIFORM_VECTORS + len(schema)
+    if active_uniform_vectors > WEBGL1_MIN_FRAGMENT_UNIFORM_VECTORS:
+        raise RuntimeError(
+            "最小模板超过 WebGL1 最低 fragment uniform vector 容量："
+            f"{active_uniform_vectors}>{WEBGL1_MIN_FRAGMENT_UNIFORM_VECTORS}。"
+        )
     shadertoy = _WEBGL1_TEMPLATE.replace("varying vec2 v_uv;\n", "")
     shadertoy = shadertoy.replace("uniform sampler2D u_image;\n", "")
     shadertoy = shadertoy.replace(
@@ -166,9 +268,11 @@ def bake_min_uniforms(materialized: MaterializedMinShader) -> str:
 
 
 __all__ = [
+    "MAX_MIN_FEATURES",
     "MIN_TEMPLATE_VERSION",
     "MaterializedMinShader",
     "UniformSpec",
+    "WEBGL1_MIN_FRAGMENT_UNIFORM_VECTORS",
     "bake_min_uniforms",
     "materialize_min_shader",
 ]

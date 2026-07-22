@@ -14,12 +14,25 @@ export interface MinPipelineTracePhase {
 // scene_mvp 最小管线的运行摘要；后端字段可缺省，前端全部按可选处理。
 export interface MinPipelineSummary {
   mae?: number | null;
+  objective_loss?: number | null;
+  metric_breakdown?: {
+    metric_version?: string;
+    global_mae?: number;
+    foreground_mae?: number;
+    highlight_mae?: number;
+    shadow_mae?: number;
+  } | null;
+  template_version?: string | null;
   render_count?: number | null;
+  render_budget?: number | null;
   llm_call_count?: number | null;
+  llm_budget?: number | null;
+  refine_budget?: number | null;
   scene?: unknown;
   trace?: MinPipelineTracePhase[] | null;
   // 质量目标：区分“流程完成”与“质量达标”
   target_mae?: number | null;
+  target_loss?: number | null;
   target_reached?: boolean | null;
   // prepared 渲染路径与 prepare 阶段耗时
   renderer_path?: string | null;

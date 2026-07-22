@@ -10,7 +10,7 @@
 - `PlaywrightWebGL1Renderer` 只接受 canonical `WEBGL1_STATIC_NO_TEXTURE_V1`；不等价的 `RenderContract` 在启动浏览器前拒绝。
 - `render()` 继续每次新建非 prepared canvas/context，不删除已准备的 program，与 V1 行为兼容。
 - `prepare(fragment_source, width, height, uniform_schema)` 只做一次静态校验、编译和链接；`render_uniforms()` 每帧完整上传白名单值集、清屏、draw、`gl.finish()` 和 `readPixels`。
-- uniform 白名单只支持 `float`/`vec2`/`vec3`；缺失、额外名称、非有限数值、错误类型或错误向量长度都在绘制前拒绝，因此不会沿用上一帧 uniform。`u_resolution`/`u_time` 由 Renderer 保留并自动上传。
+- uniform 白名单只支持 `float`/`vec2`/`vec3`/`vec4`；缺失、额外名称、非有限数值、错误类型或错误向量长度都在绘制前拒绝，因此不会沿用上一帧 uniform。`u_resolution`/`u_time` 由 Renderer 保留并自动上传。
 - `capture_png=False` 只返回按左上角行序排列的 RGB bytes，不调用 `canvas.toDataURL()`；`capture_png=True` 同时返回 PNG，仅用于接受候选或最终结果。
 - 同一个 `PlaywrightWebGL1Renderer` 生命周期内复用 browser/page；worker 异常时关闭并最多重放一次。
 - WebGL context 固定 `antialias: false`、`preserveDrawingBuffer: true`，且不创建、不绑定输入纹理。

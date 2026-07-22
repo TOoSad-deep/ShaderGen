@@ -61,7 +61,7 @@ require_text() {
 # 选择 scene_mvp 生成模式并上传 PNG
 MODE_REF="$(find_role_ref combobox '生成模式')"
 "$PWCLI" -s="$SESSION" select "$MODE_REF" scene_mvp >/dev/null
-require_text '实验功能：scene_mvp 最小管线'
+require_text '实验功能：scene_mvp 最小管线，返回复合/局部误差'
 INSTRUCTION_REF="$(find_role_ref textbox '补充约束')"
 "$PWCLI" -s="$SESSION" fill "$INSTRUCTION_REF" '保留纯白背景' >/dev/null
 UPLOAD_REF="$(find_upload_ref)"

@@ -424,3 +424,17 @@
 - 决策：`optimize_base` 和 `optimize_feature` 通过 `shaderforge.optimization` 使用固定顺序、单参数、严格白名单的数值邻域候选。base 覆盖主体 center/axes、背景与径向渐变参数；feature 覆盖现有 rim/shadow 等特征的 center/axes/color/intensity。候选按剩余 draw 预算截断，单批硬上限 24，产品 `scene_mvp` 整 run 暂用 40 draw；所有候选串行真实渲染，只有 MAE 严格下降才更新 `current_best`。
 - 原因：prepared 性能门禁已经通过，但直接进入 2000 draw CMA-ES 会同时放大算法、预算和请求时延风险。小批确定性搜索足以先验证参数接线、预算记账、回滚与可观测 trace，并保持实现可读和故障范围有限。
 - 影响：`scene_mvp` 不再只有轴长两个占位微调，基础和 feature 节点都会产生真实 uniform draw；accepted parameter 与候选数写入 trace。该实现不是 CMA-ES、没有随机/并行搜索，也不构成质量发布证据；后续扩大到 2000 draw 必须作为独立增量重新验证时延、取消和 benchmark。
+
+## D055 - scene_mvp 以真实仲裁、多特征和局部复合 loss 加固最小闭环
+
+- 日期：2026-07-22
+- 决策：保持 12 节点与路由拓扑不变，但 Initial 模型 scene 与确定性感知 fallback 在预算允许时分别真实渲染并按 `min_scene_composite_v2` 择优；固定模板保留 8 个 feature slot，逐项消费 type/center/axes/color/intensity，优化队列来自获胜 scene 的稳定 feature id。参数 proposal 必须重放到最新 best，使同批接受结果累计生效。质量档位取代固定 40 draw/1 Refine：`fast|balanced|high` 的 render/LLM/Refine 硬预算分别为 `48/2/1`、`96/4/2`、`160/6/3`。`current_best` 选择与达标判断使用整图、前景、高光、阴影 MAE 按 `0.35/0.35/0.15/0.15` 组合的复合 loss，整图 MAE 只保留为兼容诊断。
+- 原因：真实 run 已证明模型初稿可能比确定性 fallback 更差；旧模板只消费首个 rim/shadow 且忽略部分 feature 参数，固定 feature queue 与从旧 baseline 生成整批候选也会造成优化无效或已接受变化丢失。单一整图 MAE 还会被大面积背景稀释，无法可靠表达主体、高光和阴影质量。
+- 影响：本决策取代 D053 的固定 1 轮 Refine 产品限制和 D054 的 24/40 固定搜索预算，但保留 6 次整 run 模型硬上限、typed patch、真实 Renderer 接受权与无 CMA-ES 边界。API、账本、metrics、manifest、trace 和前端摘要同步公开质量档位、预算用量、复合 loss 与局部指标。该改动提升最小骨架的可解释优化能力，但未运行新的真实模型质量 benchmark，F09 继续 `active`、灰度 no-go。
+
+## D056 - packed 三槽模板以 WebGL1 最低 uniform 容量为硬边界
+
+- 日期：2026-07-22
+- 决策：将 D055 的 8 个独立 uniform feature slot 收紧为 3 个 packed slot，并把不兼容 Scene/模板分别升级为 `png_to_shader_min_scene_v2` 和 `png_to_shader_min_template_v2`。Scene 基础参数固定使用 4 个 `vec4`，每个 feature 使用 meta/shape/color 3 个 `vec4`；加上 Renderer 管理且静态使用的 `u_resolution` 后，最坏为 14 个 active fragment uniform vectors，低于 WebGL1 最低保证的 16，物化时再次 fail-closed 校验。prepared Renderer 的 typed uniform 白名单扩展到 `vec4`。`rim`、`polar_arc`、`edge_line` 分别使用主体边界带、上半椭圆弧和有限长度线带，禁止不同 schema 类型退化为同一公式。
+- 原因：原 8 槽布局超过 WebGL1 最低 fragment uniform 容量，桌面 Chromium 通过不能证明约束设备可链接；同时旧 body feature 分支把三个类型合并为同一权重，模型声明的弧和线没有像素语义。沿用 v1 版本还会让不兼容 uniform/像素公式共享 provenance。
+- 影响：本决策取代 D055 的 8-slot 部分和 D052 中 prepared 白名单仅含 float/vec2/vec3 的限制；三槽上限进入 `MinScene` 严格 Schema，超过上限的模型输出安全回退。metrics、manifest、账本和 API 摘要显式记录 v2 模板版本。真实 Chromium 集成测试必须同时证明 legacy/prepared 像素一致和三种 body feature 像素互异；F09 状态与发布 no-go 不变。

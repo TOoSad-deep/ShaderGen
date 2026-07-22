@@ -9,6 +9,7 @@ from shaderforge.optimization import (
     ScoredScene,
     accept_strict_mae_improvement,
     propose_min_scene_candidates,
+    rebase_candidate_proposal,
 )
 from shaderforge.scene import (
     Canvas,
@@ -177,6 +178,24 @@ def test_input_is_unchanged_and_mae_acceptance_is_strict_and_serial() -> None:
     assert unchanged is current
     assert improved.scene == proposals[1].scene
     assert rejected is improved
+
+
+def test_candidate_plan_rebases_onto_latest_best_for_cumulative_changes() -> None:
+    scene = _scene()
+    proposals = propose_min_scene_candidates(
+        scene,
+        stage="base",
+        remaining_draw_budget=2,
+        batch_size=2,
+    )
+    first = rebase_candidate_proposal(scene, proposals[0])
+    assert first is not None
+    second = rebase_candidate_proposal(first.scene, proposals[1])
+    assert second is not None
+
+    assert second.scene.object.primitive.center[0] == pytest.approx(0.07)
+    assert second.scene.object.primitive.center[1] == pytest.approx(-0.13)
+    assert scene.object.primitive.center == (0.1, -0.1)
 
 
 def test_feature_stage_rejects_non_whitelisted_selection() -> None:

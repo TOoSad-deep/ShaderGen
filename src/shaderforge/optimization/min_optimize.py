@@ -11,9 +11,9 @@ from shaderforge.scene import MinScene
 OptimizationStage = Literal["base", "feature"]
 
 # 单次调用始终是小预算邻域搜索；较大的 run 预算由调用方分批调度。
-MAX_CANDIDATES_PER_BATCH = 24
-_DEFAULT_BASE_BATCH_SIZE = 16
-_DEFAULT_FEATURE_BATCH_SIZE = 12
+MAX_CANDIDATES_PER_BATCH = 32
+_DEFAULT_BASE_BATCH_SIZE = 32
+_DEFAULT_FEATURE_BATCH_SIZE = 16
 
 
 @dataclass(frozen=True)
@@ -326,6 +326,47 @@ def propose_min_scene_candidates(
     return tuple(proposals)
 
 
+def rebase_candidate_proposal(
+    scene: MinScene,
+    proposal: CandidateProposal,
+) -> CandidateProposal | None:
+    """把固定候选计划重放到最新 best，使同批已接受变化可以累积。."""
+    bindings = (
+        _base_bindings(scene)
+        if proposal.stage == "base"
+        else _feature_bindings(scene, proposal.feature_id or "")
+    )
+    binding = next(
+        (
+            item
+            for item in bindings
+            if item.parameter.path == proposal.parameter.path
+        ),
+        None,
+    )
+    if binding is None:
+        raise ValueError(f"候选参数已不属于当前 scene：{proposal.parameter.path}。")
+    source = scene.model_dump(mode="python")
+    before = _read_path(source, binding.segments)
+    sign = -1.0 if proposal.direction == "decrease" else 1.0
+    after = min(
+        binding.parameter.maximum,
+        max(binding.parameter.minimum, before + sign * binding.parameter.step),
+    )
+    after = round(after, 9)
+    if after == before:
+        return None
+    return CandidateProposal(
+        stage=proposal.stage,
+        parameter=binding.parameter,
+        direction=proposal.direction,
+        before=before,
+        after=after,
+        scene=MinScene.model_validate(_replace_path(source, binding.segments, after)),
+        feature_id=proposal.feature_id,
+    )
+
+
 def accept_strict_mae_improvement(
     current: ScoredScene,
     proposal: CandidateProposal,
@@ -351,4 +392,5 @@ __all__ = [
     "TunableParameter",
     "accept_strict_mae_improvement",
     "propose_min_scene_candidates",
+    "rebase_candidate_proposal",
 ]

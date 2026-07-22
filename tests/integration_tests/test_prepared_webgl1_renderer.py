@@ -14,6 +14,7 @@ from PIL import Image, ImageDraw
 from shaderforge.generation import bake_min_uniforms, materialize_min_shader
 from shaderforge.perception import perceive_min_target
 from shaderforge.rendering import PlaywrightWebGL1Renderer, RendererUnavailableError
+from shaderforge.scene import Feature
 
 
 def _pink_orb_png(width: int = 192, height: int = 192) -> bytes:
@@ -48,7 +49,9 @@ async def test_prepared_renderer_matches_legacy_render_and_never_reuses_stale_fr
             capture_png=True,
         )
         changed_values = dict(materialized.uniform_values)
-        changed_values["u_bg"] = (0.0, 0.0, 0.0)
+        bg_scale = materialized.uniform_values["u_scene_bg_scale"]
+        assert isinstance(bg_scale, tuple)
+        changed_values["u_scene_bg_scale"] = (0.0, 0.0, 0.0, bg_scale[3])
         changed = await prepared.render_uniforms(changed_values, capture_png=False)
         restored = await prepared.render_uniforms(
             materialized.uniform_values,
@@ -102,7 +105,10 @@ async def test_prepared_renderer_100_draw_performance_probe() -> None:
         started = time.perf_counter()
         for index in range(100):
             values = dict(materialized.uniform_values)
-            values["u_bg"] = (1.0, 1.0, 1.0) if index % 2 == 0 else (0.0, 0.0, 0.0)
+            bg_scale = materialized.uniform_values["u_scene_bg_scale"]
+            assert isinstance(bg_scale, tuple)
+            color = (1.0, 1.0, 1.0) if index % 2 == 0 else (0.0, 0.0, 0.0)
+            values["u_scene_bg_scale"] = (*color, bg_scale[3])
             result = await prepared.render_uniforms(values, capture_png=False)
             assert result.success and result.rgb_bytes is not None
             assert result.image_bytes is None
@@ -119,3 +125,46 @@ async def test_prepared_renderer_100_draw_performance_probe() -> None:
     assert frame_hashes[0] != frame_hashes[1]
     assert result.rgb_bytes is not None
     assert len(result.rgb_bytes) == 192 * 192 * 3
+
+
+@pytest.mark.anyio
+async def test_rim_polar_arc_and_edge_line_render_distinct_pixels() -> None:
+    base = perceive_min_target(_pink_orb_png()).fallback_scene
+    common = {
+        "center": (0.0, 0.0),
+        "axes": (0.65, 0.35),
+        "color": (1.0, 1.0, 1.0),
+        "intensity": 1.0,
+    }
+    scenes = [
+        base.model_copy(
+            update={
+                "object": base.object.model_copy(
+                    update={
+                        "features": (
+                            Feature(id=kind, type=kind, **common),
+                        )
+                    }
+                )
+            }
+        )
+        for kind in ("rim", "polar_arc", "edge_line")
+    ]
+    materialized = [materialize_min_shader(scene) for scene in scenes]
+
+    async with PlaywrightWebGL1Renderer() as renderer:
+        prepared = await renderer.prepare(
+            materialized[0].webgl1_source,
+            192,
+            192,
+            materialized[0].uniform_schema,
+        )
+        results = [
+            await prepared.render_uniforms(item.uniform_values, capture_png=False)
+            for item in materialized
+        ]
+
+    pixels = [result.rgb_bytes for result in results]
+    assert all(result.success for result in results)
+    assert all(value is not None for value in pixels)
+    assert len(set(pixels)) == 3

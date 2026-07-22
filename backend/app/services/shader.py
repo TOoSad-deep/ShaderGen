@@ -92,6 +92,7 @@ async def generate_scene_shader_from_image(
     *,
     project_id: str,
     run_id: str,
+    quality_preset: str,
     instruction: str,
     service: png_to_shader_min.PngToShaderMinService,
 ) -> png_to_shader_min.PngToShaderMinResult:
@@ -101,6 +102,7 @@ async def generate_scene_shader_from_image(
         content_type,
         project_id=project_id,
         run_id=run_id,
+        quality_preset=quality_preset,
         instruction=instruction,
         service=service,
     )

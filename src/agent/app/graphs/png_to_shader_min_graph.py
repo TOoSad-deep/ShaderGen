@@ -48,9 +48,11 @@ PNG_TO_SHADER_MIN_RECURSION_LIMIT = 64
 #                                                               v
 #                                                          finalize -> END
 #
-# Model Author 只通过 Builder 注入的 LLMGateway 调用；current_best 只在真实渲染且
-# MAE 改善后更新，失败/非法 patch 候选不能覆盖它。Renderer 正常由 finalize 关闭，
-# Graph 外异常由 Agent Service finally 使用同一 registry 幂等兜底。
+# Model Author 只通过 Builder 注入的 LLMGateway 调用；Initial 的模型 scene 与感知
+# fallback 在预算允许时都先真实渲染并择优，current_best 只在前景/高光/阴影复合
+# loss 改善后更新；全局 MAE 保留为诊断，失败/非法 patch 候选不能覆盖 best。
+# Renderer 正常由 finalize 关闭，Graph 外异常由 Agent Service finally 使用同一
+# registry 幂等兜底。
 def build_png_to_shader_min_graph(
     *,
     artifact_store: LocalArtifactStore | None = None,

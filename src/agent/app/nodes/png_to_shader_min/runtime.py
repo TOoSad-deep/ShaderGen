@@ -34,12 +34,15 @@ from agent.app.parsers.png_to_shader_min import (
     parse_min_author_patch,
     parse_min_scene,
 )
-from shaderforge.evaluation import rgb_mae
+from shaderforge.evaluation import evaluate_min_scene
 from shaderforge.generation import (
     bake_min_uniforms,
     materialize_min_shader,
 )
-from shaderforge.optimization import propose_min_scene_candidates
+from shaderforge.optimization import (
+    propose_min_scene_candidates,
+    rebase_candidate_proposal,
+)
 from shaderforge.public import MinScene, perceive_min_target
 from shaderforge.rendering import (
     PREPARED_RENDERER_PATH,
@@ -187,6 +190,11 @@ def _encode_rgb_png(rgb_bytes: bytes, width: int, height: int) -> bytes:
     return buffer.getvalue()
 
 
+def _best_loss(candidate: dict[str, Any]) -> float:
+    """兼容旧测试状态：缺少复合损失时退回全局 MAE。."""
+    return float(candidate.get("loss", candidate["mae"]))
+
+
 async def _evaluate_scene(
     state: dict[str, Any],
     scene: MinScene,
@@ -219,9 +227,13 @@ async def _evaluate_scene(
             "materialized": materialized,
             "error": result.draw_error or "render_failed",
         }
-    mae = rgb_mae(
+    rendered = _raw_rgb_array(
+        result.rgb_bytes, scene.canvas.width, scene.canvas.height
+    )
+    metric = evaluate_min_scene(
         state["target_rgb"],
-        _raw_rgb_array(result.rgb_bytes, scene.canvas.width, scene.canvas.height),
+        rendered,
+        state.get("metric_background", scene.canvas.background),
     )
     return {
         "success": True,
@@ -230,7 +242,9 @@ async def _evaluate_scene(
         "materialized": materialized,
         "image": result.image_bytes,
         "rgb": result.rgb_bytes,
-        "mae": mae,
+        "mae": metric.global_mae,
+        "loss": metric.total_loss,
+        "metrics": metric.to_dict(),
     }
 
 
@@ -250,6 +264,7 @@ def make_min_nodes(
         return {
             "phase": "initialize",
             "status": "running",
+            "quality_preset": str(state.get("quality_preset", "balanced")),
             "render_count": int(state.get("render_count", 0)),
             "render_budget": int(state.get("render_budget", 8)),
             "llm_call_count": min(
@@ -260,7 +275,10 @@ def make_min_nodes(
             "refine_count": 0,
             "refine_budget": int(state.get("refine_budget", 0)),
             "target_mae": float(state.get("target_mae", 0.08)),
-            "feature_queue": ("rim", "shadow"),
+            "target_loss": float(
+                state.get("target_loss", state.get("target_mae", 0.08))
+            ),
+            "feature_queue": (),
             "trace": _trace(
                 state, "initialize_run", f"输入已登记：{reference.sha256[:12]}"
             ),
@@ -268,11 +286,14 @@ def make_min_nodes(
 
     async def perceive_target(state: dict[str, Any]) -> dict[str, Any]:
         perception = perceive_min_target(state["image"])
+        fallback_scene = perception.fallback_scene.model_dump(mode="json")
         return {
             "phase": "perception",
             "perception": perception.summary,
             "target_rgb": perception.target_rgb,
-            "scene": perception.fallback_scene.model_dump(mode="json"),
+            "metric_background": perception.fallback_scene.canvas.background,
+            "fallback_scene": fallback_scene,
+            "scene": fallback_scene,
             "trace": _trace(
                 state,
                 "perceive_target",
@@ -281,7 +302,7 @@ def make_min_nodes(
         }
 
     async def author_initial(state: dict[str, Any]) -> dict[str, Any]:
-        fallback = MinScene.model_validate(state["scene"])
+        fallback = MinScene.model_validate(state.get("fallback_scene", state["scene"]))
         remaining = remaining_llm_calls(state)
         if remaining <= 0:
             return {
@@ -370,41 +391,110 @@ def make_min_nodes(
     async def render_and_evaluate(state: dict[str, Any]) -> dict[str, Any]:
         scene = MinScene.model_validate(state["scene"])
         outcome = await _evaluate_scene(state, scene, registry, capture_png=True)
-        if not outcome["success"]:
+        evaluated: list[tuple[str, MinScene, dict[str, Any]]] = [
+            ("working_scene", scene, outcome)
+        ]
+        previous = state.get("current_best")
+        fallback_value = state.get("fallback_scene")
+        if (
+            not isinstance(previous, dict)
+            and isinstance(fallback_value, dict)
+            and fallback_value != scene.model_dump(mode="json")
+            and int(outcome["render_count"]) < int(state.get("render_budget", 0))
+        ):
+            fallback = MinScene.model_validate(fallback_value)
+            fallback_outcome = await _evaluate_scene(
+                {**state, "render_count": outcome["render_count"]},
+                fallback,
+                registry,
+                capture_png=True,
+            )
+            evaluated.append(("perception_fallback", fallback, fallback_outcome))
+        successful = [item for item in evaluated if item[2]["success"]]
+        if not successful:
+            last_outcome = evaluated[-1][2]
             return {
                 "phase": "render",
-                "error": str(outcome["error"]),
-                "render_count": outcome["render_count"],
+                "error": str(last_outcome["error"]),
+                "render_count": last_outcome["render_count"],
                 "trace": _trace(
-                    state, "render_and_evaluate", str(outcome["error"]), status="failed"
+                    state,
+                    "render_and_evaluate",
+                    str(last_outcome["error"]),
+                    status="failed",
                 ),
             }
+        selected_source, selected_scene, selected_outcome = min(
+            successful,
+            key=lambda item: float(item[2]["loss"]),
+        )
         candidate = {
-            "scene": scene.model_dump(mode="json"),
-            "mae": outcome["mae"],
-            "glsl": outcome["glsl"],
-            "render": outcome["image"],
+            "scene": selected_scene.model_dump(mode="json"),
+            "mae": selected_outcome["mae"],
+            "loss": selected_outcome["loss"],
+            "metrics": selected_outcome["metrics"],
+            "glsl": selected_outcome["glsl"],
+            "render": selected_outcome["image"],
         }
-        previous = state.get("current_best")
-        accepted = not isinstance(previous, dict) or float(candidate["mae"]) < float(
-            previous["mae"]
+        accepted = not isinstance(previous, dict) or _best_loss(candidate) < _best_loss(
+            previous
         )
         best = candidate if accepted else previous
         assert isinstance(best, dict)
+        candidate_mae = next(
+            (
+                float(item[2]["mae"])
+                for item in evaluated
+                if item[0] == "working_scene" and item[2]["success"]
+            ),
+            None,
+        )
+        fallback_mae = next(
+            (
+                float(item[2]["mae"])
+                for item in evaluated
+                if item[0] == "perception_fallback" and item[2]["success"]
+            ),
+            None,
+        )
         return {
             "phase": "render",
-            "render_count": outcome["render_count"],
+            "render_count": evaluated[-1][2]["render_count"],
             "scene": best["scene"],
             "current_glsl": best["glsl"],
             "current_render": best["render"],
-            "current_mae": outcome["mae"],
+            "current_mae": selected_outcome["mae"],
             "current_best_mae": best["mae"],
+            "current_best_loss": _best_loss(best),
             "current_best": best,
+            "feature_queue": tuple(
+                feature.id
+                for feature in MinScene.model_validate(best["scene"]).object.features
+            ),
             "error": None,
             "trace": _trace(
                 state,
                 "render_and_evaluate",
-                f"{'accepted' if accepted else 'rejected'}，候选 MAE={outcome['mae']:.6f}，best MAE={best['mae']:.6f}",
+                f"{'accepted' if accepted else 'rejected'}，候选 loss={selected_outcome['loss']:.6f}，best loss={_best_loss(best):.6f}",
+                selected_source=selected_source,
+                working_scene_mae=candidate_mae,
+                fallback_mae=fallback_mae,
+                working_scene_loss=next(
+                    (
+                        float(item[2]["loss"])
+                        for item in evaluated
+                        if item[0] == "working_scene" and item[2]["success"]
+                    ),
+                    None,
+                ),
+                fallback_loss=next(
+                    (
+                        float(item[2]["loss"])
+                        for item in evaluated
+                        if item[0] == "perception_fallback" and item[2]["success"]
+                    ),
+                    None,
+                ),
             ),
         }
 
@@ -417,42 +507,50 @@ def make_min_nodes(
             baseline_scene,
             stage="base",
             remaining_draw_budget=max(0, int(state["render_budget"]) - render_count),
-            batch_size=24,
+            batch_size=32,
         )
         accepted_parameter: str | None = None
         for proposal in proposals:
+            rebased = rebase_candidate_proposal(
+                MinScene.model_validate(best["scene"]), proposal
+            )
+            if rebased is None:
+                continue
             outcome = await _evaluate_scene(
                 {**state, "render_count": render_count},
-                proposal.scene,
+                rebased.scene,
                 registry,
                 capture_png=False,
             )
             render_count = outcome["render_count"]
-            if outcome["success"] and float(outcome["mae"]) < float(best["mae"]):
+            if outcome["success"] and float(outcome["loss"]) < _best_loss(best):
                 best = {
-                    "scene": proposal.scene.model_dump(mode="json"),
+                    "scene": rebased.scene.model_dump(mode="json"),
                     "mae": outcome["mae"],
+                    "loss": outcome["loss"],
+                    "metrics": outcome["metrics"],
                     "glsl": outcome["glsl"],
                     "render": _encode_rgb_png(
                         outcome["rgb"],
-                        proposal.scene.canvas.width,
-                        proposal.scene.canvas.height,
+                        rebased.scene.canvas.width,
+                        rebased.scene.canvas.height,
                     ),
                 }
-                accepted_parameter = proposal.parameter.path
-        improved = float(best["mae"]) < float(baseline["mae"])
+                accepted_parameter = rebased.parameter.path
+        improved = _best_loss(best) < _best_loss(baseline)
         return {
             "phase": "base",
             "scene": best["scene"],
             "current_best": best,
             "current_best_mae": best["mae"],
+            "current_best_loss": _best_loss(best),
             "current_glsl": best["glsl"],
             "current_render": best["render"],
             "render_count": render_count,
             "trace": _trace(
                 state,
                 "optimize_base",
-                f"{'accepted' if improved else 'rolled_back'}，MAE={best['mae']:.6f}",
+                f"{'accepted' if improved else 'rolled_back'}，loss={_best_loss(best):.6f}",
                 candidates_evaluated=render_count - int(state["render_count"]),
                 accepted_parameter=accepted_parameter,
             ),
@@ -460,7 +558,7 @@ def make_min_nodes(
 
     async def optimize_feature(state: dict[str, Any]) -> dict[str, Any]:
         queue = list(state.get("feature_queue", ()))
-        feature_type = queue.pop(0) if queue else "none"
+        feature_id = queue.pop(0) if queue else "none"
         baseline = dict(state["current_best"])
         best = baseline
         render_count = int(state["render_count"])
@@ -469,7 +567,7 @@ def make_min_nodes(
             (
                 item
                 for item in baseline_scene.object.features
-                if item.id == feature_type or item.type == feature_type
+                if item.id == feature_id
             ),
             None,
         )
@@ -481,38 +579,46 @@ def make_min_nodes(
                 remaining_draw_budget=max(
                     0, int(state["render_budget"]) - render_count
                 ),
-                batch_size=4,
+                batch_size=16,
             )
             if feature is not None
             else ()
         )
         accepted_parameter: str | None = None
         for proposal in proposals:
+            rebased = rebase_candidate_proposal(
+                MinScene.model_validate(best["scene"]), proposal
+            )
+            if rebased is None:
+                continue
             outcome = await _evaluate_scene(
                 {**state, "render_count": render_count},
-                proposal.scene,
+                rebased.scene,
                 registry,
                 capture_png=False,
             )
             render_count = outcome["render_count"]
-            if outcome["success"] and float(outcome["mae"]) < float(best["mae"]):
+            if outcome["success"] and float(outcome["loss"]) < _best_loss(best):
                 best = {
-                    "scene": proposal.scene.model_dump(mode="json"),
+                    "scene": rebased.scene.model_dump(mode="json"),
                     "mae": outcome["mae"],
+                    "loss": outcome["loss"],
+                    "metrics": outcome["metrics"],
                     "glsl": outcome["glsl"],
                     "render": _encode_rgb_png(
                         outcome["rgb"],
-                        proposal.scene.canvas.width,
-                        proposal.scene.canvas.height,
+                        rebased.scene.canvas.width,
+                        rebased.scene.canvas.height,
                     ),
                 }
-                accepted_parameter = proposal.parameter.path
-        improved = float(best["mae"]) < float(baseline["mae"])
+                accepted_parameter = rebased.parameter.path
+        improved = _best_loss(best) < _best_loss(baseline)
         return {
             "phase": "feature",
             "scene": best["scene"],
             "current_best": best,
             "current_best_mae": best["mae"],
+            "current_best_loss": _best_loss(best),
             "current_glsl": best["glsl"],
             "current_render": best["render"],
             "render_count": render_count,
@@ -520,7 +626,9 @@ def make_min_nodes(
             "trace": _trace(
                 state,
                 "optimize_feature",
-                f"{feature_type} {'accepted' if improved else 'rolled_back'}，MAE={best['mae']:.6f}",
+                f"{feature_id} {'accepted' if improved else 'rolled_back'}，loss={_best_loss(best):.6f}",
+                feature_id=feature_id,
+                feature_type=feature.type if feature is not None else None,
                 candidates_evaluated=render_count - int(state["render_count"]),
                 accepted_parameter=accepted_parameter,
             ),
@@ -558,6 +666,8 @@ def make_min_nodes(
         content = [
             text_part("current_best_scene", best_scene),
             text_part("current_best_mae", best.get("mae")),
+            text_part("current_best_loss", _best_loss(best)),
+            text_part("current_best_metrics", best.get("metrics", {})),
             text_part("user_instruction", state.get("instruction", "")),
             text_part("expected_json_schema", schema),
             *labeled_image_parts(
@@ -649,23 +759,37 @@ def make_min_nodes(
         run.write_bytes("final/render.png", best["render"], content_type="image/png")
         renderer_metrics = registry.metrics(project_id, run_id)
         target_mae = float(state.get("target_mae", 0.08))
-        target_reached = float(best["mae"]) <= target_mae
+        target_loss = float(state.get("target_loss", target_mae))
+        best_loss = _best_loss(best)
+        target_reached = best_loss <= target_loss
+        score_metrics = dict(best.get("metrics", {}))
         metrics = {
-            "metric_version": "rgb_mae_v1",
+            **score_metrics,
+            "metric_version": str(
+                score_metrics.get("metric_version", "min_scene_composite_v2")
+            ),
+            "template_version": materialized.template_version,
             "mae": float(best["mae"]),
+            "objective_loss": best_loss,
+            "quality_preset": str(state.get("quality_preset", "balanced")),
             "render_count": int(state.get("render_count", 0)),
+            "render_budget": int(state.get("render_budget", 0)),
             "llm_call_count": int(state.get("llm_call_count", 0)),
+            "llm_budget": int(state.get("llm_budget", 0)),
+            "refine_budget": int(state.get("refine_budget", 0)),
             **renderer_metrics,
             "target_mae": target_mae,
+            "target_loss": target_loss,
             "target_reached": target_reached,
         }
         run.write_json("final/metrics.json", metrics)
         trace = _trace(
             state,
             "finalize",
-            f"已固化 final，MAE={best['mae']:.6f}",
+            f"已固化 final，loss={best_loss:.6f}，MAE={best['mae']:.6f}",
             renderer_path=renderer_metrics["renderer_path"],
             target_mae=target_mae,
+            target_loss=target_loss,
             target_reached=target_reached,
             prepare_duration_ms=renderer_metrics["prepare_duration_ms"],
             uniform_render_count=renderer_metrics["uniform_render_count"],
@@ -677,6 +801,7 @@ def make_min_nodes(
             "run_id": run_id,
             "status": "completed",
             "stop_reason": state.get("stop_reason", "bounded_mvp_complete"),
+            "template_version": materialized.template_version,
             "scene": best["scene"],
             "metrics": metrics,
             "trace": trace,
@@ -696,11 +821,19 @@ def make_min_nodes(
                 "render_height": scene.canvas.height,
                 "status": "completed",
                 "stop_reason": str(state.get("stop_reason", "bounded_mvp_complete")),
+                "template_version": materialized.template_version,
+                "quality_preset": str(state.get("quality_preset", "balanced")),
                 "current_best_mae": float(best["mae"]),
+                "current_best_loss": best_loss,
+                "metric_breakdown": score_metrics,
                 "render_count": int(state.get("render_count", 0)),
+                "render_budget": int(state.get("render_budget", 0)),
                 "llm_call_count": int(state.get("llm_call_count", 0)),
+                "llm_budget": int(state.get("llm_budget", 0)),
+                "refine_budget": int(state.get("refine_budget", 0)),
                 "renderer_path": renderer_metrics["renderer_path"],
                 "target_mae": target_mae,
+                "target_loss": target_loss,
                 "target_reached": target_reached,
                 "prepare_duration_ms": renderer_metrics["prepare_duration_ms"],
                 "uniform_render_count": renderer_metrics["uniform_render_count"],
@@ -713,8 +846,8 @@ def make_min_nodes(
     def decide_after_render(state: dict[str, Any]) -> dict[str, Any]:
         if state.get("error"):
             action, reason = "finalize", "render_failed"
-        elif float(state["current_best_mae"]) <= float(state["target_mae"]):
-            action, reason = "finalize", "target_mae_reached"
+        elif float(state["current_best_loss"]) <= float(state["target_loss"]):
+            action, reason = "finalize", "target_loss_reached"
         elif int(state["render_count"]) >= int(state["render_budget"]):
             action, reason = "finalize", "render_budget_exhausted"
         else:
@@ -722,8 +855,8 @@ def make_min_nodes(
         return {"next_action": action, "stop_reason": reason}
 
     def _after_optimization(state: dict[str, Any]) -> dict[str, Any]:
-        if float(state["current_best_mae"]) <= float(state["target_mae"]):
-            return {"next_action": "finalize", "stop_reason": "target_mae_reached"}
+        if float(state["current_best_loss"]) <= float(state["target_loss"]):
+            return {"next_action": "finalize", "stop_reason": "target_loss_reached"}
         if int(state["render_count"]) >= int(state["render_budget"]):
             return {"next_action": "finalize", "stop_reason": "render_budget_exhausted"}
         if state.get("feature_queue"):

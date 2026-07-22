@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Color = tuple[float, float, float]
 Point = tuple[float, float]
+MAX_MIN_FEATURES = 3
 
 
 class _StrictModel(BaseModel):
@@ -56,7 +57,7 @@ class SceneObject(_StrictModel):
 
     primitive: Primitive
     color_field: ColorField
-    features: tuple[Feature, ...] = ()
+    features: tuple[Feature, ...] = Field(default=(), max_length=MAX_MIN_FEATURES)
 
     @model_validator(mode="after")
     def ensure_unique_feature_ids(self) -> SceneObject:
@@ -70,8 +71,8 @@ class SceneObject(_StrictModel):
 class MinScene(_StrictModel):
     """scene_mvp 唯一可编辑 Shader 表示。."""
 
-    schema_version: Literal["png_to_shader_min_scene_v1"] = (
-        "png_to_shader_min_scene_v1"
+    schema_version: Literal["png_to_shader_min_scene_v2"] = (
+        "png_to_shader_min_scene_v2"
     )
     canvas: Canvas
     object: SceneObject
@@ -127,6 +128,7 @@ __all__ = [
     "Canvas",
     "ColorField",
     "Feature",
+    "MAX_MIN_FEATURES",
     "MinScene",
     "MinScenePatch",
     "Primitive",

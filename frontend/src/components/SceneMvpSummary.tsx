@@ -52,20 +52,41 @@ export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSumm
       ) : null}
       <div className="score-grid">
         <div className="score-primary">
-          <span>MAE</span>
+          <span>综合损失</span>
+          <strong>{formatMae(minPipeline?.objective_loss)}</strong>
+        </div>
+        <div>
+          <span>目标损失</span>
+          <strong>{formatMae(minPipeline?.target_loss)}</strong>
+        </div>
+        <div>
+          <span>整图 MAE</span>
           <strong>{formatMae(minPipeline?.mae)}</strong>
         </div>
         <div>
-          <span>目标 MAE</span>
-          <strong>{formatMae(minPipeline?.target_mae)}</strong>
+          <span>前景 MAE</span>
+          <strong>{formatMae(minPipeline?.metric_breakdown?.foreground_mae)}</strong>
+        </div>
+        <div>
+          <span>高光 / 阴影 MAE</span>
+          <strong>
+            {formatMae(minPipeline?.metric_breakdown?.highlight_mae)} /{" "}
+            {formatMae(minPipeline?.metric_breakdown?.shadow_mae)}
+          </strong>
         </div>
         <div>
           <span>渲染次数</span>
-          <strong>{formatCount(minPipeline?.render_count)}</strong>
+          <strong>
+            {formatCount(minPipeline?.render_count)} /{" "}
+            {formatCount(minPipeline?.render_budget)}
+          </strong>
         </div>
         <div>
           <span>LLM 调用次数</span>
-          <strong>{formatCount(minPipeline?.llm_call_count)}</strong>
+          <strong>
+            {formatCount(minPipeline?.llm_call_count)} /{" "}
+            {formatCount(minPipeline?.llm_budget)}
+          </strong>
         </div>
         <div>
           <span>停止原因</span>
@@ -89,6 +110,9 @@ export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSumm
       {rendererPath ? (
         <p className="renderer-path" title={rendererPath}>
           prepared 渲染路径：{rendererPath}
+          {minPipeline?.template_version
+            ? ` · 模板：${minPipeline.template_version}`
+            : ""}
         </p>
       ) : null}
       {trace.length ? (

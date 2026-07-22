@@ -8,6 +8,7 @@ from shaderforge.optimization.min_optimize import (
     TunableParameter,
     accept_strict_mae_improvement,
     propose_min_scene_candidates,
+    rebase_candidate_proposal,
 )
 
 __all__ = [
@@ -18,4 +19,5 @@ __all__ = [
     "TunableParameter",
     "accept_strict_mae_improvement",
     "propose_min_scene_candidates",
+    "rebase_candidate_proposal",
 ]

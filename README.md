@@ -104,7 +104,7 @@ SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=false
 
 `DATABASE_URL` 配置后，Backend 使用独立 psycopg pool 运行 LangGraph Checkpointer/Store，并使用现有 asyncpg pool 写 Agent 过程账本。首次部署或 persistence 包升级后先执行 `make setup-memory-postgres`。`make test-memory-postgres` 优先使用 `TEST_DATABASE_URL`；未配置时会基于 `DATABASE_URL` 创建随机临时数据库，测试结束后自动删除。
 
-当前发布状态、阻塞项和 gate 证据只以 `docs/FEATURES.md` 与 `PROGRESS.md` 为准。当前注册默认 `png_to_shader_v1` 和实验性 `png_to_shader_min` 两个 Graph；产品表单默认 `procedural_v1`，也可显式选择 `scene_mvp` 快速贯通路径。旧基础对话 Graph、legacy 生成、独立 `/review` API 及其专属 Node 已删除。V1 服务端完成 WebGL1 render/evaluate/review/refine；`scene_mvp` 当前完成确定性感知、严格 Model Author、scene/template、prepared uniform 热渲染、40 draw 小预算确定性参数搜索、RGB MAE、Artifact 和 trace，尚未引入 CMA-ES/2000 draw。显式选择 `scene_mvp` 会在整 run 最多调用模型 6 次，模型失败会安全回退；密钥仍只配置在根目录 `.env`。两条路径均只公开 final-render、metrics 和 manifest，实验入口不代表已获准灰度。
+当前发布状态、阻塞项和 gate 证据只以 `docs/FEATURES.md` 与 `PROGRESS.md` 为准。当前注册默认 `png_to_shader_v1` 和实验性 `png_to_shader_min` 两个 Graph；产品表单默认 `procedural_v1`，也可显式选择 `scene_mvp` 快速贯通路径。旧基础对话 Graph、legacy 生成、独立 `/review` API 及其专属 Node 已删除。V1 服务端完成 WebGL1 render/evaluate/review/refine；`scene_mvp` 当前完成确定性感知、严格 Model Author、模型/fallback 真实渲染仲裁、多 feature 固定模板、prepared uniform 热渲染、累计式确定性参数搜索、前景/高光/阴影复合评分、Artifact 和 trace，尚未引入 CMA-ES/2000 draw。`fast|balanced|high` 会分别限制 render/LLM/Refine 为 `48/2/1`、`96/4/2`、`160/6/3`，模型失败会安全回退；密钥仍只配置在根目录 `.env`。两条路径均只公开 final-render、metrics 和 manifest，实验入口不代表已获准灰度。
 
 `SHADER_GEN_MODEL_NAME` 支持 `provider:model` 形式，例如 `dashscope:qwen3.7-plus`。`dashscope`、`openai`、`deepseek`、`glm` 表示凭据和 base URL 来源；真实模型名再决定使用 Qwen、GLM、DeepSeek 或 OpenAI 系列配置。
 

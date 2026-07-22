@@ -128,6 +128,7 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
         assert content_type == "image/png"
         assert kwargs["project_id"] == str(project_id)
         assert UUID(kwargs["run_id"])
+        assert kwargs["quality_preset"] == "high"
         assert kwargs["instruction"] == "保留右侧轮廓"
         assert kwargs["service"] is app.state.png_to_shader_min_service
         return SimpleNamespace(
@@ -138,17 +139,32 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
             render_height=48,
             status="succeeded",
             stop_reason="completed",
+            template_version="png_to_shader_min_template_v2",
+            quality_preset="high",
             current_best_mae=0.03125,
+            current_best_loss=0.04,
+            metric_breakdown={
+                "metric_version": "min_scene_composite_v2",
+                "total_loss": 0.04,
+                "global_mae": 0.03125,
+                "foreground_mae": 0.05,
+                "highlight_mae": 0.06,
+                "shadow_mae": 0.04,
+            },
             render_count=3,
+            render_budget=160,
             llm_call_count=1,
+            llm_budget=6,
+            refine_budget=3,
             renderer_path="prepared_uniforms_v1",
             target_mae=0.08,
+            target_loss=0.08,
             target_reached=True,
             prepare_duration_ms=12.5,
             uniform_render_count=3,
             uniform_render_p95_ms=4.25,
             scene={
-                "schema_version": "png_to_shader_min_scene_v1",
+                "schema_version": "png_to_shader_min_scene_v2",
                 "canvas": {
                     "width": 64,
                     "height": 48,
@@ -205,23 +221,37 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
     assert payload["project_id"] == str(project_id)
     assert UUID(payload["run_id"])
     assert payload["generation_mode"] == "scene_mvp"
-    assert payload["quality_preset"] is None
+    assert payload["quality_preset"] == "high"
     assert payload["render_width"] == 64
     assert payload["render_height"] == 48
     assert payload["stop_reason"] == "completed"
     assert payload["score"] is None
     assert payload["min_pipeline"] == {
         "mae": 0.03125,
+        "objective_loss": 0.04,
+        "metric_breakdown": {
+            "metric_version": "min_scene_composite_v2",
+            "total_loss": 0.04,
+            "global_mae": 0.03125,
+            "foreground_mae": 0.05,
+            "highlight_mae": 0.06,
+            "shadow_mae": 0.04,
+        },
+        "template_version": "png_to_shader_min_template_v2",
         "render_count": 3,
+        "render_budget": 160,
         "llm_call_count": 1,
+        "llm_budget": 6,
+        "refine_budget": 3,
         "renderer_path": "prepared_uniforms_v1",
         "target_mae": 0.08,
+        "target_loss": 0.08,
         "target_reached": True,
         "prepare_duration_ms": 12.5,
         "uniform_render_count": 3,
         "uniform_render_p95_ms": 4.25,
         "scene": {
-            "schema_version": "png_to_shader_min_scene_v1",
+            "schema_version": "png_to_shader_min_scene_v2",
             "canvas": {
                 "width": 64,
                 "height": 48,
@@ -249,10 +279,16 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
     assert isinstance(start, dict)
     assert start["project_id"] == project_id
     assert start["generation_mode"] == "scene_mvp"
-    assert start["quality_preset"] is None
+    assert start["quality_preset"] == "high"
     success = calls["success"]
     assert isinstance(success, dict)
     assert success["result_summary"]["current_best_mae"] == 0.03125
+    assert success["result_summary"]["current_best_loss"] == 0.04
+    assert success["result_summary"]["template_version"] == (
+        "png_to_shader_min_template_v2"
+    )
+    assert success["result_summary"]["quality_preset"] == "high"
+    assert success["result_summary"]["render_budget"] == 160
     assert success["result_summary"]["renderer_path"] == "prepared_uniforms_v1"
     assert success["result_summary"]["target_reached"] is True
     assert success["record_default_model_call"] is False

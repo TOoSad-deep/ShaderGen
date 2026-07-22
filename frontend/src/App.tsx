@@ -343,7 +343,7 @@ export function App() {
             <small className="experimental-note">
               {generationMode === "procedural_v1"
                 ? "实验功能：当前质量门禁未通过，可能超时或无法生成可运行 Shader。"
-                : "实验功能：scene_mvp 最小管线，返回 MAE、渲染/LLM 计数、场景 JSON 与阶段追踪。"}
+                : "实验功能：scene_mvp 最小管线，返回复合/局部误差、预算用量、场景 JSON 与阶段追踪。"}
             </small>
           </label>
           <label>

@@ -28,7 +28,7 @@
 - `BackendSettings` 在应用组合根一次性读取根目录 `.env`，并把数据库、日志、CORS 与 Node Lab 开关作为不可变配置注入 lifespan、Router 和 Service；底层数据库或 Node Lab 模块不得再次读取环境变量。`SHADERGEN_CORS_ORIGINS` 使用逗号分隔的显式 Origin，禁止通配符 `*`。
 - `POST /api/shader/generate` 在数据库连接池可用时，会写入 `agent_runs`、`agent_events` 和 `agent_logs`。
 - `procedural_v1` 把模式、质量档位和补充约束写入 run input，把停止原因、current_best、评分和公开 Artifact URL 写入 run result；Graph 返回的每个阶段事件与 `current_best_updated` 逐项写入 `agent_events`。
-- `scene_mvp` 复用同一 project/run 总账，不新增数据库表；显式选择该实验模式后使用 40 draw、最多 6 次模型调用和 1 轮 Refine 的有界预算，模型失败回退确定性感知 scene。run input 记录模式与补充约束，run result 记录状态、停止原因、MAE、draw/LLM 计数、scene、阶段 trace、公开 Artifact URL 及 `prepared_uniforms_v1` 的目标/准备/绘制摘要，阶段 trace 同步写入 `agent_events`。当 `llm_call_count=0` 时不伪造默认 `model_call` 事件。
+- `scene_mvp` 复用同一 project/run 总账，不新增数据库表；`fast|balanced|high` 分别使用 `48/2/1`、`96/4/2`、`160/6/3` 的 render/LLM/Refine 有界预算，模型失败回退确定性感知 scene。run input 记录模式、质量档位与补充约束，run result 记录状态、停止原因、整图 MAE、局部复合 loss、预算/实际用量、scene、阶段 trace、公开 Artifact URL 及 `prepared_uniforms_v1` 的准备/绘制摘要，阶段 trace 同步写入 `agent_events`。当 `llm_call_count=0` 时不伪造默认 `model_call` 事件。
 - 生成终态的模型调用、阶段事件、Agent 日志和 `agent_runs` 更新使用同一个 asyncpg 显式事务；任一步失败必须整体回滚。事务先 `FOR UPDATE` 锁定 run：相同终态重放直接 no-op，不同终态重放显式报冲突，禁止静默覆盖。
 - `agent_events.reasoning_content` 只允许保存节点显式 opt-in 捕获的思维链；V1 默认不捕获、不打印 reasoning，对外 API 永不返回该字段。
 - `agent_runs.project_id` 关联一次运行与 Shader 项目；清除 Memory 不删除过程账本。
@@ -52,9 +52,9 @@
 - `POST /api/shader/generate` route 只把校验后的输入和应用生命周期依赖组装为 command/dependencies，调用 `execute_shader_generation()`，再把稳定用例错误映射为现有 FastAPI error envelope；不得重新承载锁、Agent 分流、账本或响应契约编排。
 - route 不写 Prompt、不直接调用模型、不实现搜索/评分/渲染算法。
 - route 捕获外部调用异常时，应返回明确的 HTTP 错误；日志记录内部细节，响应给用户的信息保持可理解。
-- `POST /api/shader/generate` 接收可选 `project_id`、`generation_mode=procedural_v1|scene_mvp`、`quality_preset=fast|balanced|high` 和最长 2,000 字的 `instruction`；未提供 project 时创建 UUID，未提供 mode 时继续默认 `procedural_v1`。`quality_preset` 只影响 V1，`scene_mvp` 响应中为 `null`。
+- `POST /api/shader/generate` 接收可选 `project_id`、`generation_mode=procedural_v1|scene_mvp`、`quality_preset=fast|balanced|high` 和最长 2,000 字的 `instruction`；未提供 project 时创建 UUID，未提供 mode 时继续默认 `procedural_v1`。质量档位同时影响 V1 和 `scene_mvp`，响应回显实际档位。
 - V1 generate 响应包含 `run_id`、质量档位、视觉修订次数、停止原因、候选 id、`unscored_fallback`、规范化 render 尺寸、评分及 final-render/metrics/manifest URL。WebGL 有效但 evaluator 不可用的降级结果仍返回 GLSL 与 final-render，同时明确 `unscored_fallback=true`、`score=null`、`metrics_url=null`，禁止伪造评分。请求边界错误返回类型化 400/413/422；Renderer、模型供应商或运行账本不可用返回 503；全局或模型阶段超时返回 504；模型响应错误返回 502；内部 pipeline 不变量错误返回 500；编译修复耗尽仍返回类型化 422。任何失败响应都不返回 reasoning 或原始异常。
-- `scene_mvp` 响应复用 `ShaderResponse`，并额外返回 `min_pipeline` 摘要：`mae`、`render_count`、`llm_call_count`、`renderer_path="prepared_uniforms_v1"`、`target_mae`、`target_reached`、`prepare_duration_ms`、`uniform_render_count`、`uniform_render_p95_ms`、最终 scene 与阶段 trace；同一字段集同步进入 metrics/manifest/运行总账。`score`、`review` 和 V1 候选字段保持空值。应用 lifespan 注入并在退出时清理最小流水线 service 状态。
+- `scene_mvp` 响应复用 `ShaderResponse`，并额外返回 `min_pipeline` 摘要：整图 `mae`、`objective_loss`、前景/高光/阴影 `metric_breakdown`、`template_version`、render/LLM 的实际值与预算、Refine 预算、`renderer_path="prepared_uniforms_v1"`、`target_loss`、`target_reached`、prepare/uniform 性能、最终 scene 与阶段 trace；同一字段集同步进入 metrics/manifest/运行总账。`score`、`review` 和 V1 候选字段保持空值。应用 lifespan 注入并在退出时清理最小流水线 service 状态。
 - 成功 run 必须先通过完整 `ShaderResponse` 契约构造，再写入 `status=succeeded`；响应契约失败使用 `shader.generate.response_contract_failed`，并把过程账本标记为 failed，禁止出现“账本成功但 HTTP 500”。
 - `GET /api/shader/runs/{run_id}/artifacts/{artifact_name}` 只接受 `final-render`、`metrics`、`manifest` 三个固定名字，并依次从 V1 与最小流水线 Artifact store 查找；未知名字和不存在的 run 统一返回 404，不接受 filesystem path。
 - `DELETE /api/shader/projects/{project_id}/memory` 删除 checkpoint thread 和 Store Memory，不删除审计账本。

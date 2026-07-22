@@ -83,6 +83,7 @@ class PngToShaderMinState(TypedDict, total=False):
     phase: str
     status: str
     stop_reason: str
+    quality_preset: str
     render_count: int
     render_budget: int
     llm_call_count: int
@@ -90,7 +91,9 @@ class PngToShaderMinState(TypedDict, total=False):
     refine_count: int
     refine_budget: int
     target_mae: float
+    target_loss: float
     current_best_mae: float
+    current_best_loss: float
     feature_queue: tuple[str, ...]
 
     run_id: Annotated[str, UntrackedValue]
@@ -99,6 +102,8 @@ class PngToShaderMinState(TypedDict, total=False):
     instruction: Annotated[str, UntrackedValue]
     perception: Annotated[Any, UntrackedValue]
     target_rgb: Annotated[Any, UntrackedValue]
+    metric_background: Annotated[Any, UntrackedValue]
+    fallback_scene: Annotated[dict[str, Any], UntrackedValue]
     scene: Annotated[dict[str, Any], UntrackedValue]
     materialized: Annotated[Any, UntrackedValue]
     current_glsl: Annotated[str, UntrackedValue]

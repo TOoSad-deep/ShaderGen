@@ -38,7 +38,7 @@ RENDERER_VERSION = "playwright_webgl1_v1"
 PREPARED_RENDERER_PATH = "prepared_uniforms_v1"
 PNG_DATA_URL_PREFIX = "data:image/png;base64,"
 _UNIFORM_NAME_PATTERN = re.compile(r"^u_[A-Za-z0-9_]+$")
-_UNIFORM_TYPES = frozenset({"float", "vec2", "vec3"})
+_UNIFORM_TYPES = frozenset({"float", "vec2", "vec3", "vec4"})
 _RESERVED_UNIFORMS = frozenset({"u_image", "u_resolution", "u_time"})
 
 VERTEX_SHADER = """
@@ -193,7 +193,12 @@ void main() {
     }
 
     if (program && !drawError) {
-      const expectedTypes = {float: gl.FLOAT, vec2: gl.FLOAT_VEC2, vec3: gl.FLOAT_VEC3};
+      const expectedTypes = {
+        float: gl.FLOAT,
+        vec2: gl.FLOAT_VEC2,
+        vec3: gl.FLOAT_VEC3,
+        vec4: gl.FLOAT_VEC4,
+      };
       const activeTypes = {};
       const activeCount = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
       for (let index = 0; index < activeCount; index += 1) {
@@ -265,6 +270,7 @@ void main() {
       if (type === "float") gl.uniform1f(location, value);
       if (type === "vec2") gl.uniform2f(location, value[0], value[1]);
       if (type === "vec3") gl.uniform3f(location, value[0], value[1], value[2]);
+      if (type === "vec4") gl.uniform4f(location, value[0], value[1], value[2], value[3]);
     }
     gl.viewport(0, 0, width, height);
     gl.clearColor(1.0, 1.0, 1.0, 1.0);
@@ -453,7 +459,7 @@ def _decode_png_data_url(value: Any) -> bytes:
         raise RendererUnavailableError("浏览器返回的 PNG base64 无法解码。") from exc
 
 
-UniformType = Literal["float", "vec2", "vec3"]
+UniformType = Literal["float", "vec2", "vec3", "vec4"]
 
 
 def _normalize_uniform_schema(uniform_schema: Mapping[str, Any]) -> dict[str, UniformType]:
@@ -466,7 +472,7 @@ def _normalize_uniform_schema(uniform_schema: Mapping[str, Any]) -> dict[str, Un
             raise ValueError(f"uniform {name} 由 Renderer 保留并自动上传。")
         raw_type = raw_spec if isinstance(raw_spec, str) else getattr(raw_spec, "type", None)
         if raw_type not in _UNIFORM_TYPES:
-            raise ValueError(f"uniform {name} 只支持 float、vec2 或 vec3。")
+            raise ValueError(f"uniform {name} 只支持 float、vec2、vec3 或 vec4。")
         normalized[name] = cast(UniformType, raw_type)
     return normalized
 
@@ -489,7 +495,7 @@ def _validate_uniform_values(
         extra = sorted(set(uniform_values) - set(schema))
         raise ValueError(f"uniform 值集必须与白名单完全一致；missing={missing}，extra={extra}。")
     normalized: dict[str, float | list[float]] = {}
-    lengths = {"vec2": 2, "vec3": 3}
+    lengths = {"vec2": 2, "vec3": 3, "vec4": 4}
     for name, uniform_type in schema.items():
         value = uniform_values[name]
         if uniform_type == "float":

@@ -78,7 +78,12 @@ async def test_prepare_static_rejection_does_not_start_browser() -> None:
 
 def test_prepared_uniform_schema_and_values_are_strict() -> None:
     schema = _normalize_uniform_schema(
-        {"u_gain": "float", "u_offset": "vec2", "u_color": "vec3"}
+        {
+            "u_gain": "float",
+            "u_offset": "vec2",
+            "u_color": "vec3",
+            "u_packed": "vec4",
+        }
     )
 
     assert _validate_uniform_values(
@@ -87,17 +92,23 @@ def test_prepared_uniform_schema_and_values_are_strict() -> None:
             "u_gain": 0.5,
             "u_offset": (0.1, -0.2),
             "u_color": [0.2, 0.4, 0.6],
+            "u_packed": (1.0, 2.0, 3.0, 4.0),
         },
     ) == {
         "u_gain": 0.5,
         "u_offset": [0.1, -0.2],
         "u_color": [0.2, 0.4, 0.6],
+        "u_packed": [1.0, 2.0, 3.0, 4.0],
     }
 
     with pytest.raises(ValueError, match="missing=.*u_color"):
         _validate_uniform_values(
             schema,
-            {"u_gain": 0.5, "u_offset": (0.1, -0.2)},
+            {
+                "u_gain": 0.5,
+                "u_offset": (0.1, -0.2),
+                "u_packed": (1.0, 2.0, 3.0, 4.0),
+            },
         )
     with pytest.raises(ValueError, match="extra=.*u_other"):
         _validate_uniform_values(
@@ -106,6 +117,7 @@ def test_prepared_uniform_schema_and_values_are_strict() -> None:
                 "u_gain": 0.5,
                 "u_offset": (0.1, -0.2),
                 "u_color": (0.2, 0.4, 0.6),
+                "u_packed": (1.0, 2.0, 3.0, 4.0),
                 "u_other": 1.0,
             },
         )
@@ -116,6 +128,7 @@ def test_prepared_uniform_schema_and_values_are_strict() -> None:
                 "u_gain": 0.5,
                 "u_offset": (0.1, -0.2, 0.3),
                 "u_color": (0.2, 0.4, 0.6),
+                "u_packed": (1.0, 2.0, 3.0, 4.0),
             },
         )
     with pytest.raises(ValueError, match="有限数值"):
@@ -125,6 +138,17 @@ def test_prepared_uniform_schema_and_values_are_strict() -> None:
                 "u_gain": True,
                 "u_offset": (0.1, -0.2),
                 "u_color": (0.2, 0.4, 0.6),
+                "u_packed": (1.0, 2.0, 3.0, 4.0),
+            },
+        )
+    with pytest.raises(ValueError, match="长度 4"):
+        _validate_uniform_values(
+            schema,
+            {
+                "u_gain": 0.5,
+                "u_offset": (0.1, -0.2),
+                "u_color": (0.2, 0.4, 0.6),
+                "u_packed": (1.0, 2.0, 3.0),
             },
         )
     with pytest.raises(ValueError, match="保留"):

@@ -46,17 +46,43 @@ class PngToShaderMinResult:
     render_height: int
     status: str
     stop_reason: str
+    template_version: str
+    quality_preset: str
     current_best_mae: float
+    current_best_loss: float
+    metric_breakdown: dict[str, Any]
     render_count: int
+    render_budget: int
     llm_call_count: int
+    llm_budget: int
+    refine_budget: int
     renderer_path: str
     target_mae: float
+    target_loss: float
     target_reached: bool
     prepare_duration_ms: float
     uniform_render_count: int
     uniform_render_p95_ms: float
     scene: dict[str, Any]
     trace: tuple[dict[str, Any], ...]
+
+
+@dataclass(frozen=True)
+class MinQualityBudget:
+    """scene_mvp 各质量档位的硬预算。."""
+
+    render_budget: int
+    llm_budget: int
+    refine_budget: int
+    target_mae: float = 0.08
+    target_loss: float = 0.08
+
+
+MIN_QUALITY_BUDGETS = {
+    "fast": MinQualityBudget(render_budget=48, llm_budget=2, refine_budget=1),
+    "balanced": MinQualityBudget(render_budget=96, llm_budget=4, refine_budget=2),
+    "high": MinQualityBudget(render_budget=160, llm_budget=6, refine_budget=3),
+}
 
 
 _PUBLIC_ARTIFACTS = {
@@ -100,9 +126,16 @@ class PngToShaderMinService:
         *,
         project_id: str,
         run_id: str,
+        quality_preset: str = "balanced",
         instruction: str = "",
     ) -> PngToShaderMinResult:
         """以显式 scene_mvp 的小批 draw 与有界模型预算执行完整链路。."""
+        try:
+            policy = MIN_QUALITY_BUDGETS[quality_preset]
+        except KeyError as exc:
+            raise ValueError(f"不支持的 scene_mvp 质量档位：{quality_preset}") from exc
+        llm_budget = min(self.llm_budget, policy.llm_budget)
+        refine_budget = min(self.refine_budget, policy.refine_budget)
         try:
             state = await self.graph.ainvoke(
                 {
@@ -111,10 +144,12 @@ class PngToShaderMinService:
                     "image": image,
                     "content_type": content_type,
                     "instruction": instruction,
-                    "render_budget": 40,
-                    "llm_budget": self.llm_budget,
-                    "refine_budget": self.refine_budget,
-                    "target_mae": 0.08,
+                    "quality_preset": quality_preset,
+                    "render_budget": policy.render_budget,
+                    "llm_budget": llm_budget,
+                    "refine_budget": refine_budget,
+                    "target_mae": policy.target_mae,
+                    "target_loss": policy.target_loss,
                 },
                 {"recursion_limit": PNG_TO_SHADER_MIN_RECURSION_LIMIT},
             )
@@ -135,11 +170,19 @@ class PngToShaderMinService:
             render_height=int(final["render_height"]),
             status=str(final["status"]),
             stop_reason=str(final["stop_reason"]),
+            template_version=str(final["template_version"]),
+            quality_preset=str(final["quality_preset"]),
             current_best_mae=float(final["current_best_mae"]),
+            current_best_loss=float(final["current_best_loss"]),
+            metric_breakdown=dict(final["metric_breakdown"]),
             render_count=int(final["render_count"]),
+            render_budget=int(final["render_budget"]),
             llm_call_count=int(final["llm_call_count"]),
+            llm_budget=int(final["llm_budget"]),
+            refine_budget=int(final["refine_budget"]),
             renderer_path=str(final["renderer_path"]),
             target_mae=float(final["target_mae"]),
+            target_loss=float(final["target_loss"]),
             target_reached=bool(final["target_reached"]),
             prepare_duration_ms=float(final["prepare_duration_ms"]),
             uniform_render_count=int(final["uniform_render_count"]),
@@ -190,7 +233,7 @@ default_png_to_shader_min_service = PngToShaderMinService(
     png_to_shader_min_artifact_store,
     png_to_shader_min_renderer_registry,
     llm_budget=6,
-    refine_budget=1,
+    refine_budget=3,
 )
 
 
@@ -200,6 +243,7 @@ async def generate_png_to_shader_min(
     *,
     project_id: str,
     run_id: str,
+    quality_preset: str = "balanced",
     instruction: str = "",
     service: PngToShaderMinService = default_png_to_shader_min_service,
 ) -> PngToShaderMinResult:
@@ -209,14 +253,17 @@ async def generate_png_to_shader_min(
         content_type,
         project_id=project_id,
         run_id=run_id,
+        quality_preset=quality_preset,
         instruction=instruction,
     )
 
 
 __all__ = [
+    "MIN_QUALITY_BUDGETS",
     "MinPipelineError",
     "MinPublicArtifact",
     "MinPublicArtifactNotFoundError",
+    "MinQualityBudget",
     "PngToShaderMinResult",
     "PngToShaderMinService",
     "create_png_to_shader_min_service",

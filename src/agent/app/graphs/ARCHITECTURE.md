@@ -158,17 +158,17 @@ flowchart TD
 
 | 决定节点 | 路由函数 | 结果 | 下一节点 | 含义 |
 |---|---|---|---|---|
-| `decide_after_render` | `route_after_render` | `optimize_base` | `optimize_base` | 首帧真实渲染成功、MAE 未达标且仍有 draw 预算 |
+| `decide_after_render` | `route_after_render` | `optimize_base` | `optimize_base` | 首帧真实渲染成功、复合 loss 未达标且仍有 draw 预算 |
 | 同上 | 同上 | `finalize` | `finalize` | 已达标、失败或预算耗尽 |
-| `decide_after_base` | `route_after_base` | `optimize_feature` | `optimize_feature` | 仍有 feature queue |
+| `decide_after_base` | `route_after_base` | `optimize_feature` | `optimize_feature` | 获胜 scene 的真实 feature id queue 仍非空 |
 | 同上 | 同上 | `author_refine` | `author_refine` | 特征耗尽但仍有模型与 Refine 预算 |
 | 同上 | 同上 | `finalize` | `finalize` | 达标或预算结束 |
-| `decide_after_feature` | `route_after_feature` | `optimize_feature` | `optimize_feature` | 消费下一个 feature |
+| `decide_after_feature` | `route_after_feature` | `optimize_feature` | `optimize_feature` | 按稳定 id 消费获胜 scene 的下一个 feature |
 | 同上 | 同上 | `author_refine` | `author_refine` | feature queue 已空且仍可 Refine |
 | 同上 | 同上 | `finalize` | `finalize` | 达标或预算结束 |
 
-- 黄色节点构成最小图的 `current_best` 安全边界。`render_and_evaluate` 产生或验证 Author 候选；基础与特征优化都只在 MAE 严格改善时提交，未接受候选只返回原始 RGB，不编码 PNG；`finalize` 只固化 best scene、自包含 GLSL、PNG、MAE、prepared 性能摘要、manifest 和阶段 trace。
-- `author_initial` 通过注入的 `LLMGateway` 请求完整 MinScene，调用或严格解析失败则使用确定性感知 fallback；`author_refine` 只接受一个 path/operation/value 白名单 patch，并且永远从 `current_best.scene` 派生候选。语义调用与最多一次结构修复共用 run 级 6 次硬上限；显式 `scene_mvp` 产品模式启用该预算并限制 1 轮 Refine。
-- `optimize_base` 与 `optimize_feature` 使用固定顺序、白名单、边界裁剪的小批确定性候选；单批最多 24 个，并按剩余 40 draw run 预算截断，不实现随机搜索或 CMA-ES。
-- Refine patch 只产生待评估工作 scene，不能直接写 `current_best`；随后 `render_and_evaluate` 仅在真实 RGB MAE 严格改善时提交，否则回滚工作 scene，非法输出、调用异常和较差候选均保留原 best。
+- 黄色节点构成最小图的 `current_best` 安全边界。Initial 的模型 scene 与确定性感知 fallback 在预算允许时都由 `render_and_evaluate` 真实渲染，先按 `min_scene_composite_v2` 选择较优起点；基础与特征优化都只在复合 loss 严格改善时提交。该指标组合整图、前景、高光和阴影 MAE，全局 MAE 继续作为诊断，避免大面积背景稀释主体误差。
+- `author_initial` 通过注入的 `LLMGateway` 请求完整 MinScene，调用或严格解析失败则使用确定性感知 fallback；`author_refine` 只接受一个 path/operation/value 白名单 patch，并且永远从 `current_best.scene` 派生候选。语义调用与最多一次结构修复共用 run 级 6 次硬上限；质量档位分别把 render/LLM/Refine 硬预算设为 `fast=48/2/1`、`balanced=96/4/2`、`high=160/6/3`。
+- `optimize_base` 与 `optimize_feature` 使用固定顺序、白名单、边界裁剪的小批确定性候选；模块单批硬上限为 32，Graph 对 base/每个真实 feature 分别请求最多 32/16 个，并按所选档位剩余 draw 预算截断。每个 proposal 会重放到最新 best，使同批接受的参数变化累计生效；不实现随机搜索或 CMA-ES。
+- Refine patch 只产生待评估工作 scene，不能直接写 `current_best`；随后 `render_and_evaluate` 仅在真实复合 loss 严格改善时提交，否则回滚工作 scene，非法输出、调用异常和较差候选均保留原 best。
 - 同一 run 的固定模板通过 `prepared_uniforms_v1` 只编译/链接一次，候选只热更新 typed uniform；最终导出 GLSL 仍烘焙常量，可由旧 `render()` 独立执行。prepared 对象只存在 run registry，`finalize` 与 Service `finally` 共用幂等关闭；CMA-ES 仍未实现。

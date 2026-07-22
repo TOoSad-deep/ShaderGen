@@ -37,10 +37,17 @@ class ShaderMinPipelineSummary(BaseModel):
     """scene_mvp 最小流水线的公开运行摘要."""
 
     mae: float | None = None
+    objective_loss: float | None = None
+    metric_breakdown: dict[str, Any] = Field(default_factory=dict)
+    template_version: str
     render_count: int = 0
+    render_budget: int
     llm_call_count: int = 0
+    llm_budget: int
+    refine_budget: int
     renderer_path: Literal["prepared_uniforms_v1"]
     target_mae: float
+    target_loss: float
     target_reached: bool
     prepare_duration_ms: float
     uniform_render_count: int

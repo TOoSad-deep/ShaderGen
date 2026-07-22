@@ -8,9 +8,10 @@
 - `base` 阶段白名单覆盖主体 `center`、`axes`，背景色，径向渐变的 `inner`、`outer`、`origin`、`scale`。
 - `feature` 阶段使用稳定 `feature_id` 定位 `rim`、`shadow`、`polar_arc`、`edge_line` 等现有特征，白名单覆盖其 `center`、`axes`、`color`、`intensity`；当前 schema 没有独立 `highlight` 类型，高光由 `polar_arc`/`edge_line` 等现有 typed feature 表达。
 - 颜色裁剪到 `[0, 1]`，强度裁剪到 `[0, 2]`，渐变 scale 裁剪到 schema 合法范围，位置与轴长按画布归一化范围裁剪；边界产生的空操作会被跳过。
-- 每次调用同时受调用方 `remaining_draw_budget`、请求批量和模块硬上限 `24` 截断。模块只提议候选，不创建 draw，也不会把一次调用扩大成 2000 draw 搜索。
-- `accept_strict_mae_improvement()` 只接受 MAE 严格下降的候选，调用方可按实际 draw 结果串行维护单调 `current_best`。
-- 当前 `png_to_shader_min` 在 40 draw 整 run 预算内为 base 请求最多 24 个候选，并为每个 feature 请求最多 4 个候选；每次真实 draw、接受参数和候选数量都进入阶段 trace。
+- 每次调用同时受调用方 `remaining_draw_budget`、请求批量和模块硬上限 `32` 截断。模块只提议候选，不创建 draw，也不会把一次调用扩大成 2000 draw 搜索。
+- `accept_strict_mae_improvement()` 保留为全局 MAE 工具；当前最小 Graph 由调用方按 `min_scene_composite_v2` 复合 loss 严格下降串行维护单调 `current_best`。
+- `rebase_candidate_proposal()` 把固定顺序的候选计划逐项重放到最新 best，避免同批候选都从旧 baseline 出发而丢失已经接受的其他参数变化。
+- 当前 `png_to_shader_min` 为 base 请求最多 32 个候选，并为每个真实 feature 请求最多 16 个候选；每次真实 draw、接受参数和候选数量都进入阶段 trace。
 
 ## 边界
 
