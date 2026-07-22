@@ -8,6 +8,7 @@ from shaderforge.generation.measurement_affine import (
 )
 from shaderforge.generation.min_template import (
     MAX_MIN_FEATURES,
+    MIN_TEMPLATE_FRAGMENT_UNIFORM_VECTORS,
     MIN_TEMPLATE_VERSION,
     WEBGL1_MIN_FRAGMENT_UNIFORM_VECTORS,
     MaterializedMinShader,
@@ -18,6 +19,7 @@ from shaderforge.generation.min_template import (
 
 __all__ = [
     "MAX_MIN_FEATURES",
+    "MIN_TEMPLATE_FRAGMENT_UNIFORM_VECTORS",
     "MIN_TEMPLATE_VERSION",
     "MEASUREMENT_AFFINE_SEED_VERSION",
     "MeasurementAffineSeed",

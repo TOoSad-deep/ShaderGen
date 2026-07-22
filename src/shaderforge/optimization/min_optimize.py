@@ -13,7 +13,7 @@ OptimizationStage = Literal["base", "feature"]
 # 单次调用始终是小预算邻域搜索；较大的 run 预算由调用方分批调度。
 MAX_CANDIDATES_PER_BATCH = 32
 _DEFAULT_BASE_BATCH_SIZE = 32
-_DEFAULT_FEATURE_BATCH_SIZE = 16
+_DEFAULT_FEATURE_BATCH_SIZE = 12
 
 
 @dataclass(frozen=True)
@@ -56,6 +56,7 @@ class _ParameterBinding:
     parameter: TunableParameter
     segments: tuple[str | int, ...]
     feature_id: str | None = None
+    linked_segments: tuple[str | int, ...] | None = None
 
 
 def _parameter(
@@ -66,11 +67,13 @@ def _parameter(
     step: float,
     *,
     feature_id: str | None = None,
+    linked_segments: tuple[str | int, ...] | None = None,
 ) -> _ParameterBinding:
     return _ParameterBinding(
         TunableParameter(path, minimum, maximum, step),
         segments,
         feature_id,
+        linked_segments,
     )
 
 
@@ -80,7 +83,7 @@ def _base_bindings(scene: MinScene) -> tuple[_ParameterBinding, ...]:
     extent_y = scene.canvas.height / unit
     primitive = ("object", "primitive")
     field = ("object", "color_field")
-    return (
+    geometry = [
         _parameter(
             "object.primitive.center[0]",
             (*primitive, "center", 0),
@@ -95,29 +98,104 @@ def _base_bindings(scene: MinScene) -> tuple[_ParameterBinding, ...]:
             extent_y,
             0.03,
         ),
-        _parameter(
-            "object.primitive.axes[0]", (*primitive, "axes", 0), 0.02, extent_x, 0.04
-        ),
-        _parameter(
-            "object.primitive.axes[1]", (*primitive, "axes", 1), 0.02, extent_y, 0.04
-        ),
+    ]
+    if scene.object.primitive.type == "circle":
+        geometry.append(
+            _parameter(
+                "object.primitive.axes.radius",
+                (*primitive, "axes", 0),
+                0.02,
+                min(extent_x, extent_y),
+                0.04,
+                linked_segments=(*primitive, "axes", 1),
+            )
+        )
+    else:
+        geometry.extend(
+            (
+                _parameter(
+                    "object.primitive.axes[0]",
+                    (*primitive, "axes", 0),
+                    0.02,
+                    extent_x,
+                    0.04,
+                ),
+                _parameter(
+                    "object.primitive.axes[1]",
+                    (*primitive, "axes", 1),
+                    0.02,
+                    extent_y,
+                    0.04,
+                ),
+            )
+        )
+    common = [
         _parameter("canvas.background[0]", ("canvas", "background", 0), 0.0, 1.0, 0.04),
         _parameter("canvas.background[1]", ("canvas", "background", 1), 0.0, 1.0, 0.04),
         _parameter("canvas.background[2]", ("canvas", "background", 2), 0.0, 1.0, 0.04),
-        _parameter("object.color_field.inner[0]", (*field, "inner", 0), 0.0, 1.0, 0.04),
-        _parameter("object.color_field.inner[1]", (*field, "inner", 1), 0.0, 1.0, 0.04),
-        _parameter("object.color_field.inner[2]", (*field, "inner", 2), 0.0, 1.0, 0.04),
-        _parameter("object.color_field.outer[0]", (*field, "outer", 0), 0.0, 1.0, 0.04),
-        _parameter("object.color_field.outer[1]", (*field, "outer", 1), 0.0, 1.0, 0.04),
-        _parameter("object.color_field.outer[2]", (*field, "outer", 2), 0.0, 1.0, 0.04),
-        _parameter(
-            "object.color_field.origin[0]", (*field, "origin", 0), -2.0, 2.0, 0.05
-        ),
-        _parameter(
-            "object.color_field.origin[1]", (*field, "origin", 1), -2.0, 2.0, 0.05
-        ),
-        _parameter("object.color_field.scale", (*field, "scale"), 0.050001, 4.0, 0.08),
-    )
+    ]
+    color_bindings: list[_ParameterBinding] = []
+    if scene.object.color_field.model == "solid":
+        for channel in range(3):
+            color_bindings.append(
+                _parameter(
+                    f"object.color_field.color[{channel}]",
+                    (*field, "color", channel),
+                    0.0,
+                    1.0,
+                    0.04,
+                )
+            )
+    else:
+        names = (
+            ("inner", "outer")
+            if scene.object.color_field.model == "radial"
+            else ("start", "end")
+        )
+        for name in names:
+            for channel in range(3):
+                color_bindings.append(
+                    _parameter(
+                        f"object.color_field.{name}[{channel}]",
+                        (*field, name, channel),
+                        0.0,
+                        1.0,
+                        0.04,
+                    )
+                )
+        vector_name = (
+            "origin" if scene.object.color_field.model == "radial" else "direction"
+        )
+        for axis in range(2):
+            color_bindings.append(
+                _parameter(
+                    f"object.color_field.{vector_name}[{axis}]",
+                    (*field, vector_name, axis),
+                    -2.0 if vector_name == "origin" else -1.0,
+                    2.0 if vector_name == "origin" else 1.0,
+                    0.05,
+                )
+            )
+        if scene.object.color_field.model == "linear":
+            color_bindings.append(
+                _parameter(
+                    "object.color_field.offset",
+                    (*field, "offset"),
+                    -2.0,
+                    3.0,
+                    0.05,
+                )
+            )
+        color_bindings.append(
+            _parameter(
+                "object.color_field.scale",
+                (*field, "scale"),
+                0.050001,
+                4.0,
+                0.08,
+            )
+        )
+    return tuple((*geometry, *common, *color_bindings))
 
 
 def _feature_bindings(
@@ -237,6 +315,13 @@ def _replace_path(
     return tuple(copied_items)
 
 
+def _replace_binding(value: Any, binding: _ParameterBinding, replacement: float) -> Any:
+    updated = _replace_path(value, binding.segments, replacement)
+    if binding.linked_segments is not None:
+        updated = _replace_path(updated, binding.linked_segments, replacement)
+    return updated
+
+
 def _candidate_limit(
     stage: OptimizationStage,
     remaining_draw_budget: int,
@@ -303,9 +388,13 @@ def propose_min_scene_candidates(
             after = round(after, 9)
             if after == before:
                 continue
-            candidate = MinScene.model_validate(
-                _replace_path(source, binding.segments, after)
-            )
+            try:
+                candidate = MinScene.model_validate(
+                    _replace_binding(source, binding, after)
+                )
+            except ValueError:
+                # 例如 linear direction 的单参数邻居恰好形成零向量；非法候选不出队。
+                continue
             fingerprint = candidate.model_dump_json()
             if fingerprint in seen_scenes:
                 continue
@@ -337,11 +426,7 @@ def rebase_candidate_proposal(
         else _feature_bindings(scene, proposal.feature_id or "")
     )
     binding = next(
-        (
-            item
-            for item in bindings
-            if item.parameter.path == proposal.parameter.path
-        ),
+        (item for item in bindings if item.parameter.path == proposal.parameter.path),
         None,
     )
     if binding is None:
@@ -356,13 +441,19 @@ def rebase_candidate_proposal(
     after = round(after, 9)
     if after == before:
         return None
+    try:
+        candidate_scene = MinScene.model_validate(
+            _replace_binding(source, binding, after)
+        )
+    except ValueError:
+        return None
     return CandidateProposal(
         stage=proposal.stage,
         parameter=binding.parameter,
         direction=proposal.direction,
         before=before,
         after=after,
-        scene=MinScene.model_validate(_replace_path(source, binding.segments, after)),
+        scene=candidate_scene,
         feature_id=proposal.feature_id,
     )
 

@@ -21,6 +21,7 @@ from backend.app.services.agent_process_store import (
     record_shader_generation_success,
     start_shader_generation_run,
 )
+from backend.app.services.run_progress import RunProgressRegistry
 from backend.app.services.shader import (
     MemoryUnavailableError,
     NoValidatedShaderError,
@@ -57,6 +58,7 @@ class ShaderGenerationDependencies:
     procedural_service: Any
     min_service: Any | None
     locks: ProjectLockRegistry
+    progress: RunProgressRegistry | None = None
 
 
 class ShaderGenerationUseCaseError(RuntimeError):
@@ -397,6 +399,27 @@ async def execute_shader_generation(
         pool is not None,
     )
 
+    progress = dependencies.progress if generation_mode == "scene_mvp" else None
+    progress_succeeded = False
+    if progress is not None:
+        try:
+            progress.begin(
+                str(run_id),
+                project_id=str(project_id),
+                generation_mode=generation_mode,
+                quality_preset=quality_preset,
+            )
+        except ValueError as exc:
+            raise _generation_error(
+                status_code=409,
+                message="相同 run_id 的运行正在执行中。",
+                code="run_conflict",
+                run_id=run_id,
+                stage="run_registry",
+                retryable=False,
+                stop_reason="run_conflict",
+            ) from exc
+
     try:
         async with dependencies.locks.hold(str(project_id)):
             if pool is not None:
@@ -428,6 +451,17 @@ async def execute_shader_generation(
             else:
                 if dependencies.min_service is None:
                     raise RuntimeError("scene_mvp service 未就绪。")
+                on_progress = None
+                if progress is not None:
+
+                    def _publish_min_progress(
+                        event: dict[str, Any], render: bytes | None
+                    ) -> None:
+                        if render is not None:
+                            progress.publish_render(str(run_id), render)
+                        progress.publish(str(run_id), event)
+
+                    on_progress = _publish_min_progress
                 result = await generate_scene_shader_from_image(
                     command.image,
                     command.content_type,
@@ -436,9 +470,11 @@ async def execute_shader_generation(
                     quality_preset=quality_preset,
                     instruction=command.instruction,
                     service=dependencies.min_service,
+                    on_progress=on_progress,
                 )
             if result is None:
                 raise RuntimeError(f"{generation_mode} 未返回结果。")
+            progress_succeeded = True
     except ProjectBusyError as exc:
         duration_ms = (time.perf_counter() - command.started_at) * 1000
         logger.warning(
@@ -619,6 +655,13 @@ async def execute_shader_generation(
             retryable=is_timeout,
             stop_reason=stop_reason,
         ) from exc
+    finally:
+        if progress is not None:
+            progress.finish(
+                str(run_id),
+                "succeeded" if progress_succeeded else "failed",
+                str(getattr(result, "stop_reason", "") or "") or None,
+            )
 
     if result is not None and generation_mode == "scene_mvp":
         artifact_base = f"/api/shader/runs/{run_id}/artifacts"

@@ -11,11 +11,13 @@ from PIL import Image, UnidentifiedImageError
 
 from shaderforge.scene import (
     Canvas,
-    ColorField,
     Feature,
+    LinearColorField,
     MinScene,
     Primitive,
+    RadialColorField,
     SceneObject,
+    SolidColorField,
 )
 
 MAX_WORK_SIDE = 256
@@ -35,6 +37,102 @@ class MinPerception:
 def _color(values: np.ndarray) -> tuple[float, float, float]:
     clipped = np.clip(values.astype(float), 0.0, 1.0)
     return tuple(float(round(item, 6)) for item in clipped)  # type: ignore[return-value]
+
+
+def _erode_mask(mask: np.ndarray) -> np.ndarray:
+    """仅用四邻域去掉一像素边缘，避免基础颜色场拟合吞掉 rim。."""
+    eroded = mask.copy()
+    eroded[1:, :] &= mask[:-1, :]
+    eroded[:-1, :] &= mask[1:, :]
+    eroded[:, 1:] &= mask[:, :-1]
+    eroded[:, :-1] &= mask[:, 1:]
+    return eroded if np.count_nonzero(eroded) >= 16 else mask
+
+
+def _fit_endpoints(
+    t: np.ndarray, colors: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """对固定空间坐标 t 拟合两端 RGB，并返回像素 MAE。."""
+    design = np.stack((1.0 - t, t), axis=1)
+    endpoints, *_ = np.linalg.lstsq(design, colors, rcond=None)
+    endpoints = np.clip(endpoints, 0.0, 1.0)
+    predicted = design @ endpoints
+    return endpoints[0], endpoints[1], float(np.mean(np.abs(colors - predicted)))
+
+
+def _fit_color_field(
+    rgb: np.ndarray,
+    mask: np.ndarray,
+    center: tuple[float, float],
+    axes: tuple[float, float],
+) -> tuple[SolidColorField | RadialColorField | LinearColorField, dict[str, float]]:
+    """在主体内部用同一 MAE 比较 solid/radial/linear 三个固定模型。."""
+    interior = _erode_mask(mask)
+    ys, xs = np.nonzero(interior)
+    colors = rgb[ys, xs]
+    height, width = mask.shape
+    unit = float(min(width, height))
+    px = (2.0 * xs.astype(np.float32) + 1.0 - width) / unit
+    py = (height - (2.0 * ys.astype(np.float32) + 1.0)) / unit
+    q = np.stack(((px - center[0]) / axes[0], (py - center[1]) / axes[1]), axis=1)
+
+    mean = np.clip(np.mean(colors, axis=0), 0.0, 1.0)
+    scores = {"solid": float(np.mean(np.abs(colors - mean)))}
+    best_field: SolidColorField | RadialColorField | LinearColorField = SolidColorField(
+        model="solid", color=_color(mean)
+    )
+    best_score = scores["solid"]
+
+    best_radial: RadialColorField | None = None
+    radial_score = float("inf")
+    for origin_x, origin_y in ((0.0, 0.0), (-0.35, 0.5), (0.35, 0.5), (-0.35, -0.5)):
+        distance = np.linalg.norm(q - np.asarray((origin_x, origin_y)), axis=1)
+        for scale in (0.75, 1.0, 1.25, 1.5):
+            inner, outer, score = _fit_endpoints(
+                np.clip(distance / scale, 0.0, 1.0), colors
+            )
+            if score < radial_score:
+                radial_score = score
+                best_radial = RadialColorField(
+                    model="radial",
+                    inner=_color(inner),
+                    outer=_color(outer),
+                    origin=(origin_x, origin_y),
+                    scale=scale,
+                )
+    scores["radial"] = radial_score
+    if best_radial is not None and radial_score + 1.0e-4 < best_score:
+        best_field, best_score = best_radial, radial_score
+
+    best_linear: LinearColorField | None = None
+    linear_score = float("inf")
+    for direction in (
+        (1.0, 0.0),
+        (0.0, 1.0),
+        (0.707107, 0.707107),
+        (0.707107, -0.707107),
+    ):
+        projection = q @ np.asarray(direction, dtype=np.float32)
+        low, high = np.quantile(projection, (0.02, 0.98))
+        scale = max(0.05, float(high - low))
+        offset = float(-low / scale)
+        start, end, score = _fit_endpoints(
+            np.clip(projection / scale + offset, 0.0, 1.0), colors
+        )
+        if score < linear_score:
+            linear_score = score
+            best_linear = LinearColorField(
+                model="linear",
+                start=_color(start),
+                end=_color(end),
+                direction=direction,
+                offset=max(-2.0, min(3.0, offset)),
+                scale=min(4.0, scale),
+            )
+    scores["linear"] = linear_score
+    if best_linear is not None and linear_score + 1.0e-4 < best_score:
+        best_field = best_linear
+    return best_field, {name: round(value, 8) for name, value in scores.items()}
 
 
 def perceive_min_target(image_bytes: bytes) -> MinPerception:
@@ -75,32 +173,30 @@ def perceive_min_target(image_bytes: bytes) -> MinPerception:
         (height - 2.0 * center_px[1]) / min_side,
     )
     axes = ((x1 - x0 + 1) / min_side, (y1 - y0 + 1) / min_side)
-    object_pixels = rgb[mask]
-    inner = _color(np.percentile(object_pixels, 82, axis=0))
-    outer = _color(np.percentile(object_pixels, 28, axis=0))
     primitive_type: Literal["circle", "ellipse"] = (
         "circle" if abs(axes[0] - axes[1]) < 0.12 else "ellipse"
     )
+    if primitive_type == "circle":
+        radius = (axes[0] + axes[1]) / 2.0
+        axes = (radius, radius)
+    color_field, fit_scores = _fit_color_field(rgb, mask, center, axes)
+    object_pixels = rgb[mask]
+    light_color = _color(np.percentile(object_pixels, 82, axis=0))
+    dark_color = _color(np.percentile(object_pixels, 28, axis=0))
 
     scene = MinScene(
         canvas=Canvas(width=width, height=height, background=_color(background)),
         object=SceneObject(
             primitive=Primitive(type=primitive_type, center=center, axes=axes),
-            color_field=ColorField(
-                model="radial",
-                inner=inner,
-                outer=outer,
-                origin=(-0.35, 0.5),
-                scale=1.25,
-            ),
+            color_field=color_field,
             features=(
-                Feature(id="rim", type="rim", intensity=0.22, color=inner),
+                Feature(id="rim", type="rim", intensity=0.22, color=light_color),
                 Feature(
                     id="shadow",
                     type="shadow",
                     center=(center[0] + 0.08, center[1] - axes[1] * 0.92),
                     axes=(axes[0] * 0.68, max(0.05, axes[1] * 0.16)),
-                    color=_color(np.asarray(outer) * 0.35),
+                    color=_color(np.asarray(dark_color) * 0.35),
                     intensity=0.32,
                 ),
             ),
@@ -116,5 +212,7 @@ def perceive_min_target(image_bytes: bytes) -> MinPerception:
         "axes": list(axes),
         "primitive": primitive_type,
         "foreground_ratio": round(float(mask.mean()), 6),
+        "color_field_model": color_field.model,
+        "color_field_fit_mae": fit_scores,
     }
     return MinPerception(width, height, rgb, summary, scene)

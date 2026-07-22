@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import type { ShaderResponse } from "../api/shader";
 import type { ClientCompatibilityReport } from "./ShaderPreview";
 
@@ -17,9 +19,11 @@ interface RunProgressProps {
   loading: boolean;
   result: ShaderResponse | null;
   compatibility: ClientCompatibilityReport | null;
+  // scene_mvp 运行时由 App 注入实时面板；缺省回退到静态阶段说明。
+  loadingContent?: ReactNode;
 }
 
-export function RunProgress({ loading, result, compatibility }: RunProgressProps) {
+export function RunProgress({ loading, result, compatibility, loadingContent }: RunProgressProps) {
   if (!loading && !result) return null;
 
   return (
@@ -31,12 +35,14 @@ export function RunProgress({ loading, result, compatibility }: RunProgressProps
         </span>
       </div>
       {loading ? (
-        <ol className="stage-list">
-          <li>量化参考图并读取项目 Context</li>
-          <li>生成候选并进行 WebGL1 编译</li>
-          <li>服务端渲染、评分与 current_best 选择</li>
-          <li>按预算自动 Review 和定向修订</li>
-        </ol>
+        loadingContent ?? (
+          <ol className="stage-list">
+            <li>量化参考图并读取项目 Context</li>
+            <li>生成候选并进行 WebGL1 编译</li>
+            <li>服务端渲染、评分与 current_best 选择</li>
+            <li>按预算自动 Review 和定向修订</li>
+          </ol>
+        )
       ) : result ? (
         <dl className="run-facts">
           <div>

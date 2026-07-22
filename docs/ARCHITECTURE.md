@@ -40,7 +40,7 @@ ShaderGen/ShaderForge 将用户意图、参考图、约束和验收标准转成�
 
 当前仓库注册两个对外 Graph。`png_to_shader_v1_graph.py` 继续承担默认产品闭环：它先运行 `prepare_context` 和参考图确定性测量，再调用 Analyst/Author/Critic，通过静态 Validator、项目自有 Playwright/Chromium WebGL1 Renderer、Basic Oracle 和 LocalArtifactStore 形成有界 initial / compile-repair / visual-refine 循环。首个成功 model best 后还会生成一次与 case/manifest/gate 无关的 measurement affine 独立根候选；它不消耗模型或视觉迭代预算，但必须经过同一事实层与 Selector。生产 Oracle 保留确定性测量 ROI，并追加严格 VisualAnalysis 的语义 ROI。纯 Selector 只在硬约束通过、总损失达到最小改善且保护区不超退化时更新 `current_best`；Critic/refine 与 finalize 均从 best Artifact 重载 GLSL/PNG/metrics，模型或新候选失败不会覆盖已有 best。任务内轻量状态由 LangGraph Checkpointer 保存，图片、完整 GLSL、渲染图、ContextPack、Candidate 大对象和过程摘要使用 `UntrackedValue`；项目长期 Memory 只保存精炼摘要，并且只晋升确定性验证过的 best 策略。
 
-`png_to_shader_min_graph.py` 是显式 `scene_mvp` 实验路径：12 个节点和 3 个纯路由函数依次完成输入登记、确定性感知、严格 scene、固定模板、真实 WebGL1 渲染、局部复合评分、基础/特征参数搜索、final Artifact 与阶段 trace。Graph Builder 通过既有 `LLMGateway` 注入 Model Author：Initial 严格解析完整 MinScene，并与感知 fallback 分别真实渲染后择优；Refine 只接受一个 path/operation/value 白名单 patch，从 `current_best` 派生候选。`png_to_shader_min_scene_v2` 最多接受 3 个 feature；`png_to_shader_min_template_v2` 使用对应 packed slot 并消费每个 feature 的 type/center/axes/color/intensity，其 14 个 active fragment uniform vectors 低于 WebGL1 最低保证的 16，rim、polar_arc 和 edge_line 使用不同几何。feature queue 来自实际获胜 scene 的稳定 id。候选 proposal 重放到最新 best，使已接受参数累计生效；只有 `min_scene_composite_v2` 复合 loss 严格改善才能提交，整图 MAE 保留为诊断。`fast|balanced|high` 分别使用 `48/2/1`、`96/4/2`、`160/6/3` 的 render/LLM/Refine 硬预算；无密钥时模型错误收敛到安全 fallback。同一 run 的固定 WebGL1 模板由 `prepared_uniforms_v1` 只编译/链接一次，候选只热更新 typed uniform。最终 GLSL 仍烘焙常量以保持自包含和旧 `render()` 兼容；CMA-ES/2000 draw 仍是明确缺口。Backend 按 `generation_mode=procedural_v1|scene_mvp` 分流，两个路径共用 project/run 日志和 final-render/metrics/manifest 白名单；Frontend 默认 V1，可显式选择 scene MVP 并展示复合/局部指标、实际预算、scene 和 trace。两个 Graph 的 Service 都共享 run 级 Renderer registry，并在 `finalize` 与外层 `finally` 幂等清理。旧基础对话图、legacy 生成/独立 Review 图及其产品入口已下线。
+`png_to_shader_min_graph.py` 是显式 `scene_mvp` 实验路径：12 个节点和 3 个纯路由函数依次完成输入登记、确定性感知、严格 scene、固定模板、真实 WebGL1 渲染、局部复合评分、基础/特征参数搜索、final Artifact 与阶段 trace。Graph Builder 通过既有 `LLMGateway` 注入 Model Author：Initial 严格解析完整 MinScene，并与感知 fallback 分别真实渲染后择优；Refine 只接受一个 path/operation/value 白名单 patch，从 `current_best` 派生候选。`png_to_shader_min_scene_v3` 严格区分 solid/radial/linear 并最多接受 4 个 feature；`png_to_shader_min_template_v3` 为每槽使用 shape/color-power 2 个 `vec4`，连同 scene/类型元数据和 `u_resolution` 精确占用 15/16 active fragment uniform vectors，并为 rim/shadow/polar_arc/edge_line/gaussian_lobe/glow 提供不同主体内外语义。feature queue 来自实际获胜 scene 的稳定 id。候选 proposal 重放到最新 best，使已接受参数累计生效；只有 `min_scene_composite_v3` 的 global/foreground/background/geometry/edge/worst-tile 复合 loss 严格改善才能提交，整图 MAE 保留为诊断。`fast|balanced|high` 分别使用 `48/2/1`、`96/4/2`、`160/6/3` 的 render/LLM/Refine 硬预算；每 feature 最多 12 个候选，按固定 7 例 v3 fallback 内部 loss 中位数冻结 target loss=`0.04`。无密钥时模型错误收敛到安全 fallback。同一 run 的固定 WebGL1 模板由 `prepared_uniforms_v1` 只编译/链接一次，候选只热更新 typed uniform。最终 GLSL 仍烘焙常量以保持自包含和旧 `render()` 兼容；CMA-ES/2000 draw 仍是明确缺口。Backend 按 `generation_mode=procedural_v1|scene_mvp` 分流，两个路径共用 project/run 日志和 final-render/metrics/manifest 白名单；Frontend 默认 V1，可显式选择 scene MVP 并展示复合/局部指标、实际预算、scene 和 trace。两个 Graph 的 Service 都共享 run 级 Renderer registry，并在 `finalize` 与外层 `finally` 幂等清理。旧基础对话图、legacy 生成/独立 Review 图及其产品入口已下线。
 
 Node Lab 以 transport-free Application API 和通用 `NodeProvider` 协议复用生产 Node。Harness 内核不导入任何具体 Node/Graph，pipeline id、descriptor、执行模式、routing capability 与 Adapter 均由生产侧 `agent.app.nodes.png_to_shader_v1.integrations.node_lab` Provider 提供。当前 PNG-to-Shader Provider 暴露 20 个图节点、机器可读示例和离线成功/拒绝路径；15 个非模型节点通过 Artifact facade 直接调用生产 Node factory/routing，五个模型节点调用生产角色 Node factory 与 bounded wrapper。新 Node 只在所属功能命名空间的 Provider 登记 descriptor/binding，不修改 Node Lab 内核或 Service；Lab 只负责输入投影、私有 Artifact 和副作用门禁，不维护 initialize/materialize/render/select/finalize/promotion 的平行语义。完整 ContextPack、GLSL、图片、模型原始内容只存 Lab Artifact，策略 Memory 只 preview。八个确定性 capability、不可变步骤、真实 node target、scenario/pipeline、Renderer cold/warm、transport AI-off 和独立模型角色 benchmark 共用同一 Harness；失败/中断证据不可覆盖。可选 `/api/lab/v1/*` 仅在显式环境开关下注册，不进入产品 API；HTTP batch 只接受仓库内三个固定 AI-off suite id。`scripts/run_node_lab_cli.py`、Swagger 和 `/lab` 工作台分别提供自动化、HTTP 与人工入口，只消费公共 Application API/descriptor。
 
@@ -149,6 +149,23 @@ frontend 用户输入
 ```
 
 核心原则：`backend` 是入口，不是领域层；`agent` 是智能编排，不是算法仓库；`shaderforge` 是可测试、可复用、可脱离 HTTP 和 UI 运行的领域核心。
+
+### scene_mvp 运行时可观测数据流
+
+```text
+frontend 预生成 run_id 随 POST /api/shader/generate 发送
+  -> backend 在 RunProgressRegistry 登记 run（进程内存，单 worker）
+  -> agent.app.services.png_to_shader_min 以 astream(stream_mode="updates") 逐节点执行
+  -> 每个节点产出白名单进度事件（trace 增量、counters、best、decide 路由）
+     + 当前渲染帧字节，经编排层回调写入 RunProgressRegistry
+  -> frontend 轮询 GET /api/shader/runs/{run_id}/progress?after=<seq>（增量）
+     + 按 render_seq 刷新 GET .../progress/render
+  -> 终态响应与 agent_events 账本路径不变
+```
+
+- 事件是严格白名单：绝不包含上传图片、Scene、GLSL、materialized 或渲染字节；渲染帧只经独立字节通道路由，不进事件 JSON。
+- 节点 `duration_ms` 是相邻节点完成时刻的间隔近似值，不是节点内部计时。
+- `RunProgressRegistry` 是进程内存、单 worker 语义，重启即失并惰性 TTL 清扫；未知 run_id 返回 `pending` 以兼容客户端先于服务端登记的竞态；终态审计仍以 `agent_events` 过程账本为准。
 
 ### 在线可靠性边界
 

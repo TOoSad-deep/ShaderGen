@@ -654,6 +654,258 @@ body {
   color: #b91c1c;
 }
 
+/* scene_mvp 运行实时面板 */
+.min-live-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.min-live-panel h3 {
+  margin: 0 0 8px;
+  color: #334155;
+  font-size: 13px;
+}
+
+.min-live-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.min-live-status {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.min-live-status.is-succeeded {
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.min-live-status.is-failed {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.min-live-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: 16px;
+}
+
+.min-live-timeline ol {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.min-live-timeline li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: #f8fafc;
+  color: #94a3b8;
+  font-size: 13px;
+}
+
+.min-live-timeline li.is-running {
+  background: #eff6ff;
+  color: #1e40af;
+}
+
+.min-live-timeline li.is-completed {
+  color: #0f172a;
+}
+
+.min-live-timeline li.is-failed {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.node-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+.min-live-timeline li.is-completed .node-dot {
+  background: #15803d;
+}
+
+.min-live-timeline li.is-running .node-dot {
+  background: #1d4ed8;
+}
+
+.min-live-timeline li.is-failed .node-dot {
+  background: #b91c1c;
+}
+
+.node-label {
+  font-weight: 600;
+}
+
+.node-meta {
+  margin-left: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.node-meta em {
+  color: #1d4ed8;
+  font-style: normal;
+}
+
+.node-route {
+  width: 100%;
+  padding-left: 16px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.min-live-side {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+
+.budget-meter {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 6px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.budget-meter progress {
+  width: 100%;
+  height: 8px;
+  accent-color: #1d4ed8;
+}
+
+.budget-meter strong {
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.quality-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin-bottom: 4px;
+  color: #64748b;
+  font-size: 13px;
+}
+
+.quality-row strong {
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 15px;
+}
+
+.quality-row strong.is-reached {
+  color: #15803d;
+}
+
+.render-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.render-pair figure {
+  display: grid;
+  gap: 4px;
+  align-content: start;
+  margin: 0;
+}
+
+.render-pair figcaption {
+  color: #64748b;
+  font-size: 12px;
+}
+
+.render-pair img {
+  display: block;
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  background: white;
+}
+
+.render-pair .empty {
+  min-height: 120px;
+  font-size: 12px;
+}
+
+.min-live-feed {
+  display: grid;
+  gap: 6px;
+  max-height: 260px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.min-live-feed li {
+  padding: 8px;
+  border-radius: 4px;
+  background: #f8fafc;
+}
+
+.min-live-feed li.is-failed {
+  background: #fef2f2;
+}
+
+.feed-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  color: #334155;
+  font-size: 12px;
+}
+
+.feed-head strong {
+  color: #0f172a;
+}
+
+.feed-message {
+  margin: 4px 0 0;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.feed-details {
+  display: block;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.feed-empty {
+  color: #64748b;
+  font-size: 12px;
+}
+
 @media (max-width: 780px) {
   .topbar {
     align-items: stretch;
@@ -705,5 +957,9 @@ body {
   .preview canvas,
   .server-render-panel img {
     min-height: 260px;
+  }
+
+  .min-live-grid {
+    grid-template-columns: 1fr;
   }
 }

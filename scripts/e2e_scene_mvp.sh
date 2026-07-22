@@ -18,6 +18,7 @@ cleanup() {
 trap cleanup EXIT
 
 SHADERGEN_FAKE_API_PORT="$API_PORT" SHADERGEN_E2E_ORIGIN="$VITE_ORIGIN" \
+  SHADERGEN_FAKE_SCENE_MVP_DELAY_MS="${SHADERGEN_FAKE_SCENE_MVP_DELAY_MS:-30000}" \
   uv run python "$ROOT/scripts/fake_scene_mvp_api.py" >"$ARTIFACT_DIR/scene-mvp-api.log" 2>&1 &
 API_PID=$!
 VITE_API_BASE_URL="http://127.0.0.1:$API_PORT" \
@@ -68,8 +69,26 @@ UPLOAD_REF="$(find_upload_ref)"
 "$PWCLI" -s="$SESSION" click "$UPLOAD_REF" >/dev/null
 "$PWCLI" -s="$SESSION" upload "$ROOT/output/static_pink_glass_orb.png" >/dev/null
 RUN_REF="$(find_role_ref button '开始运行')"
-"$PWCLI" -s="$SESSION" click "$RUN_REF" >/dev/null
-sleep 2
+# DOM click 立即返回；CLI click 会等 network idle，被长 POST 阻塞到运行结束
+"$PWCLI" -s="$SESSION" eval "el => el.click()" "$RUN_REF" >/dev/null
+sleep 5
+
+# 运行中检查点（单次快照多处断言，避免多次 CLI 调用拖过观测窗口）
+LIVE_SNAPSHOT="$("$PWCLI" -s="$SESSION" snapshot)"
+require_snapshot_text() {
+  local text="$1"
+  printf '%s\n' "$LIVE_SNAPSHOT" | grep -qF "$text"
+}
+require_snapshot_text '节点时间线'
+require_snapshot_text '预算用量'
+require_snapshot_text '事件流'
+require_snapshot_text '初始化运行'
+require_snapshot_text '感知目标图'
+require_snapshot_text '渲染与评估'
+require_snapshot_text '执行中'
+require_snapshot_text '实时渲染'
+"$PWCLI" -s="$SESSION" screenshot --filename "$ARTIFACT_DIR/scene-mvp-live.png" --full-page >/dev/null
+sleep 26
 
 # 第一轮：target_reached=true，质量达标
 require_text 'scene_mvp 最小管线'
@@ -89,8 +108,8 @@ require_text 'prepared 渲染路径：prepared_uniforms_v1'
 INSTRUCTION_REF="$(find_role_ref textbox '补充约束')"
 RUN_REF="$(find_role_ref button '重新运行')"
 "$PWCLI" -s="$SESSION" fill "$INSTRUCTION_REF" '模拟质量未达标' >/dev/null
-"$PWCLI" -s="$SESSION" click "$RUN_REF" >/dev/null
-sleep 2
+"$PWCLI" -s="$SESSION" eval "el => el.click()" "$RUN_REF" >/dev/null
+sleep 31
 
 require_text '流程完成，质量未达标'
 require_text '0.2000'

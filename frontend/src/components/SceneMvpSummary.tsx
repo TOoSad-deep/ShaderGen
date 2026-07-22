@@ -68,10 +68,17 @@ export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSumm
           <strong>{formatMae(minPipeline?.metric_breakdown?.foreground_mae)}</strong>
         </div>
         <div>
-          <span>高光 / 阴影 MAE</span>
+          <span>背景 / 最坏区域 MAE</span>
           <strong>
-            {formatMae(minPipeline?.metric_breakdown?.highlight_mae)} /{" "}
-            {formatMae(minPipeline?.metric_breakdown?.shadow_mae)}
+            {formatMae(minPipeline?.metric_breakdown?.background_mae)} /{" "}
+            {formatMae(minPipeline?.metric_breakdown?.worst_tile_mae)}
+          </strong>
+        </div>
+        <div>
+          <span>几何 / 边缘损失</span>
+          <strong>
+            {formatMae(minPipeline?.metric_breakdown?.geometry_mask_loss)} /{" "}
+            {formatMae(minPipeline?.metric_breakdown?.edge_loss)}
           </strong>
         </div>
         <div>

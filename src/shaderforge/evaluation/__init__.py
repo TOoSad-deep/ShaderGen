@@ -1,6 +1,8 @@
 """Shader 渲染结果的确定性基础评分."""
 
 from shaderforge.evaluation.mae import (
+    MIN_SCENE_METRIC_VERSION,
+    MIN_SCENE_METRIC_WEIGHTS,
     MinSceneMetricBreakdown,
     decode_rgb,
     evaluate_min_scene,
@@ -23,6 +25,8 @@ __all__ = [
     "CurrentBestDecision",
     "ImageSizeMismatchError",
     "MetricWeights",
+    "MIN_SCENE_METRIC_VERSION",
+    "MIN_SCENE_METRIC_WEIGHTS",
     "MinSceneMetricBreakdown",
     "ScoreBreakdownV1",
     "decode_rgb",

@@ -13,11 +13,13 @@ from shaderforge.optimization import (
 )
 from shaderforge.scene import (
     Canvas,
-    ColorField,
     Feature,
+    LinearColorField,
     MinScene,
     Primitive,
+    RadialColorField,
     SceneObject,
+    SolidColorField,
 )
 
 
@@ -26,7 +28,7 @@ def _scene() -> MinScene:
         canvas=Canvas(width=160, height=100, background=(0.2, 0.3, 0.4)),
         object=SceneObject(
             primitive=Primitive(type="ellipse", center=(0.1, -0.1), axes=(0.7, 0.5)),
-            color_field=ColorField(
+            color_field=RadialColorField(
                 model="radial",
                 inner=(0.9, 0.5, 0.4),
                 outer=(0.4, 0.1, 0.2),
@@ -85,6 +87,49 @@ def test_base_candidates_cover_only_the_numeric_field_whitelist() -> None:
     assert all(
         MinScene.model_validate(proposal.scene.model_dump()) for proposal in proposals
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "expected_paths"),
+    (
+        (
+            SolidColorField(model="solid", color=(0.5, 0.4, 0.3)),
+            {f"object.color_field.color[{index}]" for index in range(3)},
+        ),
+        (
+            LinearColorField(
+                model="linear",
+                start=(0.9, 0.2, 0.3),
+                end=(1.0, 0.9, 0.9),
+                direction=(0.0, -1.0),
+                offset=0.5,
+                scale=1.2,
+            ),
+            {
+                *(f"object.color_field.start[{index}]" for index in range(3)),
+                *(f"object.color_field.end[{index}]" for index in range(3)),
+                "object.color_field.direction[0]",
+                "object.color_field.direction[1]",
+                "object.color_field.offset",
+                "object.color_field.scale",
+            },
+        ),
+    ),
+)
+def test_base_candidates_are_color_field_type_aware(field, expected_paths) -> None:
+    scene = _scene().model_copy(
+        update={"object": _scene().object.model_copy(update={"color_field": field})}
+    )
+    proposals = propose_min_scene_candidates(
+        scene, stage="base", remaining_draw_budget=32, batch_size=32
+    )
+    paths = {item.parameter.path for item in proposals}
+
+    assert expected_paths <= paths
+    if field.model == "solid":
+        assert not any("inner" in path or "direction" in path for path in paths)
+    else:
+        assert not any("inner" in path or ".color[" in path for path in paths)
 
 
 @pytest.mark.parametrize("feature_id", ["highlight", "rim", "shadow"])

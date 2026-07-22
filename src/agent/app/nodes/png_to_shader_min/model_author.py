@@ -9,7 +9,7 @@ from typing import TypeVar
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from agent.app.config.model_config import SHADER_GEN_MODEL_NAME
-from agent.app.contracts.llm import LLMCallOptions, LLMGateway
+from agent.app.contracts.llm import LLMCallOptions, LLMGateway, LLMResponse
 from agent.app.messages.png_to_shader_v1 import canonical_json
 from agent.app.parsers.png_to_shader_min import MinAuthorParseError
 from agent.app.prompts.prompt_loader import PromptDefinition, load_prompt_definition
@@ -33,6 +33,23 @@ class MinAuthorCallResult:
     model_ref: str | None
     error_code: str | None
     repaired: bool = False
+    latency_ms: int = 0
+    total_tokens: int | None = None
+
+
+def _response_total_tokens(response: LLMResponse) -> int | None:
+    """从统一 usage 中提取总 token，缺省时返回 None 而不是猜测。."""
+    usage = response.usage
+    if usage is None:
+        return None
+    if usage.total_tokens is not None:
+        return usage.total_tokens
+    known = [
+        item
+        for item in (usage.input_tokens, usage.output_tokens)
+        if isinstance(item, int) and not isinstance(item, bool)
+    ]
+    return sum(known) if known else None
 
 
 def effective_llm_budget(value: object) -> int:
@@ -110,6 +127,8 @@ async def invoke_min_author(
             None,
             f"llm_invocation_failed:{type(exc).__name__}",
         )
+    latency_ms = max(0, int(response.latency_ms))
+    total_tokens = _response_total_tokens(response)
     try:
         value = parser(response.text)
     except MinAuthorParseError as first_error:
@@ -119,6 +138,8 @@ async def invoke_min_author(
                 calls,
                 response.model_ref,
                 first_error.code,
+                latency_ms=latency_ms,
+                total_tokens=total_tokens,
             )
         calls += 1
         repair_options = replace(options, max_output_tokens=max_output_tokens)
@@ -138,7 +159,13 @@ async def invoke_min_author(
                 calls,
                 response.model_ref,
                 f"llm_repair_failed:{type(exc).__name__}",
+                latency_ms=latency_ms,
+                total_tokens=total_tokens,
             )
+        latency_ms += max(0, int(repaired.latency_ms))
+        repaired_tokens = _response_total_tokens(repaired)
+        if repaired_tokens is not None:
+            total_tokens = (total_tokens or 0) + repaired_tokens
         try:
             value = parser(repaired.text)
         except MinAuthorParseError as second_error:
@@ -147,9 +174,26 @@ async def invoke_min_author(
                 calls,
                 repaired.model_ref,
                 second_error.code,
+                latency_ms=latency_ms,
+                total_tokens=total_tokens,
             )
-        return MinAuthorCallResult(value, calls, repaired.model_ref, None, True)
-    return MinAuthorCallResult(value, calls, response.model_ref, None)
+        return MinAuthorCallResult(
+            value,
+            calls,
+            repaired.model_ref,
+            None,
+            True,
+            latency_ms,
+            total_tokens,
+        )
+    return MinAuthorCallResult(
+        value,
+        calls,
+        response.model_ref,
+        None,
+        latency_ms=latency_ms,
+        total_tokens=total_tokens,
+    )
 
 
 __all__ = [

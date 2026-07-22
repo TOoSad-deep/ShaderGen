@@ -167,8 +167,8 @@ flowchart TD
 | 同上 | 同上 | `author_refine` | `author_refine` | feature queue 已空且仍可 Refine |
 | 同上 | 同上 | `finalize` | `finalize` | 达标或预算结束 |
 
-- 黄色节点构成最小图的 `current_best` 安全边界。Initial 的模型 scene 与确定性感知 fallback 在预算允许时都由 `render_and_evaluate` 真实渲染，先按 `min_scene_composite_v2` 选择较优起点；基础与特征优化都只在复合 loss 严格改善时提交。该指标组合整图、前景、高光和阴影 MAE，全局 MAE 继续作为诊断，避免大面积背景稀释主体误差。
-- `author_initial` 通过注入的 `LLMGateway` 请求完整 MinScene，调用或严格解析失败则使用确定性感知 fallback；`author_refine` 只接受一个 path/operation/value 白名单 patch，并且永远从 `current_best.scene` 派生候选。语义调用与最多一次结构修复共用 run 级 6 次硬上限；质量档位分别把 render/LLM/Refine 硬预算设为 `fast=48/2/1`、`balanced=96/4/2`、`high=160/6/3`。
-- `optimize_base` 与 `optimize_feature` 使用固定顺序、白名单、边界裁剪的小批确定性候选；模块单批硬上限为 32，Graph 对 base/每个真实 feature 分别请求最多 32/16 个，并按所选档位剩余 draw 预算截断。每个 proposal 会重放到最新 best，使同批接受的参数变化累计生效；不实现随机搜索或 CMA-ES。
+- 黄色节点构成最小图的 `current_best` 安全边界。Initial 的模型 scene 与确定性感知 fallback 在预算允许时都由 `render_and_evaluate` 真实渲染，先按 `min_scene_composite_v3` 选择较优起点；基础与特征优化都只在复合 loss 严格改善时提交。该指标组合 global/foreground/background/geometry/edge/worst-tile，避免背景面积稀释、几何漂移与局部误差被整图平均掩盖。
+- `author_initial` 通过注入的 `LLMGateway` 请求完整 `png_to_shader_min_scene_v3`，调用或严格解析失败则使用确定性感知 fallback；`author_refine` 只接受一个 add/remove/replace feature 或完整 replace color field 的白名单 patch，并且永远从 `current_best.scene` 派生候选。语义调用与最多一次结构修复共用 run 级 6 次硬上限；质量档位分别把 render/LLM/Refine 硬预算设为 `fast=48/2/1`、`balanced=96/4/2`、`high=160/6/3`。
+- `optimize_base` 与 `optimize_feature` 使用固定顺序、白名单、边界裁剪的小批确定性候选；模块单批硬上限为 32，Graph 对 base/每个真实 feature 分别请求最多 32/12 个，并按所选档位剩余 draw 预算截断。每个 proposal 会重放到最新 best，使同批接受的参数变化累计生效；不实现随机搜索或 CMA-ES。
 - Refine patch 只产生待评估工作 scene，不能直接写 `current_best`；随后 `render_and_evaluate` 仅在真实复合 loss 严格改善时提交，否则回滚工作 scene，非法输出、调用异常和较差候选均保留原 best。
 - 同一 run 的固定模板通过 `prepared_uniforms_v1` 只编译/链接一次，候选只热更新 typed uniform；最终导出 GLSL 仍烘焙常量，可由旧 `render()` 独立执行。prepared 对象只存在 run registry，`finalize` 与 Service `finally` 共用幂等关闭；CMA-ES 仍未实现。

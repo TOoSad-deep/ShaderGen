@@ -9,11 +9,13 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, Response, Upl
 
 from backend.app.schemas.shader import (
     GenerationMode,
+    MinRunProgressResponse,
     QualityPresetName,
     ShaderGenerationErrorDetail,
     ShaderGenerationErrorResponse,
     ShaderResponse,
 )
+from backend.app.services.run_progress import RunProgressRegistry
 from backend.app.services.shader import (
     MemoryUnavailableError,
     ProjectBusyError,
@@ -93,6 +95,15 @@ def _runtime(request: Request) -> tuple[Any, Any | None, ProjectLockRegistry]:
     return service, min_service, locks
 
 
+def _progress_registry(request: Request) -> RunProgressRegistry:
+    """获取应用级运行进度注册表，缺省时惰性创建（与 project_locks 同模式）."""
+    registry = getattr(request.app.state, "run_progress", None)
+    if registry is None:
+        registry = RunProgressRegistry()
+        request.app.state.run_progress = registry
+    return registry
+
+
 @router.post(
     "/generate",
     response_model=ShaderResponse,
@@ -111,6 +122,7 @@ async def generate_shader(
     request: Request,
     file: UploadFile = File(...),
     project_id: UUID | None = Form(None),
+    run_id: UUID | None = Form(None),
     generation_mode: GenerationMode = Form("procedural_v1"),
     quality_preset: QualityPresetName = Form("balanced"),
     instruction: str = Form("", max_length=2_000),
@@ -118,7 +130,8 @@ async def generate_shader(
     """校验 HTTP 输入并调用对应产品模式的生成用例服务."""
     started_at = time.perf_counter()
     resolved_project_id = project_id or uuid4()
-    run_id = uuid4()
+    # 客户端可显式携带 run_id，以便在 POST 阻塞期间轮询运行进度。
+    run_id = run_id or uuid4()
     try:
         image = await read_image_upload(file)
     except HTTPException as exc:
@@ -161,6 +174,7 @@ async def generate_shader(
         procedural_service=service,
         min_service=min_service,
         locks=locks,
+        progress=_progress_registry(request),
     )
     try:
         return await execute_shader_generation(command, dependencies)
@@ -174,6 +188,33 @@ async def generate_shader(
             retryable=exc.retryable,
             stop_reason=exc.stop_reason,
         ) from exc
+
+
+@router.get("/runs/{run_id}/progress", response_model=MinRunProgressResponse)
+async def get_shader_run_progress(
+    request: Request,
+    run_id: UUID,
+    after: int = 0,
+) -> MinRunProgressResponse:
+    """增量读取 scene_mvp 运行进度；未知 run_id 返回 pending 空进度."""
+    data = _progress_registry(request).read(str(run_id), after=max(0, after))
+    return MinRunProgressResponse(run_id=run_id, **data)
+
+
+@router.get("/runs/{run_id}/progress/render")
+async def get_shader_run_progress_render(request: Request, run_id: UUID) -> Response:
+    """返回运行中最新渲染帧；尚无帧时 404."""
+    png, _render_seq = _progress_registry(request).read_render(str(run_id))
+    if png is None:
+        raise HTTPException(status_code=404, detail="当前运行还没有可展示的渲染帧。")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @router.get("/runs/{run_id}/artifacts/{artifact_name}")

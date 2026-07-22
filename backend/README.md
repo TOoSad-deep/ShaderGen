@@ -9,6 +9,7 @@
 - `app/api/routes/`：HTTP 路由。只做请求解析、边界校验、调用 service、返回响应。
 - `app/services/`：后端编排逻辑。可以调用 `src/agent/` 或后续 `src/shaderforge/`，但不要把大型领域算法写在这里。
 - `app/services/shader_generation.py`：`POST /api/shader/generate` 的产品用例服务；统一负责项目锁、`procedural_v1|scene_mvp` 分流、Agent 调用、生成总账、失败分类和公开响应契约。
+- `app/services/run_progress.py`：scene_mvp 运行进度的进程内存注册表；按 run_id 存放白名单节点事件、最新快照和最近一帧渲染 PNG，供前端轮询；单进程单 worker 语义、重启即失、惰性 TTL 清扫，不替代 `agent_events` 终态账本。
 - `app/schemas/`：请求和响应数据结构。API 契约稳定后放这里，避免散落在 route 文件。
 - `app/database/session.py`：数据库连接生命周期、schema 初始化和健康检查查询。
 - `app/database/agent_memory.py`：LangGraph psycopg saver/store 生命周期、健康检查和独立 setup；只返回中立的 Memory 资源，不反向创建 Agent service。
@@ -52,11 +53,14 @@
 - `POST /api/shader/generate` route 只把校验后的输入和应用生命周期依赖组装为 command/dependencies，调用 `execute_shader_generation()`，再把稳定用例错误映射为现有 FastAPI error envelope；不得重新承载锁、Agent 分流、账本或响应契约编排。
 - route 不写 Prompt、不直接调用模型、不实现搜索/评分/渲染算法。
 - route 捕获外部调用异常时，应返回明确的 HTTP 错误；日志记录内部细节，响应给用户的信息保持可理解。
-- `POST /api/shader/generate` 接收可选 `project_id`、`generation_mode=procedural_v1|scene_mvp`、`quality_preset=fast|balanced|high` 和最长 2,000 字的 `instruction`；未提供 project 时创建 UUID，未提供 mode 时继续默认 `procedural_v1`。质量档位同时影响 V1 和 `scene_mvp`，响应回显实际档位。
+- `POST /api/shader/generate` 接收可选 `project_id`、可选 `run_id`、`generation_mode=procedural_v1|scene_mvp`、`quality_preset=fast|balanced|high` 和最长 2,000 字的 `instruction`；未提供 project/run 时创建 UUID，未提供 mode 时继续默认 `procedural_v1`。客户端显式携带 `run_id` 后可在 POST 阻塞期间轮询运行进度；相同 run_id 已有进行中运行时返回 409 `run_conflict`。质量档位同时影响 V1 和 `scene_mvp`，响应回显实际档位。
 - V1 generate 响应包含 `run_id`、质量档位、视觉修订次数、停止原因、候选 id、`unscored_fallback`、规范化 render 尺寸、评分及 final-render/metrics/manifest URL。WebGL 有效但 evaluator 不可用的降级结果仍返回 GLSL 与 final-render，同时明确 `unscored_fallback=true`、`score=null`、`metrics_url=null`，禁止伪造评分。请求边界错误返回类型化 400/413/422；Renderer、模型供应商或运行账本不可用返回 503；全局或模型阶段超时返回 504；模型响应错误返回 502；内部 pipeline 不变量错误返回 500；编译修复耗尽仍返回类型化 422。任何失败响应都不返回 reasoning 或原始异常。
-- `scene_mvp` 响应复用 `ShaderResponse`，并额外返回 `min_pipeline` 摘要：整图 `mae`、`objective_loss`、前景/高光/阴影 `metric_breakdown`、`template_version`、render/LLM 的实际值与预算、Refine 预算、`renderer_path="prepared_uniforms_v1"`、`target_loss`、`target_reached`、prepare/uniform 性能、最终 scene 与阶段 trace；同一字段集同步进入 metrics/manifest/运行总账。`score`、`review` 和 V1 候选字段保持空值。应用 lifespan 注入并在退出时清理最小流水线 service 状态。
+- `scene_mvp` 响应复用 `ShaderResponse`，并额外返回 `min_pipeline` 摘要：整图 `mae`、`objective_loss`、global/foreground/background/geometry/edge/worst-tile `metric_breakdown`、`template_version`、render/LLM 的实际值与预算、Refine 预算、`renderer_path="prepared_uniforms_v1"`、`target_loss`、`target_reached`、prepare/uniform 性能、最终 scene 与阶段 trace；同一字段集同步进入 metrics/manifest/运行总账。`score`、`review` 和 V1 候选字段保持空值。应用 lifespan 注入并在退出时清理最小流水线 service 状态。
 - 成功 run 必须先通过完整 `ShaderResponse` 契约构造，再写入 `status=succeeded`；响应契约失败使用 `shader.generate.response_contract_failed`，并把过程账本标记为 failed，禁止出现“账本成功但 HTTP 500”。
 - `GET /api/shader/runs/{run_id}/artifacts/{artifact_name}` 只接受 `final-render`、`metrics`、`manifest` 三个固定名字，并依次从 V1 与最小流水线 Artifact store 查找；未知名字和不存在的 run 统一返回 404，不接受 filesystem path。
+- `GET /api/shader/runs/{run_id}/progress?after=<seq>` 增量返回 scene_mvp 运行进度：`status=pending|running|succeeded|failed`（未知 id 返回 `pending` 空进度，兼容客户端先于服务端登记的竞态）、`latest_seq`、`seq>after` 的白名单节点事件（node、phase、status、elapsed/duration_ms、trace 增量、counters、best、decide 节点的 next_action/stop_reason）与最新快照（budgets、counters、best、current_node、render_seq）。事件绝不包含上传图片、Scene、GLSL 或渲染字节。
+- `GET /api/shader/runs/{run_id}/progress/render` 返回运行中最新渲染帧 PNG（`no-store`），尚无帧时 404；前端按快照 `render_seq` 变化刷新。
+- 进度事件由 scene_mvp service 把 `ainvoke` 改为 `astream(stream_mode="updates")` 后逐节点产出，经 `execute_shader_generation` 注入的回调写入 `RunProgressRegistry`；节点 `duration_ms` 是相邻节点完成时刻的间隔近似值。`procedural_v1` 不发布进度；终态 `_scene_trace_events` 写 `agent_events` 的路径不变。
 - `DELETE /api/shader/projects/{project_id}/memory` 删除 checkpoint thread 和 Store Memory，不删除审计账本。
 - 单进程内同一 `project_id` 并发请求立即返回 `409 project_busy`。
 - V1 checkpoint 使用稳定的 `png-to-shader-v1:{project_id}` thread 命名；清除项目记忆会清除该 checkpoint、旧 Graph 遗留的裸 `{project_id}` checkpoint 和项目 Store Memory，但不删除过程账本或 Artifact。

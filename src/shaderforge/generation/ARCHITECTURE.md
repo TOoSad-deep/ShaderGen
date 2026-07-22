@@ -8,8 +8,8 @@
 - 使用测量 bbox 构造抗锯齿 ellipse mask，并把 affine 系数固化进 WebGL1 GLSL；
 - 前景低置信、bbox 缺失、component 不足或拟合病态时，回退到 palette solid ellipse；
 - 输出稳定 generator version、输入/测量/GLSL hash、策略、拟合像素数、RMSE、系数和 fallback 原因。
-- `png_to_shader_min_template_v2` 从严格 `png_to_shader_min_scene_v2` 生成固定 WebGL1 uniform 模板、typed schema/值集和自包含导出版。Scene 基础参数压成 4 个 `vec4`，最多 3 个 feature 各压成 3 个 `vec4`；连同 Renderer 管理的 `u_resolution`，静态使用量为 14 个 fragment uniform vectors，不超过 WebGL1 最低保证的 16。固定 slot 使 add/remove 不改变 prepared program 签名，并逐 slot 消费 `type/center/axes/color/intensity`。
-- `rim` 使用主体边界带，`polar_arc` 使用带半平面门控的椭圆弧，`edge_line` 使用有限长度线带；三者在相同数值字段下仍产生不同几何。运行评估使用 prepared uniform，最终 `webgl1.glsl` 仍把 uniform 烘焙为常量。
+- `png_to_shader_min_template_v3` 从严格 `png_to_shader_min_scene_v3` 生成固定 WebGL1 uniform 模板、typed schema/值集和自包含导出版。Scene 基础参数使用 4 个 `vec4`，另有 1 个 scene meta；最多 4 个 feature 各压成 shape/color-power 2 个 `vec4`，类型集中到 1 个 kinds `vec4`。连同 Renderer 管理的 `u_resolution`，静态使用量精确为 15 个 fragment uniform vectors，不超过 WebGL1 最低保证的 16。
+- solid/radial/linear 由 scene meta 进入真实模板分支；circle 在契约层等轴并由模板使用平均半径，ellipse 保留双轴。`rim`、`shadow`、`polar_arc`、`edge_line`、`gaussian_lobe`、`glow` 具有固定且互异的主体内/外像素语义；主体内四槽按 `gaussian_lobe → rim → polar_arc/edge_line` 三个固定 stage 重放，不受 feature 列表顺序改变。固定 slot 使 add/remove/replace 不改变 prepared program 签名；运行评估使用 prepared uniform，最终 `webgl1.glsl` 仍把 uniform 烘焙为常量。
 
 ## 输入契约
 

@@ -14,7 +14,12 @@ from PIL import Image, ImageDraw
 from shaderforge.generation import bake_min_uniforms, materialize_min_shader
 from shaderforge.perception import perceive_min_target
 from shaderforge.rendering import PlaywrightWebGL1Renderer, RendererUnavailableError
-from shaderforge.scene import Feature
+from shaderforge.scene import (
+    Feature,
+    LinearColorField,
+    RadialColorField,
+    SolidColorField,
+)
 
 
 def _pink_orb_png(width: int = 192, height: int = 192) -> bytes:
@@ -32,8 +37,12 @@ def _decoded_rgb(image_bytes: bytes) -> bytes:
 
 
 @pytest.mark.anyio
-async def test_prepared_renderer_matches_legacy_render_and_never_reuses_stale_frame() -> None:
-    materialized = materialize_min_shader(perceive_min_target(_pink_orb_png()).fallback_scene)
+async def test_prepared_renderer_matches_legacy_render_and_never_reuses_stale_frame() -> (
+    None
+):
+    materialized = materialize_min_shader(
+        perceive_min_target(_pink_orb_png()).fallback_scene
+    )
     width = height = 96
 
     async with PlaywrightWebGL1Renderer() as renderer:
@@ -92,7 +101,9 @@ async def test_prepared_renderer_matches_legacy_render_and_never_reuses_stale_fr
 )
 async def test_prepared_renderer_100_draw_performance_probe() -> None:
     """显式探针：192x192 粉球模板 100 draw，不进入普通 make check."""
-    materialized = materialize_min_shader(perceive_min_target(_pink_orb_png()).fallback_scene)
+    materialized = materialize_min_shader(
+        perceive_min_target(_pink_orb_png()).fallback_scene
+    )
     async with PlaywrightWebGL1Renderer() as renderer:
         prepared = await renderer.prepare(
             materialized.webgl1_source,
@@ -140,11 +151,7 @@ async def test_rim_polar_arc_and_edge_line_render_distinct_pixels() -> None:
         base.model_copy(
             update={
                 "object": base.object.model_copy(
-                    update={
-                        "features": (
-                            Feature(id=kind, type=kind, **common),
-                        )
-                    }
+                    update={"features": (Feature(id=kind, type=kind, **common),)}
                 )
             }
         )
@@ -168,3 +175,129 @@ async def test_rim_polar_arc_and_edge_line_render_distinct_pixels() -> None:
     assert all(result.success for result in results)
     assert all(value is not None for value in pixels)
     assert len(set(pixels)) == 3
+
+
+@pytest.mark.anyio
+async def test_solid_radial_and_linear_color_fields_render_distinct_pixels() -> None:
+    base = perceive_min_target(_pink_orb_png()).fallback_scene
+    fields = (
+        SolidColorField(model="solid", color=(0.9, 0.2, 0.4)),
+        RadialColorField(
+            model="radial",
+            inner=(1.0, 0.9, 0.9),
+            outer=(0.7, 0.0, 0.2),
+            origin=(-0.4, 0.4),
+            scale=1.1,
+        ),
+        LinearColorField(
+            model="linear",
+            start=(1.0, 0.1, 0.3),
+            end=(1.0, 0.95, 0.98),
+            direction=(0.0, -1.0),
+            offset=0.5,
+            scale=1.4,
+        ),
+    )
+    materialized = [
+        materialize_min_shader(
+            base.model_copy(
+                update={
+                    "object": base.object.model_copy(
+                        update={"color_field": field, "features": ()}
+                    )
+                }
+            )
+        )
+        for field in fields
+    ]
+    signatures = {
+        (item.webgl1_source, tuple(item.uniform_schema.items()))
+        for item in materialized
+    }
+
+    async with PlaywrightWebGL1Renderer() as renderer:
+        prepared = await renderer.prepare(
+            materialized[0].webgl1_source,
+            192,
+            192,
+            materialized[0].uniform_schema,
+        )
+        results = [
+            await prepared.render_uniforms(item.uniform_values, capture_png=False)
+            for item in materialized
+        ]
+
+    assert len(signatures) == 1
+    assert all(result.success and result.rgb_bytes is not None for result in results)
+    assert len({result.rgb_bytes for result in results}) == 3
+
+
+@pytest.mark.anyio
+async def test_all_six_feature_kinds_and_four_slots_have_live_pixel_semantics() -> None:
+    base = perceive_min_target(_pink_orb_png()).fallback_scene
+    common = {
+        "center": (0.25, 0.1),
+        "axes": (0.45, 0.25),
+        "color": (0.2, 0.9, 1.0),
+        "intensity": 0.9,
+    }
+    kinds = ("rim", "shadow", "polar_arc", "edge_line", "gaussian_lobe", "glow")
+    kind_materialized = [
+        materialize_min_shader(
+            base.model_copy(
+                update={
+                    "object": base.object.model_copy(
+                        update={"features": (Feature(id=kind, type=kind, **common),)}
+                    )
+                }
+            )
+        )
+        for kind in kinds
+    ]
+    four_features = tuple(
+        Feature(
+            id=f"lobe_{index}",
+            type="gaussian_lobe",
+            center=(-0.55 + index * 0.35, 0.25 - index * 0.15),
+            axes=(0.18, 0.16),
+            color=(0.1 + index * 0.2, 0.8, 1.0 - index * 0.2),
+            intensity=0.35 + index * 0.15,
+        )
+        for index in range(4)
+    )
+    slot_scenes = [
+        base.model_copy(
+            update={
+                "object": base.object.model_copy(
+                    update={"features": four_features[:count]}
+                )
+            }
+        )
+        for count in range(5)
+    ]
+    slot_materialized = [materialize_min_shader(scene) for scene in slot_scenes]
+
+    async with PlaywrightWebGL1Renderer() as renderer:
+        prepared = await renderer.prepare(
+            kind_materialized[0].webgl1_source,
+            192,
+            192,
+            kind_materialized[0].uniform_schema,
+        )
+        kind_results = [
+            await prepared.render_uniforms(item.uniform_values, capture_png=False)
+            for item in kind_materialized
+        ]
+        slot_results = [
+            await prepared.render_uniforms(item.uniform_values, capture_png=False)
+            for item in slot_materialized
+        ]
+
+    assert all(
+        result.success and result.rgb_bytes is not None for result in kind_results
+    )
+    assert len({result.rgb_bytes for result in kind_results}) == len(kinds)
+    assert all(
+        result.success and result.rgb_bytes is not None for result in slot_results
+    )
+    assert len({result.rgb_bytes for result in slot_results}) == len(slot_results)

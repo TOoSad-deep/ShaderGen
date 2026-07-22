@@ -13,14 +13,14 @@ F09 已完成 M0 契约层、M1 最小事实层和 M3 所需的确定性候选�
 - `evaluation/`：sRGB RMSE/MAE、边缘、几何、代表像素、ROI 与保护区域 Basic Oracle，以及 CandidateRecord/current_best 纯选择器；
 - `generation/`：从 normalized reference 与 TargetMeasurements 生成无模型、无贴图的 affine/solid ellipse Shader seed 及稳定 provenance；
 - `scene.py`：`scene_mvp` 的严格、版本化单主体 scene 与 typed patch 契约；
-- `perception/`：最小链路的背景、bbox、中心/轴长和代表色确定性测量；
-- `generation/min_template.py`：scene 到固定 WebGL1 模板、typed uniform 和双 GLSL 导出的确定性物化；
-- `evaluation/mae.py`：一次解码后可复用的同尺寸 RGB MAE；
-- `optimization/`：`scene_mvp` 的固定顺序数值邻域提议、字段白名单、边界裁剪、单批 24 候选硬上限和严格 MAE 改善接受器；
+- `perception/`：最小链路的背景、bbox、中心/轴长测量，以及主体内部 solid/radial/linear 同口径颜色场拟合；
+- `generation/min_template.py`：v3 scene 到 15/16 vectors 固定 WebGL1 模板、四个紧凑 feature 槽、typed uniform 和双 GLSL 导出的确定性物化；
+- `evaluation/mae.py`：一次解码后可复用的同尺寸 RGB MAE 与 v3 通用区域复合 objective；
+- `optimization/`：`scene_mvp` 的固定顺序数值邻域提议、typed 颜色场/feature 字段白名单、边界裁剪、单批 32 候选硬上限和严格改善接受器；
 - `store/`：`LocalArtifactStore` 负责 project/run 映射与隔离，run 级 `RunArtifactStore` 负责路径安全、原子写入和完整性读取。
 - `benchmark/`：M5 固定数据集加载、AI-off baseline、版本化质量门禁和匿名 A/B 盲评包。
 
-三个模型角色和自动修订 Graph 已在 `src/agent/app/` 的 M2/M3 实现并调用上述公共能力；M4 已通过 Agent Service、Backend 白名单 API 和前端双端复核接入产品路径。并行的 `scene_mvp` 已贯通确定性感知、严格 Model Author、scene、固定模板、同 run 一次编译的 prepared Renderer、原始 RGB MAE、小预算确定性基础/特征参数搜索、Artifact 和阶段 trace；CMA-ES/2000 draw 尚未实现。M5 已实现 benchmark harness、AI-off smoke、自动门禁与盲评包，最终发布状态仍取决于固定 10 例真实模型结果和独立人工盲评。
+三个模型角色和自动修订 Graph 已在 `src/agent/app/` 的 M2/M3 实现并调用上述公共能力；M4 已通过 Agent Service、Backend 白名单 API 和前端双端复核接入产品路径。并行的 `scene_mvp` 已贯通 v3 Scene/template/metric、确定性感知三类颜色场拟合、严格 Model Author、同 run 一次编译的 prepared Renderer、小预算确定性基础/四槽 feature 参数搜索、Artifact 和阶段 trace；CMA-ES/2000 draw 尚未实现。固定 7 例同口径外部 objective 验证 v3 fallback 相对 v2 为 6/7 改善，但最终发布状态仍取决于真实模型结果和独立人工盲评。
 
 ## 公共入口
 

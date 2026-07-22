@@ -25,9 +25,10 @@
 - API 函数返回明确的 TypeScript 类型。
 - 后端错误要转成用户能理解的错误消息；不要把原始异常对象直接展示给用户。
 - 当前 `src/api/shader.ts` 封装 V1 GLSL 生成、Artifact URL 解析和项目记忆清理。Generate 始终显式发送 `generation_mode`（`procedural_v1` 或 `scene_mvp`，由页面模式选择器决定，默认 `procedural_v1`），并发送质量档位、补充约束和 `project_id`；前端不再调用独立 Review 接口。
+- `scene_mvp` 运行时前端预生成 UUID `run_id` 随 Generate 发送，随后用 `fetchMinRunProgress(runId, after)` 轮询 `GET /runs/{run_id}/progress`（约 1.2s 间隔、`after` 增量、连续 3 次失败停止、POST 结束后最后一次 drain），并用 `resolveMinRunRenderUrl(runId, renderSeq)` 按快照 `render_seq` 变化刷新运行中渲染帧；未知 run 的 `pending` 响应按等待处理，不报错。
 - `src/api/nodeLab.ts` 只封装默认关闭的 `/api/lab/v1/*` 调试边界；`/lab` 工作台读取后端 descriptor 和调用示例，不在前端复制节点输入规则、Fixture 或 benchmark 判定。步骤列表直接消费后端返回的 DAG summary，只在用户选中步骤时读取完整 detail，禁止为每个步骤产生 N+1 请求。
 - `procedural_v1` 读取 run/current_best/score/stop/render 尺寸和白名单 Artifact URL；相对 URL 必须经 `resolveShaderApiUrl()` 解析，不在组件中手拼 API base。
-- `scene_mvp` 在 `ShaderResponse` 上读取可选 `min_pipeline`（整图 `mae`、`objective_loss`、局部 `metric_breakdown`、`template_version`、render/LLM 的实际值与预算、Refine 预算、`scene`、`trace`，以及 `target_loss`、`target_reached` 与 prepared 性能字段）；所有字段按可缺省处理，缺省时展示占位而不是报错。
+- `scene_mvp` 在 `ShaderResponse` 上读取可选 `min_pipeline`（整图 `mae`、`objective_loss`、global/foreground/background/geometry/edge/worst-tile `metric_breakdown`、`template_version`、render/LLM 的实际值与预算、Refine 预算、`scene`、`trace`，以及 `target_loss`、`target_reached` 与 prepared 性能字段）；所有字段按可缺省处理，缺省时展示占位而不是报错。
 - 生成失败兼容旧版 `detail: string` 和类型化 `detail: {message, code, run_id, stage, retryable, stop_reason}`；页面必须展示可用于后端检索的 Run ID 和失败阶段，不把服务端超时误报为客户端输入错误。
 - Generate 使用 `AbortController` 支持“停止等待”和浏览器端兜底超时。它只中止客户端 HTTP 等待，不等价于服务端取消；自动等待上限可通过 `VITE_GENERATION_REQUEST_TIMEOUT_MS`（毫秒，最小 10000）覆盖。
 - Generate 传递 `project_id` 并读取 `memory_status` 和自动闭环 Review；清除项目记忆只通过 `clearProjectMemory()`。
@@ -38,6 +39,7 @@
 - 页面级状态留在页面或 `App`，可复用组件只处理自身交互和渲染。
 - 产品页面提供 `procedural_v1`（默认）和 `scene_mvp` 两种生成模式，由“生成模式”选择器切换；两种模式均为实验功能，页面必须保留清晰的实验性提示。
 - `scene_mvp` 结果由 `SceneMvpSummary` 纯展示组件渲染：复合损失与目标、整图/前景/高光/阴影 MAE、基于 `target_reached` 的“质量达标/流程完成未达标”提示、渲染/LLM 实际值与预算、run_id、停止原因、prepared 性能、场景 JSON 和阶段追踪；最终 Render 与 GLSL 预览继续复用既有面板。
+- `scene_mvp` 运行期间由 `MinRunLivePanel` 替换 `RunProgress` 的静态阶段说明（`loadingContent` 注入）：12 节点时间线（状态/耗时/循环次数、decide 节点的路由去向）、render/LLM/Refine 预算用量、best loss/MAE 对 target 的质量进度、参考图与运行中渲染帧对比、带 trace 详情（loss、candidates、model_calls、author_latency_ms 等）的事件流；节点 id 与中文 label 的映射必须和 `png_to_shader_min_graph.py` 的 12 个节点保持一致，所有进度字段按可缺省处理。
 - WebGL/Canvas 相关逻辑优先封装在专用组件中，不和上传表单、API 调用混写。
 - `ShaderPreview` 只执行 V1 静态预览：按服务端规范化尺寸使用 WebGL1、固定 `u_time=0`、不创建或绑定原图纹理，并从白名单 URL 读取服务端 PNG 计算 RGB RMSE（当前兼容阈值 0.02）。
 - `RunProgress` 只展示阻塞式 V1 请求的执行中阶段说明和完成后的档位、迭代、停止原因、候选与双端复核；它不是实时轮询器。`unscored_fallback=true` 时必须显示“WebGL fallback”，不得标成 `current_best`，且不渲染虚假的评分面板。`ScoreSummary` 只展示 Backend 返回的确定性指标，不在前端重算 Oracle。
@@ -75,4 +77,5 @@
 
 - 涉及后端接口字段时，同时检查 `frontend/src/api/` 类型和 `backend/app/schemas/` 是否一致。
 - 四条 E2E 默认分别使用隔离端口 `15173/18088`、`15176/18091`、`15174/18089` 和 `15175/18090`，不会复用或终止开发中的 `5173/8088` 服务；需要并行运行时可通过脚本内对应 `SHADERGEN_*_E2E_*_PORT` 环境变量覆盖。Node Lab 页面 E2E 只连接假 API，不调用模型、Renderer、Memory 或产品 run；scene_mvp E2E 同样只连接本地假 API，覆盖质量达标与未达标两种响应。
+- scene_mvp E2E 的假 API 把 generate 延迟放宽到 30s（`SHADERGEN_FAKE_SCENE_MVP_DELAY_MS` 可覆盖），进度事件按延迟比例出现，以便在运行窗口内断言实时面板；点击“开始运行”必须用 `eval "el => el.click()"`，因为 CLI `click` 会等待 network idle，被长 POST 阻塞到运行结束。
 - 前端目录、组件约定、API 封装或样式规则变化时，同步更新本文档。

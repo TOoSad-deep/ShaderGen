@@ -22,6 +22,7 @@ from backend.app.database.agent_memory import close_agent_memory, open_agent_mem
 from backend.app.database.session import close_database_pool, open_database_pool
 from backend.app.middleware.request_logging import build_request_logging_middleware
 from backend.app.schemas.shader import ShaderGenerationErrorDetail
+from backend.app.services.run_progress import RunProgressRegistry
 from backend.app.services.shader import (
     ProjectLockRegistry,
     close_png_to_shader_min_service,
@@ -36,6 +37,7 @@ def _clear_runtime_state(app: FastAPI) -> None:
     app.state.png_to_shader_v1_service = None
     app.state.png_to_shader_min_service = None
     app.state.project_locks = None
+    app.state.run_progress = None
     app.state.node_lab_service = None
 
 
@@ -46,6 +48,7 @@ def build_lifespan(settings: BackendSettings) -> Lifespan[FastAPI]:
     async def lifespan_context(app: FastAPI) -> AsyncIterator[None]:
         logger.info("backend.startup")
         app.state.project_locks = ProjectLockRegistry()
+        app.state.run_progress = RunProgressRegistry()
         app.state.png_to_shader_v1_service = None
         app.state.png_to_shader_min_service = None
         app.state.agent_memory = None

@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from shaderforge.public import (
     AddFeaturePatch,
+    ColorField,
     Feature,
     MinScene,
     RemoveFeaturePatch,
-    SwapModelPatch,
+    ReplaceColorFieldPatch,
+    ReplaceFeaturePatch,
     apply_scene_patch,
 )
 
@@ -23,7 +25,7 @@ class _StrictModel(BaseModel):
 
 
 class AddFeatureAuthorPatch(_StrictModel):
-    """向唯一 feature 列表增加一个完整 typed feature。."""
+    """增加完整 feature 的 Author patch。."""
 
     operation: Literal["add"]
     path: Literal["/object/features"]
@@ -31,44 +33,66 @@ class AddFeatureAuthorPatch(_StrictModel):
 
 
 class RemoveFeatureAuthorPatch(_StrictModel):
-    """按稳定 id 删除一个 feature。."""
+    """按稳定 id 删除 feature 的 Author patch。."""
 
     operation: Literal["remove"]
     path: Literal["/object/features"]
     value: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
 
 
-class ReplaceColorModelAuthorPatch(_StrictModel):
-    """只允许切换颜色场的模板白名单模型。."""
+class FeatureReplacement(_StrictModel):
+    feature_id: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
+    feature: Feature
+
+
+class ReplaceFeatureAuthorPatch(_StrictModel):
+    """按稳定 id 替换完整 feature 的 Author patch。."""
 
     operation: Literal["replace"]
-    path: Literal["/object/color_field/model"]
-    value: Literal["solid", "radial"]
+    path: Literal["/object/features"]
+    value: FeatureReplacement
 
 
-MinAuthorPatch = Annotated[
-    AddFeatureAuthorPatch | RemoveFeatureAuthorPatch | ReplaceColorModelAuthorPatch,
-    Field(discriminator="operation"),
-]
+class ReplaceColorFieldAuthorPatch(_StrictModel):
+    """替换完整 typed ColorField 的 Author patch。."""
+
+    operation: Literal["replace"]
+    path: Literal["/object/color_field"]
+    value: ColorField
+
+
+# 两种 replace 共享 operation，依靠严格 path 与 value shape 判别，不能用单字段 discriminator。
+MinAuthorPatch = (
+    AddFeatureAuthorPatch
+    | RemoveFeatureAuthorPatch
+    | ReplaceFeatureAuthorPatch
+    | ReplaceColorFieldAuthorPatch
+)
 
 
 def apply_min_author_patch(scene: MinScene, patch: MinAuthorPatch) -> MinScene:
     """把 Agent 白名单 patch 适配到领域 scene patch，并重新完整校验。."""
     if isinstance(patch, AddFeatureAuthorPatch):
         return apply_scene_patch(
-            scene,
-            AddFeaturePatch(op="add_feature", feature=patch.value),
+            scene, AddFeaturePatch(op="add_feature", feature=patch.value)
         )
     if isinstance(patch, RemoveFeatureAuthorPatch):
-        if patch.value not in {feature.id for feature in scene.object.features}:
-            raise ValueError("remove patch 指向的 feature id 不存在。")
         return apply_scene_patch(
             scene,
             RemoveFeaturePatch(op="remove_feature", feature_id=patch.value),
         )
+    if isinstance(patch, ReplaceFeatureAuthorPatch):
+        return apply_scene_patch(
+            scene,
+            ReplaceFeaturePatch(
+                op="replace_feature",
+                feature_id=patch.value.feature_id,
+                feature=patch.value.feature,
+            ),
+        )
     return apply_scene_patch(
         scene,
-        SwapModelPatch(op="swap_model", model=patch.value),
+        ReplaceColorFieldPatch(op="replace_color_field", color_field=patch.value),
     )
 
 
@@ -76,6 +100,7 @@ __all__ = [
     "AddFeatureAuthorPatch",
     "MinAuthorPatch",
     "RemoveFeatureAuthorPatch",
-    "ReplaceColorModelAuthorPatch",
+    "ReplaceColorFieldAuthorPatch",
+    "ReplaceFeatureAuthorPatch",
     "apply_min_author_patch",
 ]

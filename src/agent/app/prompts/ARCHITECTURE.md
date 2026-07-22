@@ -11,7 +11,7 @@
 - `visual_critic_v1.yaml`：比较参考图和绑定的当前 render，只输出证据、问题域和定向建议。
 - `structured_output_repair_v1.yaml`：只修复已有输出的 JSON/Schema，不新增业务语义。
 - `min_author_initial_v1.yaml`：让 `scene_mvp` Initial Author 返回与参考图画布绑定的完整 MinScene。
-- `min_author_refine_v1.yaml`：让 `scene_mvp` Refine Author 只返回一个 path/operation/value 白名单 patch。
+- `min_author_refine_v1.yaml`：让 `scene_mvp` Refine Author 只返回一个 add/remove/replace feature 或完整 replace color field 的 path/operation/value 白名单 patch。
 - `min_author_repair_v1.yaml`：只修复上述 scene/patch 的 JSON 结构，不增加视觉语义。
 - `prompt_loader.py`：Prompt 加载入口，同时读取 YAML `version` 供模型调用审计。
 

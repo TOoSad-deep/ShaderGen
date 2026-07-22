@@ -3,7 +3,7 @@
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 MemoryStatus = Literal["durable", "ephemeral", "degraded"]
 GenerationMode = Literal["procedural_v1", "scene_mvp"]
@@ -94,3 +94,47 @@ class ShaderGenerationErrorResponse(BaseModel):
     """兼容 FastAPI detail envelope 的生成失败响应."""
 
     detail: ShaderGenerationErrorDetail
+
+
+class MinRunProgressEvent(BaseModel):
+    """scene_mvp 单节点进度事件（白名单，不含图片、Scene 或 GLSL）."""
+
+    model_config = ConfigDict(extra="allow")
+
+    seq: int
+    node: str
+    status: str
+    phase: str | None = None
+    elapsed_ms: float | None = None
+    duration_ms: float | None = None
+    budgets: dict[str, Any] = Field(default_factory=dict)
+    counters: dict[str, int] = Field(default_factory=dict)
+    best: dict[str, float] = Field(default_factory=dict)
+    trace: list[dict[str, Any]] = Field(default_factory=list)
+    next_action: str | None = None
+    stop_reason: str | None = None
+
+
+class MinRunProgressSnapshot(BaseModel):
+    """运行进度快照：最新计数、质量、当前节点与渲染帧序号."""
+
+    model_config = ConfigDict(extra="allow")
+
+    budgets: dict[str, Any] = Field(default_factory=dict)
+    counters: dict[str, int] = Field(default_factory=dict)
+    best: dict[str, float] = Field(default_factory=dict)
+    current_node: str | None = None
+    render_seq: int = 0
+
+
+class MinRunProgressResponse(BaseModel):
+    """scene_mvp 运行进度增量读取响应；未知 run_id 返回 pending."""
+
+    run_id: UUID
+    status: Literal["pending", "running", "succeeded", "failed"]
+    generation_mode: str | None = None
+    quality_preset: str | None = None
+    started_at: str | None = None
+    latest_seq: int = 0
+    events: list[MinRunProgressEvent] = Field(default_factory=list)
+    snapshot: MinRunProgressSnapshot = Field(default_factory=MinRunProgressSnapshot)

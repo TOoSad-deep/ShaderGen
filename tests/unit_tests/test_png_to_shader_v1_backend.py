@@ -139,17 +139,19 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
             render_height=48,
             status="succeeded",
             stop_reason="completed",
-            template_version="png_to_shader_min_template_v2",
+            template_version="png_to_shader_min_template_v3",
             quality_preset="high",
             current_best_mae=0.03125,
             current_best_loss=0.04,
             metric_breakdown={
-                "metric_version": "min_scene_composite_v2",
+                "metric_version": "min_scene_composite_v3",
                 "total_loss": 0.04,
                 "global_mae": 0.03125,
                 "foreground_mae": 0.05,
-                "highlight_mae": 0.06,
-                "shadow_mae": 0.04,
+                "background_mae": 0.03,
+                "geometry_mask_loss": 0.04,
+                "edge_loss": 0.06,
+                "worst_tile_mae": 0.08,
             },
             render_count=3,
             render_budget=160,
@@ -164,7 +166,7 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
             uniform_render_count=3,
             uniform_render_p95_ms=4.25,
             scene={
-                "schema_version": "png_to_shader_min_scene_v2",
+                "schema_version": "png_to_shader_min_scene_v3",
                 "canvas": {
                     "width": 64,
                     "height": 48,
@@ -230,14 +232,16 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
         "mae": 0.03125,
         "objective_loss": 0.04,
         "metric_breakdown": {
-            "metric_version": "min_scene_composite_v2",
+            "metric_version": "min_scene_composite_v3",
             "total_loss": 0.04,
             "global_mae": 0.03125,
             "foreground_mae": 0.05,
-            "highlight_mae": 0.06,
-            "shadow_mae": 0.04,
+            "background_mae": 0.03,
+            "geometry_mask_loss": 0.04,
+            "edge_loss": 0.06,
+            "worst_tile_mae": 0.08,
         },
-        "template_version": "png_to_shader_min_template_v2",
+        "template_version": "png_to_shader_min_template_v3",
         "render_count": 3,
         "render_budget": 160,
         "llm_call_count": 1,
@@ -251,7 +255,7 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
         "uniform_render_count": 3,
         "uniform_render_p95_ms": 4.25,
         "scene": {
-            "schema_version": "png_to_shader_min_scene_v2",
+            "schema_version": "png_to_shader_min_scene_v3",
             "canvas": {
                 "width": 64,
                 "height": 48,
@@ -285,7 +289,7 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
     assert success["result_summary"]["current_best_mae"] == 0.03125
     assert success["result_summary"]["current_best_loss"] == 0.04
     assert success["result_summary"]["template_version"] == (
-        "png_to_shader_min_template_v2"
+        "png_to_shader_min_template_v3"
     )
     assert success["result_summary"]["quality_preset"] == "high"
     assert success["result_summary"]["render_budget"] == 160

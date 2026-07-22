@@ -95,6 +95,7 @@ async def generate_scene_shader_from_image(
     quality_preset: str,
     instruction: str,
     service: png_to_shader_min.PngToShaderMinService,
+    on_progress: png_to_shader_min.MinProgressCallback | None = None,
 ) -> png_to_shader_min.PngToShaderMinResult:
     """通过 Agent 公共接口执行 scene_mvp 最小流水线."""
     return await png_to_shader_min.generate_png_to_shader_min(
@@ -104,6 +105,7 @@ async def generate_scene_shader_from_image(
         run_id=run_id,
         quality_preset=quality_preset,
         instruction=instruction,
+        on_progress=on_progress,
         service=service,
     )
 

@@ -19,8 +19,10 @@ export interface MinPipelineSummary {
     metric_version?: string;
     global_mae?: number;
     foreground_mae?: number;
-    highlight_mae?: number;
-    shadow_mae?: number;
+    background_mae?: number;
+    geometry_mask_loss?: number;
+    edge_loss?: number;
+    worst_tile_mae?: number;
   } | null;
   template_version?: string | null;
   render_count?: number | null;
@@ -126,6 +128,7 @@ async function readError(response: Response, fallback: string): Promise<ShaderAp
 
 export interface GenerateShaderOptions {
   projectId?: string;
+  runId?: string;
   qualityPreset: QualityPreset;
   generationMode?: GenerationMode;
   instruction: string;
@@ -139,6 +142,7 @@ export async function generateShader(
   const formData = new FormData();
   formData.append("file", file);
   if (options.projectId) formData.append("project_id", options.projectId);
+  if (options.runId) formData.append("run_id", options.runId);
   formData.append("generation_mode", options.generationMode ?? "procedural_v1");
   formData.append("quality_preset", options.qualityPreset);
   formData.append("instruction", options.instruction);
@@ -154,6 +158,71 @@ export async function generateShader(
   }
 
   return response.json();
+}
+
+// scene_mvp 运行中单节点进度事件；后端白名单字段，全部按可缺省处理。
+export interface MinRunProgressEvent {
+  seq: number;
+  node: string;
+  status: string;
+  phase?: string | null;
+  elapsed_ms?: number | null;
+  duration_ms?: number | null;
+  budgets?: Record<string, number> | null;
+  counters?: {
+    render_count?: number;
+    llm_call_count?: number;
+    refine_count?: number;
+  } | null;
+  best?: { mae?: number; loss?: number } | null;
+  trace?: Array<Record<string, unknown>> | null;
+  next_action?: string | null;
+  stop_reason?: string | null;
+}
+
+export interface MinRunProgressSnapshot {
+  budgets?: Record<string, number> | null;
+  counters?: {
+    render_count?: number;
+    llm_call_count?: number;
+    refine_count?: number;
+  } | null;
+  best?: { mae?: number; loss?: number } | null;
+  current_node?: string | null;
+  render_seq?: number | null;
+}
+
+export type MinRunProgressStatus = "pending" | "running" | "succeeded" | "failed";
+
+export interface MinRunProgressResponse {
+  run_id: string;
+  status: MinRunProgressStatus;
+  generation_mode?: string | null;
+  quality_preset?: string | null;
+  started_at?: string | null;
+  latest_seq: number;
+  events: MinRunProgressEvent[];
+  snapshot: MinRunProgressSnapshot;
+}
+
+export async function fetchMinRunProgress(
+  runId: string,
+  after = 0,
+): Promise<MinRunProgressResponse> {
+  const query = after > 0 ? `?after=${Math.floor(after)}` : "";
+  const response = await apiFetch(
+    `/api/shader/runs/${encodeURIComponent(runId)}/progress${query}`,
+  );
+  if (!response.ok) {
+    throw await readError(response, "读取运行进度失败。");
+  }
+  return response.json();
+}
+
+export function resolveMinRunRenderUrl(runId: string, renderSeq: number): string {
+  return resolveApiUrl(
+    `/api/shader/runs/${encodeURIComponent(runId)}/progress/render?seq=${renderSeq}`,
+  );
 }
 
 export async function clearProjectMemory(projectId: string): Promise<void> {

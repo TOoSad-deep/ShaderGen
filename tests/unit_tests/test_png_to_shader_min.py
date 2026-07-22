@@ -22,13 +22,22 @@ from agent.app.parsers.png_to_shader_min import (
 from agent.app.services.png_to_shader_min import PngToShaderMinService
 from shaderforge.generation import (
     MAX_MIN_FEATURES,
+    MIN_TEMPLATE_FRAGMENT_UNIFORM_VECTORS,
     MIN_TEMPLATE_VERSION,
     WEBGL1_MIN_FRAGMENT_UNIFORM_VECTORS,
     bake_min_uniforms,
     materialize_min_shader,
 )
 from shaderforge.perception import perceive_min_target
-from shaderforge.scene import AddFeaturePatch, Feature, MinScene, apply_scene_patch
+from shaderforge.scene import (
+    AddFeaturePatch,
+    Feature,
+    MinScene,
+    Primitive,
+    ReplaceFeaturePatch,
+    SolidColorField,
+    apply_scene_patch,
+)
 from shaderforge.store import LocalArtifactStore
 from shaderforge.validation import validate_shader
 
@@ -96,7 +105,7 @@ class _FakePrepared:
 class _UniformValuePrepared(_FakePrepared):
     async def render_uniforms(self, values, *, capture_png=False):
         self.render_durations_ms = (*self.render_durations_ms, 1.25)
-        channel = round(float(values["u_scene_inner_origin_x"][0]) * 255)
+        channel = round(float(values["u_scene_color_a_param_x"][0]) * 255)
         rgb = bytes((channel, channel, channel)) * self.width * self.height
         image_bytes = None
         if capture_png:
@@ -142,36 +151,38 @@ class _BudgetGraph:
     def __init__(self) -> None:
         self.inputs: list[dict[str, object]] = []
 
-    async def ainvoke(self, state, _config):
+    async def astream(self, state, _config, *, stream_mode="updates"):
         self.inputs.append(state)
-        return {
-            "final_result": {
-                "project_id": state["project_id"],
-                "run_id": state["run_id"],
-                "glsl": "void main(){}",
-                "render_width": 1,
-                "render_height": 1,
-                "status": "completed",
-                "stop_reason": "bounded_mvp_complete",
-                "template_version": "png_to_shader_min_template_v2",
-                "quality_preset": state["quality_preset"],
-                "current_best_mae": 0.1,
-                "current_best_loss": 0.11,
-                "metric_breakdown": {"metric_version": "min_scene_composite_v2"},
-                "render_count": 1,
-                "render_budget": state["render_budget"],
-                "llm_call_count": 0,
-                "llm_budget": state["llm_budget"],
-                "refine_budget": state["refine_budget"],
-                "renderer_path": "prepared_uniforms_v1",
-                "target_mae": state["target_mae"],
-                "target_loss": state["target_loss"],
-                "target_reached": False,
-                "prepare_duration_ms": 1.0,
-                "uniform_render_count": 1,
-                "uniform_render_p95_ms": 1.0,
-                "scene": {},
-                "trace": (),
+        yield {
+            "finalize": {
+                "final_result": {
+                    "project_id": state["project_id"],
+                    "run_id": state["run_id"],
+                    "glsl": "void main(){}",
+                    "render_width": 1,
+                    "render_height": 1,
+                    "status": "completed",
+                    "stop_reason": "bounded_mvp_complete",
+                    "template_version": "png_to_shader_min_template_v3",
+                    "quality_preset": state["quality_preset"],
+                    "current_best_mae": 0.1,
+                    "current_best_loss": 0.11,
+                    "metric_breakdown": {"metric_version": "min_scene_composite_v3"},
+                    "render_count": 1,
+                    "render_budget": state["render_budget"],
+                    "llm_call_count": 0,
+                    "llm_budget": state["llm_budget"],
+                    "refine_budget": state["refine_budget"],
+                    "renderer_path": "prepared_uniforms_v1",
+                    "target_mae": state["target_mae"],
+                    "target_loss": state["target_loss"],
+                    "target_reached": False,
+                    "prepare_duration_ms": 1.0,
+                    "uniform_render_count": 1,
+                    "uniform_render_p95_ms": 1.0,
+                    "scene": {},
+                    "trace": (),
+                }
             }
         }
 
@@ -240,6 +251,7 @@ async def test_scene_mvp_quality_preset_selects_bounded_budgets(
     assert graph.inputs[-1]["render_budget"] == render_budget
     assert graph.inputs[-1]["llm_budget"] == llm_budget
     assert graph.inputs[-1]["refine_budget"] == refine_budget
+    assert graph.inputs[-1]["target_loss"] == 0.04
     assert result.quality_preset == quality_preset
     assert result.render_budget == render_budget
 
@@ -256,21 +268,25 @@ def test_scene_template_and_patch_are_strict_and_valid_webgl1() -> None:
     )
 
     assert isinstance(MinScene.model_validate(patched.model_dump()), MinScene)
-    assert patched.schema_version == "png_to_shader_min_scene_v2"
+    assert patched.schema_version == "png_to_shader_min_scene_v3"
     materialized = materialize_min_shader(patched)
     source = bake_min_uniforms(materialized)
     assert validate_shader(source).valid
     assert "texture2D(" not in source
     assert "iResolution.xy" in materialized.shadertoy_source
     assert "uniform vec4 u_scene_bg_scale" not in materialized.shadertoy_source
-    assert materialized.template_version == "png_to_shader_min_template_v2"
-    assert MIN_TEMPLATE_VERSION == "png_to_shader_min_template_v2"
+    assert materialized.template_version == "png_to_shader_min_template_v3"
+    assert MIN_TEMPLATE_VERSION == "png_to_shader_min_template_v3"
 
 
-def test_scene_template_consumes_multiple_feature_slots_and_all_numeric_fields() -> None:
+def test_scene_template_consumes_multiple_feature_slots_and_all_numeric_fields() -> (
+    None
+):
     scene = perceive_min_target(_pink_orb_png()).fallback_scene.model_copy(
         update={
-            "object": perceive_min_target(_pink_orb_png()).fallback_scene.object.model_copy(
+            "object": perceive_min_target(
+                _pink_orb_png()
+            ).fallback_scene.object.model_copy(
                 update={
                     "features": (
                         Feature(
@@ -297,20 +313,39 @@ def test_scene_template_consumes_multiple_feature_slots_and_all_numeric_fields()
 
     materialized = materialize_min_shader(scene)
 
-    assert materialized.uniform_values["u_feature_0_meta"] == (3.0, 0.8, -0.3, 0.6)
-    assert materialized.uniform_values["u_feature_0_shape"] == (0.8, 0.15, 0.0, 0.0)
-    assert materialized.uniform_values["u_feature_0_color"] == (1.0, 1.0, 1.0, 0.0)
-    assert materialized.uniform_values["u_feature_1_meta"] == (4.0, 0.6, 0.4, -0.6)
-    assert materialized.uniform_values["u_feature_2_meta"] == (0.0, 0.0, 0.0, 0.0)
-    assert "u_feature_0_meta.zw" in materialized.webgl1_source
-    assert "u_feature_1_shape.xy" in materialized.webgl1_source
-    assert materialized.webgl1_source.count("applyFeatureBody(body") == MAX_MIN_FEATURES
+    assert materialized.uniform_values["u_feature_0_shape"] == (-0.3, 0.6, 0.8, 0.15)
+    assert materialized.uniform_values["u_feature_0_color_power"] == (
+        1.0,
+        1.0,
+        1.0,
+        0.8,
+    )
+    assert materialized.uniform_values["u_feature_1_shape"] == (0.4, -0.6, 0.6, 0.1)
+    assert materialized.uniform_values["u_feature_kinds"] == (3.0, 4.0, 0.0, 0.0)
+    assert "u_feature_0_shape" in materialized.webgl1_source
+    assert "u_feature_1_color_power" in materialized.webgl1_source
+    assert (
+        materialized.webgl1_source.count("applyFeatureBody(body")
+        == MAX_MIN_FEATURES * 3
+    )
+    first_lobe = materialized.webgl1_source.index(
+        "applyFeatureBody(body, p, objectDistance, 1.0"
+    )
+    first_rim = materialized.webgl1_source.index(
+        "applyFeatureBody(body, p, objectDistance, 2.0"
+    )
+    first_detail = materialized.webgl1_source.index(
+        "applyFeatureBody(body, p, objectDistance, 3.0"
+    )
+    assert first_lobe < first_rim < first_detail
     assert (
         materialized.webgl1_source.count("applyFeatureBackground(background")
         == MAX_MIN_FEATURES
     )
     active_fragment_uniform_vectors = 1 + len(materialized.uniform_schema)
-    assert active_fragment_uniform_vectors == 14
+    assert (
+        active_fragment_uniform_vectors == MIN_TEMPLATE_FRAGMENT_UNIFORM_VECTORS == 15
+    )
     assert active_fragment_uniform_vectors <= WEBGL1_MIN_FRAGMENT_UNIFORM_VECTORS
     assert "float rimWeight" in materialized.webgl1_source
     assert "float arcWeight" in materialized.webgl1_source
@@ -326,20 +361,97 @@ def test_scene_rejects_more_features_than_fixed_prepared_slots() -> None:
         for index in range(MAX_MIN_FEATURES + 1)
     ]
 
-    with pytest.raises(ValueError, match="3 items"):
+    with pytest.raises(ValueError, match="4 items"):
         MinScene.model_validate(data)
+
+
+def test_circle_requires_equal_axes_and_color_fields_are_strict_unions() -> None:
+    with pytest.raises(ValueError, match="circle axes"):
+        Primitive(type="circle", center=(0.0, 0.0), axes=(0.8, 0.7))
+    assert Primitive(type="circle", center=(0.0, 0.0), axes=(0.8, 0.8)).axes == (
+        0.8,
+        0.8,
+    )
+    scene = perceive_min_target(_pink_orb_png()).fallback_scene.model_dump(
+        mode="python"
+    )
+    scene["object"]["color_field"] = {
+        "model": "solid",
+        "color": (0.8, 0.4, 0.5),
+        "scale": 1.0,
+    }
+    with pytest.raises(ValueError, match="Extra inputs"):
+        MinScene.model_validate(scene)
+
+
+def test_replace_feature_is_atomic_and_preserves_stable_id_at_full_capacity() -> None:
+    scene = perceive_min_target(_pink_orb_png()).fallback_scene
+    features = tuple(
+        Feature(id=f"slot_{index}", type="rim", intensity=0.1 + index * 0.1)
+        for index in range(MAX_MIN_FEATURES)
+    )
+    full = MinScene.model_validate(
+        {
+            **scene.model_dump(mode="python"),
+            "object": {
+                **scene.object.model_dump(mode="python"),
+                "features": features,
+            },
+        }
+    )
+    replacement = Feature(
+        id="slot_2",
+        type="gaussian_lobe",
+        center=(0.2, 0.3),
+        axes=(0.4, 0.2),
+        color=(1.0, 0.8, 0.9),
+        intensity=0.7,
+    )
+
+    patched = apply_scene_patch(
+        full,
+        ReplaceFeaturePatch(
+            op="replace_feature", feature_id="slot_2", feature=replacement
+        ),
+    )
+
+    assert len(patched.object.features) == MAX_MIN_FEATURES
+    assert patched.object.features[2] == replacement
+    with pytest.raises(ValueError, match="不存在"):
+        apply_scene_patch(
+            full,
+            ReplaceFeaturePatch(
+                op="replace_feature",
+                feature_id="missing",
+                feature=replacement.model_copy(update={"id": "missing"}),
+            ),
+        )
+    with pytest.raises(ValueError, match="稳定 feature id"):
+        ReplaceFeaturePatch(
+            op="replace_feature",
+            feature_id="slot_1",
+            feature=replacement,
+        )
 
 
 def test_min_author_patch_parser_requires_one_whitelisted_typed_patch() -> None:
     patch = parse_min_author_patch(
-        '{"operation":"replace","path":"/object/color_field/model","value":"solid"}'
+        '{"operation":"replace","path":"/object/color_field","value":{"model":"solid","color":[0.9,0.4,0.5]}}'
     )
     scene = perceive_min_target(_pink_orb_png()).fallback_scene
 
     assert apply_min_author_patch(scene, patch).object.color_field.model == "solid"
+    feature_patch = parse_min_author_patch(
+        '{"operation":"replace","path":"/object/features","value":'
+        '{"feature_id":"rim","feature":{"id":"rim","type":"gaussian_lobe",'
+        '"center":[0,0],"axes":[0.4,0.3],"color":[1,0.8,0.9],"intensity":0.5}}}'
+    )
+    assert apply_min_author_patch(scene, feature_patch).object.features[0].type == (
+        "gaussian_lobe"
+    )
     with pytest.raises(MinAuthorParseError):
         parse_min_author_patch(
-            '[{"operation":"replace","path":"/object/color_field/model","value":"solid"}]'
+            '[{"operation":"replace","path":"/object/color_field","value":{"model":"solid","color":[1,1,1]}}]'
         )
     with pytest.raises(MinAuthorParseError):
         parse_min_author_patch(
@@ -356,8 +468,10 @@ async def test_min_author_initial_accepts_complete_strict_scene(tmp_path) -> Non
     state = _author_state()
     data = dict(state["scene"])  # type: ignore[arg-type]
     data["object"] = dict(data["object"])
-    data["object"]["color_field"] = dict(data["object"]["color_field"])
-    data["object"]["color_field"]["model"] = "solid"
+    data["object"]["color_field"] = {
+        "model": "solid",
+        "color": [0.9, 0.4, 0.5],
+    }
     scene = MinScene.model_validate(data)
     gateway = _FakeGateway(scene.model_dump_json())
     nodes = make_min_nodes(
@@ -398,10 +512,14 @@ async def test_initial_model_scene_cannot_replace_better_rendered_fallback(
 ) -> None:
     fallback = perceive_min_target(_pink_orb_png()).fallback_scene
     fallback_data = fallback.model_dump(mode="json")
-    fallback_data["object"]["color_field"]["inner"] = (0.0, 0.0, 0.0)
+    fallback_data["object"]["color_field"] = SolidColorField(
+        model="solid", color=(0.0, 0.0, 0.0)
+    ).model_dump(mode="json")
     fallback_data = MinScene.model_validate(fallback_data).model_dump(mode="json")
     model_data = MinScene.model_validate(fallback_data).model_dump(mode="json")
-    model_data["object"]["color_field"]["inner"] = (1.0, 1.0, 1.0)
+    model_data["object"]["color_field"] = SolidColorField(
+        model="solid", color=(1.0, 1.0, 1.0)
+    ).model_dump(mode="json")
     state = {
         "project_id": "arbitration-project",
         "run_id": "arbitration-run",
@@ -499,7 +617,7 @@ async def test_refine_candidate_cannot_overwrite_better_current_best(tmp_path) -
         "mae": 0.0,
     }
     gateway = _FakeGateway(
-        '{"operation":"replace","path":"/object/color_field/model","value":"solid"}'
+        '{"operation":"replace","path":"/object/color_field","value":{"model":"solid","color":[0.9,0.4,0.5]}}'
     )
     registry = MinRendererRegistry(_FakeRenderer)  # type: ignore[arg-type]
     nodes = make_min_nodes(LocalArtifactStore(tmp_path), registry, gateway)
@@ -580,6 +698,7 @@ async def test_min_graph_writes_trace_and_final_artifacts(tmp_path) -> None:
             "llm_budget": 0,
             "refine_budget": 0,
             "target_mae": 1.0,
+            "target_loss": 1.0,
         }
     )
 
@@ -587,7 +706,7 @@ async def test_min_graph_writes_trace_and_final_artifacts(tmp_path) -> None:
     assert result["render_count"] == 1
     assert result["final_result"]["renderer_path"] == "prepared_uniforms_v1"
     assert result["final_result"]["template_version"] == (
-        "png_to_shader_min_template_v2"
+        "png_to_shader_min_template_v3"
     )
     assert result["final_result"]["uniform_render_count"] == 1
     assert result["final_result"]["target_reached"] is True
@@ -618,11 +737,11 @@ async def test_min_graph_writes_trace_and_final_artifacts(tmp_path) -> None:
     )
     metrics = run.read_bytes("final/metrics.json")
     assert b'"renderer_path":"prepared_uniforms_v1"' in metrics
-    assert b'"template_version":"png_to_shader_min_template_v2"' in metrics
+    assert b'"template_version":"png_to_shader_min_template_v3"' in metrics
     assert b'"uniform_render_p95_ms":1.25' in metrics
     manifest = run.read_bytes("final/manifest.json")
     assert b'"renderer_path":"prepared_uniforms_v1"' in manifest
-    assert b'"template_version":"png_to_shader_min_template_v2"' in manifest
+    assert b'"template_version":"png_to_shader_min_template_v3"' in manifest
     assert b'"target_reached":true' in manifest
 
 
@@ -632,7 +751,9 @@ async def test_min_graph_builder_injects_fake_gateway_for_model_author(
 ) -> None:
     image = _pink_orb_png()
     data = perceive_min_target(image).fallback_scene.model_dump(mode="json")
-    data["object"]["color_field"]["model"] = "solid"
+    data["object"]["color_field"] = SolidColorField(
+        model="solid", color=(0.9, 0.4, 0.5)
+    ).model_dump(mode="json")
     gateway = _FakeGateway(MinScene.model_validate(data).model_dump_json())
     graph = build_png_to_shader_min_graph(
         artifact_store=LocalArtifactStore(tmp_path),
@@ -650,6 +771,7 @@ async def test_min_graph_builder_injects_fake_gateway_for_model_author(
             "llm_budget": 1,
             "refine_budget": 0,
             "target_mae": 1.0,
+            "target_loss": 1.0,
         }
     )
 
@@ -690,5 +812,7 @@ async def test_min_graph_prepares_once_and_reuses_program_for_candidates(
     assert renderer.closed is True
     assert result["final_result"]["uniform_render_count"] == 3
     assert result["final_result"]["target_reached"] is False
-    base_trace = next(item for item in result["trace"] if item["phase"] == "optimize_base")
+    base_trace = next(
+        item for item in result["trace"] if item["phase"] == "optimize_base"
+    )
     assert base_trace["candidates_evaluated"] == 2

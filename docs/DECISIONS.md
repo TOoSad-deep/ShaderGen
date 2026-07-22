@@ -438,3 +438,17 @@
 - 决策：将 D055 的 8 个独立 uniform feature slot 收紧为 3 个 packed slot，并把不兼容 Scene/模板分别升级为 `png_to_shader_min_scene_v2` 和 `png_to_shader_min_template_v2`。Scene 基础参数固定使用 4 个 `vec4`，每个 feature 使用 meta/shape/color 3 个 `vec4`；加上 Renderer 管理且静态使用的 `u_resolution` 后，最坏为 14 个 active fragment uniform vectors，低于 WebGL1 最低保证的 16，物化时再次 fail-closed 校验。prepared Renderer 的 typed uniform 白名单扩展到 `vec4`。`rim`、`polar_arc`、`edge_line` 分别使用主体边界带、上半椭圆弧和有限长度线带，禁止不同 schema 类型退化为同一公式。
 - 原因：原 8 槽布局超过 WebGL1 最低 fragment uniform 容量，桌面 Chromium 通过不能证明约束设备可链接；同时旧 body feature 分支把三个类型合并为同一权重，模型声明的弧和线没有像素语义。沿用 v1 版本还会让不兼容 uniform/像素公式共享 provenance。
 - 影响：本决策取代 D055 的 8-slot 部分和 D052 中 prepared 白名单仅含 float/vec2/vec3 的限制；三槽上限进入 `MinScene` 严格 Schema，超过上限的模型输出安全回退。metrics、manifest、账本和 API 摘要显式记录 v2 模板版本。真实 Chromium 集成测试必须同时证明 legacy/prepared 像素一致和三种 body feature 像素互异；F09 状态与发布 no-go 不变。
+
+## D057 - scene_mvp 运行进度用进程内存事件缓冲加增量轮询
+
+- 日期：2026-07-22
+- 决策：scene_mvp 的运行时可观测采用“内存事件缓冲 + 前端增量轮询”，不引入 SSE/WebSocket。前端预生成 UUID `run_id` 随 POST 显式发送（服务端缺省自生成的行为不变，进行中 run_id 冲突返回 409 `run_conflict`），随后以约 1.2s 间隔轮询 `GET /api/shader/runs/{run_id}/progress?after=<seq>`。Agent service 把 `ainvoke` 换成 `astream(stream_mode="updates")`，逐节点产出严格白名单事件（trace 差分、counters、best、decide 路由），渲染帧字节经独立通道保存最近一帧；两者写入 `backend.app.services.run_progress.RunProgressRegistry`（单进程单 worker、重启即失、惰性 TTL 清扫）。
+- 原因：仓库此前没有任何流式基础设施，`agent_runs` schema 注释本就预留“前端轮询”语义；scene_mvp 单次运行 1–12 分钟，轮询足够且 TestClient 易测，SSE 的连接生命周期、重连和测试成本在现阶段不成比例。运行中途不写 `agent_events`：终态单事务账本语义保持不变，内存缓冲只服务运行中的页面观测。事件之所以必须白名单化，是因为 state update 直接携带图片、Scene、GLSL 与渲染字节。
+- 影响：`POST /api/shader/generate` 新增可选 `run_id` 表单字段；新增 `/progress` 与 `/progress/render` 两个只读端点，未知 run_id 返回 `pending` 以吸收客户端先于服务端登记的竞态。Graph 拓扑、路由和终态账本不变；`procedural_v1` 不发布进度。多 worker 部署下进度不可见（事件只存在于执行该 run 的进程），属于已接受的单 worker 限制，后续需要时再换共享事件总线。
+
+## D058 - scene_mvp 先做固定模板扩展，不引入动态 Compiler
+
+- 日期：2026-07-22
+- 决策：F09 的下一质量增量采用 `docs/superpowers/specs/2026-07-22-scene-mvp-fixed-template-expansion-design.md`。继续限定单主体 `circle|ellipse`，颜色场支持具有真实像素语义的 `solid|radial|linear`，feature 保留既有四类并新增主体内 `gaussian_lobe` 与主体外 `glow`；每个 feature 压成 2 个 `vec4`，四个槽连同基础 Scene、类型元数据和 `u_resolution` 最坏使用 15 个 fragment uniform vectors。Refine 新增按稳定 id 的原子 `replace_feature` 和完整 `replace_color_field`。Graph 拓扑、同 run 单 prepared program、默认 `procedural_v1` 和显式 `scene_mvp` 产品边界不变。该方案名不是项目阶段号，与已废弃为历史参考的旧 V3 Oracle/Search 方案无关；Scene/template/metric 的正式版本号在实现增量冻结。
+- 原因：粉色凝胶球实测证明当前单一 radial 场、三槽和亮度分位数 objective 存在明显表达与评价缺口，但一次引入动态结构编译、最多 8 个逻辑 feature、多几何、自动残差分类和自动 procedural fallback 会同时改写 Renderer 生命周期、资源规划、感知、Graph/Backend 编排和预算语义。固定模板扩展可以在 WebGL1 最低容量内增加通用颜色场与局部效果，同时保持 Initial/fallback/Refine 共用唯一 program 签名和现有 current_best 安全边界。
+- 影响：实现已分别冻结 `png_to_shader_min_scene_v3`、`png_to_shader_min_template_v3`、`min_scene_composite_v3`；固定 7 例 deterministic fallback 的内部 loss 中位数约 `0.0402`，据此冻结 `target_loss=0.04`。三类颜色场、circle/ellipse、六类 feature、四槽 15/16 资源边界和 replace patch 均有聚焦测试。相同 7 例用外部 `png_to_shader_score_v1` 对照 v2 fallback，v3 为 6/7 改善且其余 global/ROI/bbox 回归未越过预设容差。本轮仍不支持 `rounded_rect`、`ring`、`dual_disks`，不自动切换 `procedural_v1`，不引入 CMA-ES、动态 ROI、逐 feature 消融或多 program cache。该工程证据不等于真实模型或人工偏好门禁；F09 继续 `active/no-go`。

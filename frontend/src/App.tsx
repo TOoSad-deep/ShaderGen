@@ -4,16 +4,21 @@ import { type DragEvent, useCallback, useEffect, useRef, useState } from "react"
 
 import {
   clearProjectMemory,
+  fetchMinRunProgress,
   generateShader,
   resolveShaderApiUrl,
   ShaderApiError,
   type GenerationMode,
   type MemoryStatus,
+  type MinRunProgressEvent,
+  type MinRunProgressResponse,
+  type MinRunProgressSnapshot,
   type QualityPreset,
   type ShaderApiFailure,
   type ShaderResponse,
 } from "./api/shader";
 import { FailureDetails } from "./components/FailureDetails";
+import { MinRunLivePanel } from "./components/MinRunLivePanel";
 import { RunProgress } from "./components/RunProgress";
 import { SceneMvpSummary } from "./components/SceneMvpSummary";
 import { ScoreSummary } from "./components/ScoreSummary";
@@ -37,6 +42,26 @@ interface ActiveGenerationRequest {
   timeoutId: number;
   stopKind: RequestStopKind | null;
   timeoutMs: number;
+}
+
+// scene_mvp 运行中的前端聚合状态：事件全量 + 最新快照。
+interface LiveMinRun {
+  runId: string;
+  events: MinRunProgressEvent[];
+  snapshot: MinRunProgressSnapshot | null;
+  status: string;
+}
+
+const MIN_RUN_POLL_INTERVAL_MS = 1200;
+const MIN_RUN_MAX_POLL_FAILURES = 3;
+
+function newClientRunId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "00000000-0000-4000-8000-000000000000".replace(/0/g, () =>
+    Math.floor(Math.random() * 16).toString(16),
+  );
 }
 
 const DEFAULT_REQUEST_TIMEOUT_MS: Record<QualityPreset, number> = {
@@ -96,6 +121,7 @@ export function App() {
   const [recentProjects, setRecentProjects] = useState<RecentProject[]>(loadRecentProjects);
   const [memoryStatus, setMemoryStatus] = useState<MemoryStatus | null>(null);
   const [projectMessage, setProjectMessage] = useState("");
+  const [liveRun, setLiveRun] = useState<LiveMinRun | null>(null);
   const copyTimerRef = useRef<number | null>(null);
   const activeGenerationRef = useRef<ActiveGenerationRequest | null>(null);
 
@@ -138,6 +164,7 @@ export function App() {
     setApiFailure(null);
     setRequestStopNotice("");
     setCopied(false);
+    setLiveRun(null);
   }
 
   async function handleFile(file: File) {
@@ -181,9 +208,51 @@ export function App() {
     }, timeoutMs);
     activeGenerationRef.current = active;
 
+    // scene_mvp：客户端预生成 run_id，使 POST 阻塞期间可以轮询运行进度。
+    const runId = generationMode === "scene_mvp" ? newClientRunId() : undefined;
+    let pollStopped = false;
+    let pollFailures = 0;
+    let lastSeq = 0;
+
+    const mergeProgress = (data: MinRunProgressResponse) => {
+      if (!runId) return;
+      lastSeq = Math.max(lastSeq, data.latest_seq ?? 0);
+      setLiveRun((current) => {
+        const base = current && current.runId === runId ? current.events : [];
+        const seen = new Set(base.map((event) => event.seq));
+        const fresh = data.events.filter((event) => !seen.has(event.seq));
+        return {
+          runId,
+          events: [...base, ...fresh],
+          snapshot: data.snapshot ?? current?.snapshot ?? null,
+          status: data.status,
+        };
+      });
+    };
+
+    const pollProgress = async () => {
+      if (pollStopped || !runId) return;
+      try {
+        const data = await fetchMinRunProgress(runId, lastSeq);
+        pollFailures = 0;
+        mergeProgress(data);
+      } catch {
+        pollFailures += 1;
+      }
+      if (!pollStopped && pollFailures < MIN_RUN_MAX_POLL_FAILURES) {
+        window.setTimeout(() => void pollProgress(), MIN_RUN_POLL_INTERVAL_MS);
+      }
+    };
+
+    if (runId) {
+      setLiveRun({ runId, events: [], snapshot: null, status: "pending" });
+      window.setTimeout(() => void pollProgress(), 500);
+    }
+
     try {
       const result = await generateShader(selectedFile, {
         projectId: projectId ?? undefined,
+        runId,
         qualityPreset,
         generationMode,
         instruction: instruction.trim(),
@@ -208,6 +277,15 @@ export function App() {
         setError(reason instanceof Error ? reason.message : "生成失败。");
       }
     } finally {
+      pollStopped = true;
+      if (runId) {
+        // 最后一次拉取，补齐 POST 结束前沿途未取到的事件；失败不影响主流程。
+        try {
+          mergeProgress(await fetchMinRunProgress(runId, lastSeq));
+        } catch {
+          // 忽略收尾轮询失败。
+        }
+      }
       window.clearTimeout(active.timeoutId);
       if (activeGenerationRef.current === active) {
         activeGenerationRef.current = null;
@@ -402,6 +480,17 @@ export function App() {
           loading={loading}
           result={runResult}
           compatibility={compatibility}
+          loadingContent={
+            generationMode === "scene_mvp" && liveRun ? (
+              <MinRunLivePanel
+                runId={liveRun.runId}
+                referenceUrl={imageUrl}
+                events={liveRun.events}
+                snapshot={liveRun.snapshot}
+                status={liveRun.status}
+              />
+            ) : undefined
+          }
         />
 
         {isSceneMvp && runResult ? (

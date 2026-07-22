@@ -34,7 +34,7 @@ from agent.app.parsers.png_to_shader_min import (
     parse_min_author_patch,
     parse_min_scene,
 )
-from shaderforge.evaluation import evaluate_min_scene
+from shaderforge.evaluation import MIN_SCENE_METRIC_VERSION, evaluate_min_scene
 from shaderforge.generation import (
     bake_min_uniforms,
     materialize_min_shader,
@@ -227,9 +227,7 @@ async def _evaluate_scene(
             "materialized": materialized,
             "error": result.draw_error or "render_failed",
         }
-    rendered = _raw_rgb_array(
-        result.rgb_bytes, scene.canvas.width, scene.canvas.height
-    )
+    rendered = _raw_rgb_array(result.rgb_bytes, scene.canvas.width, scene.canvas.height)
     metric = evaluate_min_scene(
         state["target_rgb"],
         rendered,
@@ -275,9 +273,7 @@ def make_min_nodes(
             "refine_count": 0,
             "refine_budget": int(state.get("refine_budget", 0)),
             "target_mae": float(state.get("target_mae", 0.08)),
-            "target_loss": float(
-                state.get("target_loss", state.get("target_mae", 0.08))
-            ),
+            "target_loss": float(state.get("target_loss", 0.04)),
             "feature_queue": (),
             "trace": _trace(
                 state, "initialize_run", f"输入已登记：{reference.sha256[:12]}"
@@ -358,6 +354,8 @@ def make_min_nodes(
                     author_source="perception_fallback",
                     model_calls=result.call_count,
                     error_code=result.error_code,
+                    author_latency_ms=result.latency_ms,
+                    author_tokens=result.total_tokens,
                 ),
             }
         return {
@@ -373,6 +371,8 @@ def make_min_nodes(
                 author_source="model",
                 model_calls=result.call_count,
                 repaired=result.repaired,
+                author_latency_ms=result.latency_ms,
+                author_tokens=result.total_tokens,
             ),
         }
 
@@ -564,11 +564,7 @@ def make_min_nodes(
         render_count = int(state["render_count"])
         baseline_scene = MinScene.model_validate(baseline["scene"])
         feature = next(
-            (
-                item
-                for item in baseline_scene.object.features
-                if item.id == feature_id
-            ),
+            (item for item in baseline_scene.object.features if item.id == feature_id),
             None,
         )
         proposals = (
@@ -579,7 +575,7 @@ def make_min_nodes(
                 remaining_draw_budget=max(
                     0, int(state["render_budget"]) - render_count
                 ),
-                batch_size=16,
+                batch_size=12,
             )
             if feature is not None
             else ()
@@ -719,6 +715,8 @@ def make_min_nodes(
                     author_source="current_best",
                     model_calls=result.call_count,
                     error_code=error_code,
+                    author_latency_ms=result.latency_ms,
+                    author_tokens=result.total_tokens,
                 ),
             }
         return {
@@ -735,6 +733,8 @@ def make_min_nodes(
                 author_source="model_patch",
                 model_calls=result.call_count,
                 repaired=result.repaired,
+                author_latency_ms=result.latency_ms,
+                author_tokens=result.total_tokens,
             ),
         }
 
@@ -759,14 +759,14 @@ def make_min_nodes(
         run.write_bytes("final/render.png", best["render"], content_type="image/png")
         renderer_metrics = registry.metrics(project_id, run_id)
         target_mae = float(state.get("target_mae", 0.08))
-        target_loss = float(state.get("target_loss", target_mae))
+        target_loss = float(state.get("target_loss", 0.04))
         best_loss = _best_loss(best)
         target_reached = best_loss <= target_loss
         score_metrics = dict(best.get("metrics", {}))
         metrics = {
             **score_metrics,
             "metric_version": str(
-                score_metrics.get("metric_version", "min_scene_composite_v2")
+                score_metrics.get("metric_version", MIN_SCENE_METRIC_VERSION)
             ),
             "template_version": materialized.template_version,
             "mae": float(best["mae"]),

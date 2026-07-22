@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -75,7 +77,7 @@ class MinQualityBudget:
     llm_budget: int
     refine_budget: int
     target_mae: float = 0.08
-    target_loss: float = 0.08
+    target_loss: float = 0.04
 
 
 MIN_QUALITY_BUDGETS = {
@@ -83,6 +85,83 @@ MIN_QUALITY_BUDGETS = {
     "balanced": MinQualityBudget(render_budget=96, llm_budget=4, refine_budget=2),
     "high": MinQualityBudget(render_budget=160, llm_budget=6, refine_budget=3),
 }
+
+# 进度回调：第一参数为 JSON 安全的白名单事件，第二参数为当前渲染 PNG 字节或 None。
+MinProgressCallback = Callable[[dict[str, Any], "bytes | None"], None]
+
+_PROGRESS_COUNTER_KEYS = ("render_count", "llm_call_count", "refine_count")
+_PROGRESS_BEST_KEYS = (("current_best_mae", "mae"), ("current_best_loss", "loss"))
+_PROGRESS_BUDGET_KEYS = (
+    "render_budget",
+    "llm_budget",
+    "refine_budget",
+    "target_mae",
+    "target_loss",
+)
+
+
+def _json_safe(value: Any) -> Any:
+    """把 trace 详情收敛为可 JSON 序列化的标量/容器，其他一律转字符串。."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    if isinstance(value, dict):
+        return {str(key): _json_safe(item) for key, item in value.items()}
+    return str(value)
+
+
+def _number(value: Any) -> float | None:
+    """只接受真实数值，拒绝 bool 与其他类型。."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _build_progress_event(
+    *,
+    node_name: str,
+    update: dict[str, Any],
+    budgets: dict[str, Any],
+    trace_tail: tuple[dict[str, Any], ...],
+    elapsed_ms: float,
+    duration_ms: float,
+) -> dict[str, Any]:
+    """把单节点 state update 收敛为白名单进度事件，绝不携带图片/Scene/GLSL。."""
+    counters: dict[str, int] = {}
+    for key in _PROGRESS_COUNTER_KEYS:
+        number = _number(update.get(key))
+        if number is not None:
+            counters[key] = int(number)
+    best: dict[str, float] = {}
+    for source, target in _PROGRESS_BEST_KEYS:
+        number = _number(update.get(source))
+        if number is not None:
+            best[target] = number
+    failed = bool(update.get("error")) or any(
+        str(item.get("status")) == "failed" for item in trace_tail
+    )
+    event: dict[str, Any] = {
+        "node": node_name,
+        "status": "failed" if failed else "completed",
+        "elapsed_ms": round(elapsed_ms, 2),
+        "duration_ms": round(duration_ms, 2),
+        "budgets": dict(budgets),
+    }
+    phase = update.get("phase")
+    if isinstance(phase, str) and phase:
+        event["phase"] = phase
+    if trace_tail:
+        event["trace"] = [_json_safe(dict(item)) for item in trace_tail]
+    if counters:
+        event["counters"] = counters
+    if best:
+        event["best"] = best
+    for key in ("next_action", "stop_reason"):
+        value = update.get(key)
+        if isinstance(value, str) and value:
+            event[key] = value
+    return event
 
 
 _PUBLIC_ARTIFACTS = {
@@ -128,31 +207,72 @@ class PngToShaderMinService:
         run_id: str,
         quality_preset: str = "balanced",
         instruction: str = "",
+        on_progress: MinProgressCallback | None = None,
     ) -> PngToShaderMinResult:
-        """以显式 scene_mvp 的小批 draw 与有界模型预算执行完整链路。."""
+        """以显式 scene_mvp 的小批 draw 与有界模型预算执行完整链路.
+
+        传入 on_progress 时，每个节点完成后回调一次白名单进度事件；
+        duration_ms 是相邻节点完成时刻的间隔，作为节点耗时的近似值。
+        """
         try:
             policy = MIN_QUALITY_BUDGETS[quality_preset]
         except KeyError as exc:
             raise ValueError(f"不支持的 scene_mvp 质量档位：{quality_preset}") from exc
         llm_budget = min(self.llm_budget, policy.llm_budget)
         refine_budget = min(self.refine_budget, policy.refine_budget)
+        graph_input: dict[str, Any] = {
+            "project_id": project_id,
+            "run_id": run_id,
+            "image": image,
+            "content_type": content_type,
+            "instruction": instruction,
+            "quality_preset": quality_preset,
+            "render_budget": policy.render_budget,
+            "llm_budget": llm_budget,
+            "refine_budget": refine_budget,
+            "target_mae": policy.target_mae,
+            "target_loss": policy.target_loss,
+        }
+        budgets = {key: graph_input[key] for key in _PROGRESS_BUDGET_KEYS}
+        state: dict[str, Any] = dict(graph_input)
+        started_at = time.perf_counter()
+        last_tick = started_at
+        trace_length = 0
         try:
-            state = await self.graph.ainvoke(
-                {
-                    "project_id": project_id,
-                    "run_id": run_id,
-                    "image": image,
-                    "content_type": content_type,
-                    "instruction": instruction,
-                    "quality_preset": quality_preset,
-                    "render_budget": policy.render_budget,
-                    "llm_budget": llm_budget,
-                    "refine_budget": refine_budget,
-                    "target_mae": policy.target_mae,
-                    "target_loss": policy.target_loss,
-                },
+            async for chunk in self.graph.astream(
+                graph_input,
                 {"recursion_limit": PNG_TO_SHADER_MIN_RECURSION_LIMIT},
-            )
+                stream_mode="updates",
+            ):
+                if not isinstance(chunk, dict):
+                    continue
+                for node_name, update in chunk.items():
+                    if not isinstance(update, dict):
+                        continue
+                    state.update(update)
+                    trace_value = update.get("trace")
+                    trace_tail: tuple[dict[str, Any], ...] = ()
+                    if isinstance(trace_value, tuple):
+                        trace_tail = tuple(
+                            item
+                            for item in trace_value[trace_length:]
+                            if isinstance(item, dict)
+                        )
+                        trace_length = len(trace_value)
+                    if on_progress is None:
+                        continue
+                    now = time.perf_counter()
+                    event = _build_progress_event(
+                        node_name=str(node_name),
+                        update=update,
+                        budgets=budgets,
+                        trace_tail=trace_tail,
+                        elapsed_ms=(now - started_at) * 1000,
+                        duration_ms=(now - last_tick) * 1000,
+                    )
+                    last_tick = now
+                    render = update.get("current_render")
+                    on_progress(event, render if isinstance(render, bytes) else None)
         finally:
             await self.renderers.close(project_id, run_id)
         final = state.get("final_result") if isinstance(state, dict) else None
@@ -245,6 +365,7 @@ async def generate_png_to_shader_min(
     run_id: str,
     quality_preset: str = "balanced",
     instruction: str = "",
+    on_progress: MinProgressCallback | None = None,
     service: PngToShaderMinService = default_png_to_shader_min_service,
 ) -> PngToShaderMinResult:
     """通过稳定入口执行 scene_mvp。."""
@@ -255,12 +376,14 @@ async def generate_png_to_shader_min(
         run_id=run_id,
         quality_preset=quality_preset,
         instruction=instruction,
+        on_progress=on_progress,
     )
 
 
 __all__ = [
     "MIN_QUALITY_BUDGETS",
     "MinPipelineError",
+    "MinProgressCallback",
     "MinPublicArtifact",
     "MinPublicArtifactNotFoundError",
     "MinQualityBudget",

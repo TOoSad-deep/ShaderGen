@@ -11,7 +11,7 @@
 - ROI RMSE 与 protection region loss；
 - 按前景 mask 置信度衰减 geometry 权重并重新归一化总分；
 - 比较两轮 protection loss 的最大退化。
-- `scene_mvp` 使用 `min_scene_composite_v2` 同时记录整图、前景、前景高光和前景阴影 MAE，并以 `0.35/0.35/0.15/0.15` 的复合 loss 选择 `current_best`；全局 MAE 继续保留为诊断。
+- `scene_mvp` 使用 `min_scene_composite_v3` 记录 global/foreground/background MAE、geometry mask loss、edge loss 与固定 `4×4` 网格最坏 2 个 tile MAE，冻结权重为 `0.20/0.25/0.15/0.15/0.10/0.15`；前景证据不足时停用 background/geometry 并重新归一化，不再使用亮度分位数伪 highlight/shadow。
 - `CandidateRecord` 强绑定 GLSL、Author/provenance、compile、render、metrics、review 与父候选引用，并把来源收紧为 `model | deterministic`；确定性来源必须由调用方同时保存 generator version；
 - `select_current_best()` 只接受硬约束通过、总损失达到最小改善且保护区最大退化不超阈值的候选；缺失既有保护证据直接拒绝。
 
@@ -24,4 +24,4 @@
 - Oracle 不调用 VLM、不选择问题域；`current_best` 更新由同包独立的纯 Selector 完成，Graph 只消费其决定；
 - Oracle 只评分调用方显式提供的 ROI；生产 Graph 可以把严格 `VisualAnalysis` 的语义 ROI 追加到确定性测量 ROI，但不得用同名语义区域覆盖测量事实；
 - 指标公式变化必须升级 `metric_version` 并重新校准 benchmark。
-- `scene_mvp` 的前景由参考图相对感知背景的固定色差阈值确定；前景证据不足时退回整图，不能因空 mask 产生 NaN 或虚假零损失。
+- `scene_mvp` 的前景由参考图相对感知背景的固定色差阈值确定；背景使用主体膨胀后的保护区，geometry 比较参考/候选 mask IoU，edge 比较亮度邻域梯度。前景证据不足时退回整图，不能因空 mask 产生 NaN 或虚假零损失。
