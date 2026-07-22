@@ -13,7 +13,7 @@
 | id | 行为 | 验证 | 状态 | 证据 |
 |---|---|---|---|---|
 | H01 | 新 agent 会话可以只通过仓库文件理解项目用途、命令、目标架构、决策、当前进度和下一个功能。 | `make check` | passing | 2026-07-15：`make check` 已通过：单元测试通过、docs-check 通过、LangGraph validate 发现 1 个 graph、前端构建通过。 |
-| H02 | Node Lab Harness 可以通过通用 Provider 隔离诊断生产 Node target、场景流水线、Renderer、HTTP transport、五个模型角色 fixture 和本地工作台，不复制生产节点语义。 | `make benchmark-node-lab-ai-off && make benchmark-node-lab-model && make test-node-lab-ui` | passing | 2026-07-21：通用化重构后，Pipeline 作用域、空安全 Registry 和 V1 适配层边界测试通过；三项门禁重新实际通过。模型角色只使用离线 fixture，工作台只连接假 API，未调用真实模型。H02 通过不改变 F09 的质量 gate。 |
+| H02 | Node Lab Harness 可以通过通用 Provider 隔离诊断生产 Node target、场景流水线、通用 cold/warm resource、HTTP transport、五个模型角色 fixture 和本地工作台，不复制生产节点语义。 | `make benchmark-node-lab-ai-off && make benchmark-node-lab-model && make test-node-lab-ui` | passing | 2026-07-22：通用化重构后，Pipeline 作用域、独立存储、Provider Builder、标准 Executor、完整 Schema、State reducer 和 V1 适配层边界测试通过；三项门禁重新实际通过。模型角色只使用离线 fixture，工作台只连接假 API，未调用真实模型。H02 通过不改变 F09 的质量 gate。 |
 | F01 | 用户可以为 Shader 任务提交 Idea、需求、参考设计和测试规划输入。 | `uv run pytest tests/unit_tests/test_shader_task_input_contract.py && npm --prefix frontend run build` | not_started | 来自架构 SVG 的用户输入层。 |
 | F02 | Routing 和 Agent 分析可以从用户输入产出结构化 Intent IR。 | `uv run pytest tests/unit_tests/test_routing.py tests/unit_tests/test_intent_ir.py` | not_started | 来自架构 SVG 的核心处理层。 |
 | F03 | DSL 节点图和 Renderer 可以产出 GLSL 以及可渲染画面。 | `uv run pytest tests/unit_tests/test_dsl_renderer.py && npm --prefix frontend run build` | not_started | 来自架构 SVG 的核心处理层。 |

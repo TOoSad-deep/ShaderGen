@@ -100,11 +100,7 @@ def test_node_lab_core_is_transport_free_and_does_not_reflect_nodes() -> None:
         "agent.app.graphs",
         "agent.app.llms",
         "agent.app.nodes",
-        "shaderforge.analysis",
-        "shaderforge.evaluation",
-        "shaderforge.public",
-        "shaderforge.rendering",
-        "shaderforge.validation",
+        "shaderforge",
     )
     violations = [
         f"{path.relative_to(core_root).as_posix()}: {target}"
@@ -117,6 +113,10 @@ def test_node_lab_core_is_transport_free_and_does_not_reflect_nodes() -> None:
         "png_to_shader_v1" not in path.read_text(encoding="utf-8")
         for path in core_root.glob("*.py")
     )
+    benchmark_source = (core_root / "benchmark.py").read_text(encoding="utf-8")
+    assert 'capability_id != "render-shader"' not in benchmark_source
+    assert "src/agent/app/services/node_lab.py" not in benchmark_source
+    assert 'for package in ("numpy", "pillow", "playwright"' not in benchmark_source
 
 
 def test_node_lab_node_execution_is_owned_by_production_provider() -> None:

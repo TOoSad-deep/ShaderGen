@@ -41,5 +41,5 @@
 - V1 使用 `png-to-shader-v1:{project_id}` 隔离 checkpoint，同时继续用原 project_id 读取项目 Store Memory，并返回 `durable`、`ephemeral` 或 `degraded` memory status。
 - 后端只依赖 service 的公共函数和结果类型。
 - Node Lab Route 和 CLI 只能调用 `agent.app.services.node_lab`；不得复制 Registry、Fixture 解析、State diff、fingerprint 或 Artifact 规则。
-- Node Lab Service 不得维护 descriptor、`SUPPORTED_NODE_IDS` 或逐节点 dispatch。新 Node 由生产 Provider 声明 descriptor/binding；JSON-safe Node 可用通用 `DirectNodeExecutor`，有 Artifact、Renderer、Memory 或模型依赖的 Node 由 Provider 提供专用 Executor。当前 V1 的 15 个非模型节点统一绑定 `DeterministicNodeExecutor`，五个模型节点统一绑定 `ModelRoleExecutor`，不能把 20 个 descriptor 误写成 20 个独立 Adapter。Provider descriptor 必须与生产 Graph 节点集合一致，且每个声明模式都必须有精确或通用 Executor，否则 Application 构造失败。
+- Node Lab Service 不得维护 descriptor、`SUPPORTED_NODE_IDS` 或逐节点 dispatch。新 Node 由生产 Provider 声明 descriptor/binding；普通 JSON-safe callable 可用 `NodeProviderBuilder` 与 `DirectNodeExecutor` 零改造接入，Context/Runnable/Command-like 形状使用标准 Executor，Graph reducer 语义通过 Application 注入。只有 Artifact、Renderer、Memory 或模型依赖仍由 Provider 提供专用薄 Executor。当前 V1 的 15 个非模型节点统一绑定 `DeterministicNodeExecutor`，五个模型节点统一绑定 `ModelRoleExecutor`，不能把 20 个 descriptor 误写成 20 个独立 Adapter。Provider descriptor 必须与生产 Graph 节点集合一致，且每个声明模式都必须有精确或通用 Executor，否则 Application 构造失败。
 - Node、capability 与 suite Registry 必须属于同一 `pipeline_id`。新 Pipeline 的 benchmark manifest 应显式写入该 id；显式不匹配时必须在首个 attempt 前拒绝。

@@ -22,11 +22,12 @@
 | D018 | updated | D036、D044 | V1 Checkpointer、Store 与 GSSC 仍有效，persistence 生命周期现由冻结配置与补偿清理栈管理。 |
 | D023 | updated | D036 | V1 产品化边界仍有效，legacy 分流和独立 Review 部分已删除。 |
 | D027 | updated | D036 | 可靠性与安全账本原则仍有效，legacy 兼容部分已删除。 |
-| D028 | updated | D032、D038、D048、D049 | Node Lab Harness 原则仍有效，通用内核现为顶层 Python 包。 |
-| D032 | updated | D038、D048、D049 | Node 是唯一语义实现仍有效，Provider 及其 capability/fixture/suite 归功能命名空间。 |
+| D028 | updated | D032、D038、D048、D049、D050 | Node Lab Harness 原则仍有效，通用内核现为顶层 Python 包。 |
+| D032 | updated | D038、D048、D049、D050 | Node 是唯一语义实现仍有效，Provider 及其 capability/fixture/suite 归功能命名空间。 |
 | D034 | updated | D038 | 按职责拆分仍有效，文件已进一步迁入 V1 功能命名空间。 |
 | D035 | updated | D036、D044 | 薄 Route、Backend Service 和 Renderer 双层清理仍有效；Backend persistence 清理由 D044 加固。 |
-| D048 | updated | D049 | Pipeline 作用域与无 V1 默认语义继续有效；通用内核已迁出 Agent 内部目录。 |
+| D048 | updated | D049、D050 | Pipeline 作用域与无 V1 默认语义继续有效；通用内核已迁出 Agent 内部目录并补齐标准接入协议。 |
+| D049 | updated | D050 | 独立包、不独立部署的边界继续有效；包内不再复用 ShaderForge 存储实现。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -388,3 +389,10 @@
 - 决策：将通用 Harness 从 `src/agent/app/lab/` 迁到顶层 typed 包 `src/nodelab/`，公共导入统一改为 `nodelab.*`，不保留 Agent 内部兼容壳。V1 Provider 继续归属 `agent.app.nodes.png_to_shader_v1.integrations.node_lab`，`agent.app.services.node_lab` 继续作为默认组合根，Backend Route 继续只是显式开启的可选 transport；本次不创建独立进程、远程协议或部署单元。
 - 原因：内核已不持有 Agent、Graph、ShaderForge 或 V1 语义，继续放在 Agent 内部目录会错误表达所有权并阻碍其他 Pipeline 复用；但当前执行、Artifact Store、资源生命周期和 Provider 都是同进程 Python 协议，尚无独立扩缩容、多仓/多语言、队列取消、远程鉴权或资源隔离需求，提前服务化只会增加分布式状态和运维契约。
 - 影响：`nodelab` 作为当前 `shadergen` distribution 中的独立包随 wheel 发布并携带 `py.typed`；调用方需要迁移旧的内部导入。Agent 只保留 Pipeline Provider 与组合服务，Backend/CLI/benchmark 的行为、API 路径、Graph、V1 descriptor/capability/suite 和真实模型门禁不变。未来只有出现独立部署或跨进程需求时，才在现有 Application API 外增加远程服务边界。
+
+## D050 - Node Lab 通过标准 Adapter、Reducer 和完整 Schema 接入现有 Node
+
+- 日期：2026-07-22
+- 决策：`nodelab` 自有 `AtomicFileStore`，代码不得导入 `shaderforge`；benchmark 的 workspace、Provider 源码、补充源码和依赖版本由组合根注入，warm profile 统一命名为通用 `resource_lifecycle`，旧 `renderer_lifecycle` 仅保留只读兼容。普通 callable 通过 `NodeProviderBuilder` 从 Pydantic Model 或显式 JSON Schema 生成 descriptor/binding；标准 `DirectNodeExecutor`、`ContextNodeExecutor` 和 `RunnableNodeExecutor` 归一化 Mapping、`NodeExecutionResult` 与 Command-like 返回值。Runner 使用完整 JSON Schema Draft 2020-12 校验输入输出，并通过可注入 `StateReducer` 复现 Pipeline 的 State 合并语义。
+- 原因：仅把目录迁出 Agent 仍不足以证明可复用：存储和 benchmark 继续反向依赖 ShaderForge/仓库固定路径，接入方需要手写大量 descriptor，且原 Runner 只检查必填字段、固定浅合并，无法忠实承载带类型约束、context、Runnable、Command 或 reducer 的现有 Node。把这些差异收敛为稳定协议可以减少 Node 本体改造，同时保留生产语义唯一来源。
+- 影响：JSON-safe `node(state) -> partial State` 通常无需改造即可接入；已有 context/Runnable/Command Node 只需在 Provider 选择标准 Adapter，非浅合并 Graph 只需注入 reducer。标准 Adapter 自动登记委托实现与工厂源码，自定义 Executor 可显式补充 `source_paths`；reducer 源码进入 benchmark source fingerprint，归并后的 State hash 进入步骤 execution fingerprint，reducer 失败也提交安全证据。Artifact hydration、模型/数据库/Renderer/Memory 生命周期、权限门禁和敏感输出仍必须由所属 Pipeline 的薄 Executor 明示，内核不会反射 import、猜测依赖或自动授权副作用。Node Lab 继续随当前 distribution 进程内发布，本决策不引入远程服务、独立部署、Graph 变更或真实模型调用。

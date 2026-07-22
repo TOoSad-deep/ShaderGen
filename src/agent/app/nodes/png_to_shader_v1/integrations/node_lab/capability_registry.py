@@ -130,11 +130,16 @@ def _input_schema(spec: _CapabilitySpec) -> dict[str, object]:
     }
 
 
-def _output_schema(fields: tuple[str, ...]) -> dict[str, object]:
+def _output_schema(spec: _CapabilitySpec) -> dict[str, object]:
+    required = (
+        ["next_action"]
+        if spec.capability_id.startswith("decide-after-")
+        else list(spec.outputs)
+    )
     return {
         "type": "object",
-        "properties": {field: {} for field in fields},
-        "required": list(fields),
+        "properties": {field: {} for field in spec.outputs},
+        "required": required,
         "additionalProperties": True,
     }
 
@@ -156,7 +161,7 @@ def build_png_to_shader_v1_capability_registry() -> CapabilityRegistry:
             benchmark_metrics=list(spec.metrics),
             source_ref=spec.source_ref,
             input_schema=_input_schema(spec),
-            output_schema=_output_schema(spec.outputs),
+            output_schema=_output_schema(spec),
         )
         for spec in _SPECS
     )

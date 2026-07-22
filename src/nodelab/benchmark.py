@@ -10,7 +10,7 @@ import statistics
 import subprocess
 import sys
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from hashlib import sha256
@@ -23,6 +23,7 @@ import yaml  # type: ignore[import-untyped]
 from pydantic import Field, field_validator, model_validator
 from typing_extensions import Self
 
+from nodelab.file_store import AtomicFileStore
 from nodelab.models import (
     CapabilityExecutionRequest,
     Identifier,
@@ -31,9 +32,7 @@ from nodelab.models import (
     StepExecutionRequest,
     ensure_json_object,
 )
-from shaderforge.store import RunArtifactStore
 
-ROOT = Path(__file__).resolve().parents[2]
 _SUITE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _MAX_CASES = 100
 _MAX_REPETITIONS = 20
@@ -132,14 +131,7 @@ class BenchmarkCase(NodeLabModel):
     target_type: Literal["capability", "node", "scenario", "pipeline"]
     capability_id: Identifier | None = None
     node_id: Identifier | None = None
-    profile: Literal[
-        "micro",
-        "node",
-        "scenario",
-        "pipeline",
-        "renderer_cold",
-        "renderer_warm",
-    ]
+    profile: Identifier
     inputs: dict[str, Any] = Field(default_factory=dict)
     artifacts: list[BenchmarkArtifactInput] = Field(default_factory=list)
     expect: BenchmarkExpectation | None = None
@@ -252,10 +244,26 @@ class BenchmarkManifest(NodeLabModel):
     suite_id: Identifier
     repetitions: int = Field(default=1, ge=1, le=_MAX_REPETITIONS)
     warmups: int = Field(default=0, ge=0, le=_MAX_WARMUPS)
-    renderer_lifecycle: Literal["cold_per_attempt", "warm_per_suite"] = (
+    resource_lifecycle: Literal["cold_per_attempt", "warm_per_suite"] = (
         "cold_per_attempt"
     )
+    renderer_lifecycle: Literal["cold_per_attempt", "warm_per_suite"] | None = None
     cases: list[BenchmarkCase] = Field(min_length=1, max_length=_MAX_CASES)
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_renderer_lifecycle(cls, value: Any) -> Any:
+        """只读兼容旧 manifest，并收敛到通用资源生命周期字段."""
+        if not isinstance(value, Mapping):
+            return value
+        normalized = dict(value)
+        legacy = normalized.get("renderer_lifecycle")
+        current = normalized.get("resource_lifecycle")
+        if legacy is not None and current is not None and legacy != current:
+            raise ValueError("resource_lifecycle 与旧 renderer_lifecycle 不一致。")
+        if legacy is not None:
+            normalized["resource_lifecycle"] = legacy
+        return normalized
 
     @model_validator(mode="after")
     def validate_case_ids(self) -> Self:
@@ -264,19 +272,17 @@ class BenchmarkManifest(NodeLabModel):
         if len(ids) != len(set(ids)):
             raise ValueError("benchmark case_id 不能重复。")
         profiles = {case.profile for case in self.cases}
-        if "renderer_warm" in profiles:
-            if self.renderer_lifecycle != "warm_per_suite" or self.warmups < 1:
+        if self.resource_lifecycle == "warm_per_suite":
+            if self.warmups < 1:
                 raise ValueError(
-                    "renderer_warm 必须使用 warm_per_suite 且至少一次 warmup。"
+                    "warm_per_suite 必须至少执行一次 warmup。"
                 )
-            if profiles != {"renderer_warm"}:
+            if len(profiles) != 1:
                 raise ValueError(
-                    "renderer_warm 必须使用独立 suite，不能与其他 profile 混合。"
+                    "warm_per_suite 必须使用单一独立 profile。"
                 )
-            if any(case.capability_id != "render-shader" for case in self.cases):
-                raise ValueError("renderer_warm 当前只支持 render-shader capability。")
-        elif self.renderer_lifecycle != "cold_per_attempt":
-            raise ValueError("没有 renderer_warm case 时必须使用 cold_per_attempt。")
+            if any(case.target_type not in {"capability", "scenario"} for case in self.cases):
+                raise ValueError("warm_per_suite 当前只支持 capability/scenario case。")
         return self
 
 
@@ -299,7 +305,8 @@ class ValidatedBenchmarkSuite:
             "case_count": len(self.manifest.cases),
             "repetitions": self.manifest.repetitions,
             "warmups": self.manifest.warmups,
-            "renderer_lifecycle": self.manifest.renderer_lifecycle,
+            "resource_lifecycle": self.manifest.resource_lifecycle,
+            "renderer_lifecycle": self.manifest.resource_lifecycle,
             "profiles": sorted({case.profile for case in self.manifest.cases}),
         }
 
@@ -388,28 +395,41 @@ def load_benchmark_manifest(
 
 def source_environment(
     *,
+    workspace_root: str | Path | None = None,
     extra_source_paths: Iterable[Path] = (),
+    dependency_names: Iterable[str] = ("jsonschema", "pydantic", "PyYAML"),
 ) -> tuple[dict[str, Any], str, str]:
     """冻结影响 Node Lab deterministic 行为的源码与执行环境摘要."""
+    root = Path(workspace_root or Path.cwd()).resolve()
+    core_root = Path(__file__).resolve().parent
     source_paths = sorted(
         {
-            *Path(ROOT / "src/nodelab").glob("*.py"),
-            ROOT / "src/agent/app/services/node_lab.py",
+            *core_root.glob("*.py"),
             *(
-                path if path.is_absolute() else ROOT / path
+                path if path.is_absolute() else root / path
                 for path in extra_source_paths
             ),
         }
     )
+
+    def source_key(path: Path) -> str:
+        resolved = path.resolve()
+        if resolved.is_relative_to(root):
+            return resolved.relative_to(root).as_posix()
+        if resolved.is_relative_to(core_root):
+            return f"nodelab/{resolved.relative_to(core_root).as_posix()}"
+        opaque_parent = sha256(str(resolved.parent).encode("utf-8")).hexdigest()[:12]
+        return f"external/{opaque_parent}/{resolved.name}"
+
     source_hashes = {
-        path.relative_to(ROOT).as_posix(): sha256(path.read_bytes()).hexdigest()
+        source_key(path): sha256(path.read_bytes()).hexdigest()
         for path in source_paths
         if path.is_file()
     }
     source_fingerprint = sha256(_stable_json_bytes(source_hashes)).hexdigest()
     status = subprocess.run(
         ["git", "status", "--porcelain"],
-        cwd=ROOT,
+        cwd=root,
         check=False,
         capture_output=True,
         text=True,
@@ -419,7 +439,7 @@ def source_environment(
         "python": sys.version.split()[0],
         "platform": platform.platform(),
         "machine": platform.machine(),
-        "dependency_versions": _dependency_versions(),
+        "dependency_versions": _dependency_versions(dependency_names),
         "worktree_dirty": bool(status.stdout.strip())
         if status.returncode == 0
         else None,
@@ -429,10 +449,12 @@ def source_environment(
     return environment, source_fingerprint, environment_fingerprint
 
 
-def _dependency_versions() -> dict[str, str | None]:
-    """记录影响图片、数值和浏览器执行的包版本."""
+def _dependency_versions(
+    dependency_names: Iterable[str],
+) -> dict[str, str | None]:
+    """记录调用方声明的依赖版本，不内置领域包清单."""
     versions: dict[str, str | None] = {}
-    for package in ("numpy", "pillow", "playwright", "pydantic"):
+    for package in sorted(set(dependency_names)):
         try:
             versions[package] = version(package)
         except PackageNotFoundError:
@@ -443,7 +465,7 @@ def _dependency_versions() -> dict[str, str | None]:
 def _copy_attempt_artifact(
     *,
     application: Any,
-    store: RunArtifactStore,
+    store: AtomicFileStore,
     lab_run_id: str,
     descriptor: dict[str, Any],
     attempt_root: str,
@@ -571,7 +593,7 @@ def _upload_attempt_artifact(
     *,
     application: Any,
     suite: ValidatedBenchmarkSuite,
-    store: RunArtifactStore,
+    store: AtomicFileStore,
     context: _AttemptContext,
     case: BenchmarkCase,
     artifact_spec: BenchmarkArtifactInput,
@@ -607,7 +629,7 @@ def _upload_attempt_artifact(
 def _copy_response_artifacts(
     *,
     application: Any,
-    store: RunArtifactStore,
+    store: AtomicFileStore,
     context: _AttemptContext,
     response: Any,
     attempt_root: str,
@@ -633,12 +655,12 @@ async def _execute_attempt(
     *,
     application: Any,
     suite: ValidatedBenchmarkSuite,
-    store: RunArtifactStore,
+    store: AtomicFileStore,
     context: _AttemptContext,
     case: BenchmarkCase,
     attempt_root: str,
-    renderer: Any | None,
-    warm_render_calls: list[int],
+    resource: Any | None,
+    warm_resource_calls: list[int],
 ) -> tuple[dict[str, Any], bool, list[str], float]:
     """按显式 target_type 执行单目标或多步骤目标，并返回最终响应."""
     started = time.perf_counter()
@@ -670,8 +692,8 @@ async def _execute_attempt(
                     capability_id=case.capability_id,
                     inputs=inputs,
                 ),
-                resource=renderer,
-                warm_resource_calls=warm_render_calls,
+                resource=resource,
+                warm_resource_calls=warm_resource_calls,
             )
         else:
             assert case.node_id is not None
@@ -745,8 +767,8 @@ async def _execute_attempt(
                     capability_id=step.capability_id,
                     inputs=inputs,
                 ),
-                resource=renderer,
-                warm_resource_calls=warm_render_calls,
+                resource=resource,
+                warm_resource_calls=warm_resource_calls,
             )
             response_target = {
                 "target_type": "capability",
@@ -811,7 +833,7 @@ async def _execute_attempt(
 
 def _write_interruption(
     *,
-    store: RunArtifactStore,
+    store: AtomicFileStore,
     context: _AttemptContext,
     config_sha256: str,
     run_id: str,
@@ -876,9 +898,11 @@ async def run_benchmark_suite(
     """运行 AI-off suite，原子保存逐 attempt 证据和聚合报告."""
     run_id = _safe_suite_id(suite_run_id or f"node-lab-{uuid4().hex[:12]}")
     root = Path(output_root).resolve() / run_id
-    store = RunArtifactStore(root)
+    store = AtomicFileStore(root)
     environment, source_fingerprint, environment_fingerprint = source_environment(
+        workspace_root=application.benchmark_workspace_root,
         extra_source_paths=application.benchmark_source_paths(),
+        dependency_names=application.benchmark_dependency_names,
     )
     config_base = {
         "schema_version": "node_lab_benchmark_config_v1",
@@ -916,7 +940,7 @@ async def run_benchmark_suite(
     async with AsyncExitStack() as stack:
         resource = None
         warm_resource_calls = [0]
-        if suite.manifest.renderer_lifecycle == "warm_per_suite":
+        if suite.manifest.resource_lifecycle == "warm_per_suite":
             resource = await stack.enter_async_context(
                 application.benchmark_resource_session()
             )
@@ -958,8 +982,8 @@ async def run_benchmark_suite(
                     context=context,
                     case=case,
                     attempt_root=attempt_root,
-                    renderer=resource,
-                    warm_render_calls=warm_resource_calls,
+                    resource=resource,
+                    warm_resource_calls=warm_resource_calls,
                 )
             except (asyncio.CancelledError, KeyboardInterrupt) as exc:
                 _write_interruption(
@@ -986,7 +1010,8 @@ async def run_benchmark_suite(
                     "capability_id": case.capability_id,
                     "node_id": case.node_id,
                     "profile": case.profile,
-                    "renderer_lifecycle": suite.manifest.renderer_lifecycle,
+                    "resource_lifecycle": suite.manifest.resource_lifecycle,
+                    "renderer_lifecycle": suite.manifest.resource_lifecycle,
                     "attempt_id": attempt_id,
                     "warmup": warmup,
                     "duration_ms": duration_ms,
@@ -1051,7 +1076,8 @@ async def run_benchmark_suite(
         "profiles": sorted(
             {str(item["profile"]) for item in [*attempts, *interruptions]}
         ),
-        "renderer_lifecycle": suite.manifest.renderer_lifecycle,
+        "resource_lifecycle": suite.manifest.resource_lifecycle,
+        "renderer_lifecycle": suite.manifest.resource_lifecycle,
     }
     store.write_json("report.json", report)
     store.write_text("report.md", _report_markdown(report))
@@ -1069,7 +1095,7 @@ def _report_markdown(report: dict[str, Any]) -> str:
         f"- attempts: `{report['passed_attempt_count']}/{report['attempt_count']}` passed",
         f"- completed/interrupted: `{report['completed_attempt_count']}` / `{report['interrupted_attempt_count']}`",
         f"- correctness rate: `{report['correctness_rate']:.3f}`",
-        f"- renderer lifecycle: `{report['renderer_lifecycle']}`",
+        f"- resource lifecycle: `{report['resource_lifecycle']}`",
         f"- duration p50/p95/max ms: `{duration['p50']}` / `{duration['p95']}` / `{duration['max']}`",
         f"- source fingerprint: `{report['source_fingerprint']}`",
         f"- environment fingerprint: `{report['environment_fingerprint']}`",

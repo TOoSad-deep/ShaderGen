@@ -89,6 +89,7 @@ model_identity = lab.NodeDescriptor is NodeDescriptor
 exports_complete = set(lab.__all__) == set(lab._EXPORT_MODULES)
 runner_after_model = "nodelab.runner" in sys.modules
 renderer_after_model = "shaderforge.rendering" in sys.modules
+shaderforge_store_after_model = "shaderforge.store" in sys.modules
 playwright_after_model = "playwright.async_api" in sys.modules
 
 application = lab.NodeLabApplication
@@ -98,9 +99,11 @@ print(json.dumps({
     "exports_complete": exports_complete,
     "runner_after_model": runner_after_model,
     "renderer_after_model": renderer_after_model,
+    "shaderforge_store_after_model": shaderforge_store_after_model,
     "playwright_after_model": playwright_after_model,
     "application_name": application.__name__,
     "runner_loaded": "nodelab.runner" in sys.modules,
+    "shaderforge_store_loaded": "shaderforge.store" in sys.modules,
 }))
 """
     )
@@ -110,9 +113,11 @@ print(json.dumps({
         "exports_complete": True,
         "runner_after_model": False,
         "renderer_after_model": False,
+        "shaderforge_store_after_model": False,
         "playwright_after_model": False,
         "application_name": "NodeLabApplication",
         "runner_loaded": True,
+        "shaderforge_store_loaded": False,
     }
 
 

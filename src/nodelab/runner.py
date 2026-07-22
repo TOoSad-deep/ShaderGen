@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Iterable, Mapping
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
+
+from jsonschema import Draft202012Validator  # type: ignore[import-untyped]
+from jsonschema.exceptions import SchemaError  # type: ignore[import-untyped]
 
 from nodelab.capabilities import CapabilityRegistry
 from nodelab.fixtures import FixtureRegistry
@@ -22,6 +25,9 @@ from nodelab.integration import (
     NodeExecutor,
     NodeProvider,
     PreflightNodeExecutor,
+    ShallowStateReducer,
+    StateReducer,
+    discover_implementation_source_paths,
 )
 from nodelab.models import (
     DEFAULT_NODE_LAB_PIPELINE_ID,
@@ -176,6 +182,48 @@ def _missing_required_fields(
     return sorted(field for field in required if field not in value)
 
 
+def _validate_json_schema(
+    schema: Mapping[str, object],
+    value: Mapping[str, object],
+    *,
+    code: str,
+    message: str,
+    stage: str,
+    lab_run_id: str | None = None,
+    node_id: str | None = None,
+) -> None:
+    """按 Draft 2020-12 完整校验 JSON Schema，并只返回安全错误位置."""
+    try:
+        Draft202012Validator.check_schema(schema)
+    except SchemaError as exc:
+        raise ValueError("Node descriptor 包含非法 JSON Schema。") from exc
+    errors = sorted(
+        Draft202012Validator(schema).iter_errors(value),
+        key=lambda item: tuple(str(part) for part in item.absolute_path),
+    )
+    if not errors:
+        return
+    details = [
+        {
+            "path": "$"
+            + "".join(
+                f"[{part}]" if isinstance(part, int) else f".{part}"
+                for part in error.absolute_path
+            ),
+            "validator": str(error.validator),
+        }
+        for error in errors[:20]
+    ]
+    raise NodeLabError(
+        code,
+        message,
+        stage=stage,
+        lab_run_id=lab_run_id,
+        node_id=node_id,
+        details={"schema_errors": details},
+    )
+
+
 class NodeLabApplication:
     """供人工工具、测试和 benchmark 共用的单一执行真相源."""
 
@@ -194,6 +242,14 @@ class NodeLabApplication:
         node_executors: Mapping[tuple[str, ExecutionMode], NodeExecutor] | None = None,
         benchmark_resource_factory: BenchmarkResourceFactory | None = None,
         capability_runtime_factory: CapabilityRuntimeFactory | None = None,
+        state_reducer: StateReducer | None = None,
+        benchmark_workspace_root: str | Path | None = None,
+        benchmark_source_paths: Iterable[str | Path] = (),
+        benchmark_dependency_names: Iterable[str] = (
+            "jsonschema",
+            "pydantic",
+            "PyYAML",
+        ),
         id_factory: IdFactory = _new_id,
         now: NowFactory = _utc_now,
         timer: Timer = time.perf_counter,
@@ -246,6 +302,14 @@ class NodeLabApplication:
         self._suite_registry = suite_registry or SuiteRegistry()
         self._benchmark_resource_factory = benchmark_resource_factory
         self._capability_runtime_factory = capability_runtime_factory
+        self._state_reducer = state_reducer or ShallowStateReducer()
+        self._benchmark_workspace_root = Path(
+            benchmark_workspace_root or Path.cwd()
+        ).resolve()
+        self._benchmark_source_paths = tuple(
+            Path(path) for path in benchmark_source_paths
+        )
+        self._benchmark_dependency_names = tuple(benchmark_dependency_names)
         configured: dict[ExecutionMode, NodeExecutor] = {
             "fixture": FixtureNodeExecutor(self._fixtures),
         }
@@ -324,9 +388,26 @@ class NodeLabApplication:
 
     def benchmark_source_paths(self) -> tuple[Path, ...]:
         """返回 Provider 声明的 benchmark 生产源文件."""
-        if self._node_provider is None:
-            return ()
-        return tuple(Path(path) for path in self._node_provider.source_paths())
+        provider_paths = (
+            tuple(Path(path) for path in self._node_provider.source_paths())
+            if self._node_provider is not None
+            else ()
+        )
+        reducer_paths = tuple(
+            Path(path)
+            for path in discover_implementation_source_paths(self._state_reducer)
+        )
+        return (*self._benchmark_source_paths, *provider_paths, *reducer_paths)
+
+    @property
+    def benchmark_workspace_root(self) -> Path:
+        """返回环境 fingerprint 使用的调用方工作区根."""
+        return self._benchmark_workspace_root
+
+    @property
+    def benchmark_dependency_names(self) -> tuple[str, ...]:
+        """返回调用方声明的环境依赖包名."""
+        return self._benchmark_dependency_names
 
     def describe_capabilities(
         self,
@@ -521,8 +602,19 @@ class NodeLabApplication:
                 node_id=request.node_id,
                 details={"missing_fields": missing_inputs},
             )
+        _validate_json_schema(
+            descriptor.input_schema,
+            state_before,
+            code="input_contract_invalid",
+            message="节点输入不符合 descriptor JSON Schema。",
+            stage="input_validation",
+            lab_run_id=request.lab_run_id,
+            node_id=request.node_id,
+        )
         step_id = self._id_factory()
         started = self._timer()
+        output: dict[str, object] = {}
+        state_after = dict(state_before)
         try:
             result = await executor.execute(descriptor, request, state_before)
             missing_outputs = _missing_required_fields(
@@ -538,6 +630,30 @@ class NodeLabApplication:
                     node_id=request.node_id,
                     details={"missing_fields": missing_outputs},
                 )
+            _validate_json_schema(
+                descriptor.output_schema,
+                result.output_patch,
+                code="internal_invariant_failed",
+                message="节点输出不符合 descriptor JSON Schema。",
+                stage="output_validation",
+                lab_run_id=request.lab_run_id,
+                node_id=request.node_id,
+            )
+            output = dict(result.output_patch)
+            try:
+                state_after = ensure_json_object(
+                    self._state_reducer.apply(state_before, output),
+                    path="$.state_after",
+                )
+            except Exception as exc:
+                raise NodeLabError(
+                    "internal_invariant_failed",
+                    "State reducer 无法生成合法的 JSON-safe State。",
+                    stage="state_reduction",
+                    lab_run_id=request.lab_run_id,
+                    node_id=request.node_id,
+                    details={"error_type": type(exc).__name__},
+                ) from exc
         except NodeLabError as exc:
             result = None
             error_detail = exc.to_detail()
@@ -561,7 +677,7 @@ class NodeLabApplication:
         execution_status: ExecutionStatus
         outcome: ExecutionOutcome
         if result is None:
-            output: dict[str, object] = {}
+            output = {}
             state_after = dict(state_before)
             diagnostics = {"error": error_detail}
             provenance = {"execution_source": request.execution_mode}
@@ -572,8 +688,6 @@ class NodeLabApplication:
             outcome = "failed"
         else:
             output = dict(result.output_patch)
-            state_after = {**state_before, **output}
-            ensure_json_object(state_after, path="$.state_after")
             diagnostics = dict(result.diagnostics)
             provenance = dict(result.provenance)
             usage = dict(result.usage)
@@ -591,6 +705,7 @@ class NodeLabApplication:
                 "diagnostics": diagnostics,
                 "provenance": provenance,
                 "outcome": outcome,
+                "state_after_sha256": _stable_sha256(state_after),
             }
         )
         response = StepExecutionResponse(
@@ -687,6 +802,14 @@ class NodeLabApplication:
         execution_id = self._id_factory()
         started = self._timer()
         try:
+            _validate_json_schema(
+                descriptor.input_schema,
+                request.inputs,
+                code="input_contract_invalid",
+                message="Capability 输入不符合 descriptor JSON Schema。",
+                stage="capability_input_validation",
+                lab_run_id=request.lab_run_id,
+            )
             if self._capability_executor is None:
                 raise NodeLabError(
                     "capability_not_configured",
@@ -698,6 +821,14 @@ class NodeLabApplication:
                 request,
                 descriptor,
                 runtime,
+            )
+            _validate_json_schema(
+                descriptor.output_schema,
+                result.output_patch,
+                code="internal_invariant_failed",
+                message="Capability 输出不符合 descriptor JSON Schema。",
+                stage="capability_output_validation",
+                lab_run_id=request.lab_run_id,
             )
         except NodeLabError as exc:
             result = None

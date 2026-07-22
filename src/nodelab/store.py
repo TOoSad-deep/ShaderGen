@@ -8,6 +8,7 @@ from hashlib import sha256
 from pathlib import Path
 from typing import Any
 
+from nodelab.file_store import AtomicFileStore
 from nodelab.models import (
     ArtifactDescriptor,
     LabRunRecord,
@@ -16,7 +17,6 @@ from nodelab.models import (
     StepExecutionResponse,
     ensure_json_object,
 )
-from shaderforge.store import RunArtifactStore
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _STEPS_INDEX_SCHEMA = "node_lab_steps_index_v1"
@@ -37,7 +37,7 @@ def _safe_identifier(value: str, field_name: str) -> str:
 
 
 def _load_json_object(
-    run_store: RunArtifactStore, relative_path: str
+    run_store: AtomicFileStore, relative_path: str
 ) -> dict[str, Any]:
     """从隔离 run 目录读取 JSON object."""
     try:
@@ -76,7 +76,7 @@ class NodeLabStore:
             )
         return candidate
 
-    def _existing_run_store(self, lab_run_id: str) -> RunArtifactStore:
+    def _existing_run_store(self, lab_run_id: str) -> AtomicFileStore:
         """打开已提交 LabRun；目录存在但无 run.json 仍视为无效."""
         candidate = self._candidate_root(lab_run_id)
         if not candidate.is_dir() or not (candidate / "run.json").is_file():
@@ -86,7 +86,7 @@ class NodeLabStore:
                 stage="store_read",
                 lab_run_id=lab_run_id,
             )
-        return RunArtifactStore(candidate)
+        return AtomicFileStore(candidate)
 
     def create_run(
         self,
@@ -102,7 +102,7 @@ class NodeLabStore:
                 stage="store_write",
                 lab_run_id=record.lab_run_id,
             )
-        run_store = RunArtifactStore(candidate)
+        run_store = AtomicFileStore(candidate)
         safe_state = ensure_json_object(initial_state, path="$.initial_state")
         run_store.write_json("root-state.json", safe_state)
         run_store.write_json(

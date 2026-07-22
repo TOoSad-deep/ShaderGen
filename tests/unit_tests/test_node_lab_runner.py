@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping
 
 import pytest
+from pydantic import BaseModel
 
 from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
     build_png_to_shader_v1_registry,
@@ -18,8 +20,14 @@ from agent.app.services.node_lab import (
     describe_nodes,
     execute_step,
 )
+from nodelab.benchmark import source_environment
 from nodelab.capabilities import CapabilityRegistry
-from nodelab.integration import DirectNodeExecutor, NodeExecutorBinding
+from nodelab.integration import (
+    ContextNodeExecutor,
+    DirectNodeExecutor,
+    NodeExecutorBinding,
+    RunnableNodeExecutor,
+)
 from nodelab.models import (
     CapabilityDescriptor,
     CapabilityExecutionRequest,
@@ -30,6 +38,7 @@ from nodelab.models import (
     NodeLabError,
     StepExecutionRequest,
 )
+from nodelab.provider import NodeProviderBuilder
 from nodelab.runner import NodeLabApplication
 from nodelab.store import NodeLabStore
 
@@ -242,6 +251,395 @@ async def test_custom_provider_does_not_inherit_v1_capabilities_fixtures_or_suit
     )
     assert response.pipeline_id == "custom_pipeline"
     assert response.output == {"echo": "hello"}
+
+
+class _BuilderInput(BaseModel):
+    value: str
+
+
+class _BuilderOutput(BaseModel):
+    echoed: str
+
+
+@pytest.mark.anyio
+async def test_provider_builder_connects_typed_callable_without_node_changes(
+    tmp_path: Path,
+) -> None:
+    def existing_node(state: Mapping[str, object]) -> dict[str, object]:
+        return {"echoed": state["value"]}
+
+    provider = (
+        NodeProviderBuilder("builder_pipeline")
+        .add_node(
+            existing_node,
+            node_id="echo",
+            input_model=_BuilderInput,
+            output_model=_BuilderOutput,
+            example_inputs={"value": "hello"},
+        )
+        .build()
+    )
+    app = NodeLabApplication(
+        store=NodeLabStore(tmp_path),
+        node_provider=provider,
+        id_factory=_id_factory(["lab-1", "step-1"]),
+        now=lambda: FIXED_NOW,
+        timer=_timer([1.0, 1.01]),
+    )
+    run = app.create_run(LabRunCreateRequest())
+    response = await app.execute_step(
+        StepExecutionRequest(
+            lab_run_id=run.lab_run_id,
+            node_id="echo",
+            execution_mode="deterministic",
+            inputs={"value": "hello"},
+        )
+    )
+
+    assert response.output == {"echoed": "hello"}
+    with pytest.raises(NodeLabError) as caught:
+        await app.execute_step(
+            StepExecutionRequest(
+                lab_run_id=run.lab_run_id,
+                node_id="echo",
+                execution_mode="deterministic",
+                inputs={"value": 42},
+            )
+        )
+    assert caught.value.code == "input_contract_invalid"
+    assert caught.value.stage == "input_validation"
+
+
+@dataclass(frozen=True)
+class _CommandLike:
+    update: dict[str, object]
+    goto: str
+
+
+@pytest.mark.anyio
+async def test_context_and_command_like_node_use_standard_adapter(
+    tmp_path: Path,
+) -> None:
+    def runtime_node(
+        state: Mapping[str, object],
+        context: object,
+    ) -> _CommandLike:
+        return _CommandLike(
+            update={"result": f"{state['value']}:{context}"},
+            goto="next-node",
+        )
+
+    executor = ContextNodeExecutor(
+        runtime_node,
+        context_factory=lambda _descriptor, _request, _state: "runtime",
+    )
+    delegated_source = tmp_path / "delegated_runtime.py"
+    delegated_source.write_text("def delegated_runtime():\n    return 'v1'\n")
+    provider = (
+        NodeProviderBuilder("context_pipeline")
+        .add_node(
+            executor=executor,
+            node_id="runtime-node",
+            source_paths=[delegated_source],
+            input_schema={
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": True,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {"result": {"type": "string"}},
+                "required": ["result"],
+                "additionalProperties": False,
+            },
+            example_inputs={"value": "hello"},
+        )
+        .build()
+    )
+    provider_source_paths = {Path(path) for path in provider.source_paths()}
+    assert Path(__file__).resolve() in provider_source_paths
+    assert delegated_source.resolve() in provider_source_paths
+    _, source_fingerprint_before, _ = source_environment(
+        workspace_root=tmp_path,
+        extra_source_paths=provider_source_paths,
+        dependency_names=(),
+    )
+    delegated_source.write_text("def delegated_runtime():\n    return 'v2'\n")
+    _, source_fingerprint_after, _ = source_environment(
+        workspace_root=tmp_path,
+        extra_source_paths=provider_source_paths,
+        dependency_names=(),
+    )
+    assert source_fingerprint_before != source_fingerprint_after
+    app = NodeLabApplication(
+        store=NodeLabStore(tmp_path),
+        node_provider=provider,
+        id_factory=_id_factory(["lab-1", "step-1"]),
+        now=lambda: FIXED_NOW,
+        timer=_timer([1.0, 1.01]),
+    )
+    run = app.create_run(LabRunCreateRequest())
+    response = await app.execute_step(
+        StepExecutionRequest(
+            lab_run_id=run.lab_run_id,
+            node_id="runtime-node",
+            inputs={"value": "hello"},
+            execution_mode="deterministic",
+        )
+    )
+
+    assert response.output == {"result": "hello:runtime"}
+    assert response.next_action == "next-node"
+
+
+@pytest.mark.anyio
+async def test_runnable_adapter_and_custom_state_reducer_preserve_node_source(
+    tmp_path: Path,
+) -> None:
+    class Runnable:
+        async def ainvoke(
+            self,
+            state: dict[str, object],
+            config: Mapping[str, object] | None,
+        ) -> dict[str, object]:
+            assert config == {"mode": "lab"}
+            return {"events": [str(state["value"])]}
+
+    class EventReducer:
+        def apply(
+            self,
+            before: Mapping[str, object],
+            update: Mapping[str, object],
+        ) -> dict[str, object]:
+            return {
+                **before,
+                **update,
+                "events": [*list(before.get("events", [])), *list(update["events"])],
+            }
+
+    executor = RunnableNodeExecutor(
+        Runnable(),
+        config_factory=lambda _request: {"mode": "lab"},
+    )
+    provider = (
+        NodeProviderBuilder("runnable_pipeline")
+        .add_node(
+            executor=executor,
+            node_id="append-event",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "value": {"type": "string"},
+                    "events": {"type": "array"},
+                },
+                "required": ["value", "events"],
+                "additionalProperties": True,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {"events": {"type": "array"}},
+                "required": ["events"],
+                "additionalProperties": False,
+            },
+            example_inputs={"value": "child", "events": []},
+        )
+        .build()
+    )
+    app = NodeLabApplication(
+        store=NodeLabStore(tmp_path),
+        node_provider=provider,
+        state_reducer=EventReducer(),
+        id_factory=_id_factory(["lab-1", "step-1"]),
+        now=lambda: FIXED_NOW,
+        timer=_timer([1.0, 1.01]),
+    )
+    run = app.create_run(LabRunCreateRequest(initial_state={"events": ["root"]}))
+    response = await app.execute_step(
+        StepExecutionRequest(
+            lab_run_id=run.lab_run_id,
+            node_id="append-event",
+            inputs={"value": "child"},
+            execution_mode="deterministic",
+        )
+    )
+
+    assert response.output == {"events": ["child"]}
+    assert response.state_diff.changed["events"]["after"] == ["root", "child"]
+    assert Path(__file__).resolve() in {
+        Path(path) for path in app.benchmark_source_paths()
+    }
+
+
+@pytest.mark.anyio
+async def test_reducer_failures_commit_safe_step_evidence(tmp_path: Path) -> None:
+    def existing_node(state: Mapping[str, object]) -> dict[str, object]:
+        return {"echoed": state["value"]}
+
+    class RaisingReducer:
+        def apply(
+            self,
+            before: Mapping[str, object],
+            update: Mapping[str, object],
+        ) -> dict[str, object]:
+            del before, update
+            raise RuntimeError("secret reducer detail")
+
+    class InvalidReducer:
+        def apply(
+            self,
+            before: Mapping[str, object],
+            update: Mapping[str, object],
+        ) -> dict[str, object]:
+            del before, update
+            return {"invalid": object()}
+
+    provider = (
+        NodeProviderBuilder("reducer_failure_pipeline")
+        .add_node(
+            existing_node,
+            node_id="echo",
+            input_model=_BuilderInput,
+            output_model=_BuilderOutput,
+            example_inputs={"value": "hello"},
+        )
+        .build()
+    )
+    for suffix, reducer in (
+        ("raises", RaisingReducer()),
+        ("invalid", InvalidReducer()),
+    ):
+        store = NodeLabStore(tmp_path / suffix)
+        app = NodeLabApplication(
+            store=store,
+            node_provider=provider,
+            state_reducer=reducer,
+            id_factory=_id_factory(["lab-1", "step-1"]),
+            now=lambda: FIXED_NOW,
+            timer=_timer([1.0, 1.01]),
+        )
+        run = app.create_run(LabRunCreateRequest())
+        response = await app.execute_step(
+            StepExecutionRequest(
+                lab_run_id=run.lab_run_id,
+                node_id="echo",
+                execution_mode="deterministic",
+                inputs={"value": "hello"},
+            )
+        )
+
+        assert response.execution_status == "failed"
+        assert response.diagnostics["error"]["stage"] == "state_reduction"
+        assert response.diagnostics["error"]["error_type"] in {
+            "RuntimeError",
+            "ValueError",
+        }
+        assert "secret reducer detail" not in str(response.to_dict())
+        assert app.list_step_ids(run.lab_run_id) == ("step-1",)
+        assert app.get_step(run.lab_run_id, "step-1") == response
+        assert store.load_state_after(run.lab_run_id, "step-1") == {"value": "hello"}
+
+
+@pytest.mark.anyio
+async def test_execution_fingerprint_includes_reduced_state(tmp_path: Path) -> None:
+    def existing_node(state: Mapping[str, object]) -> dict[str, object]:
+        return {"echoed": state["value"]}
+
+    class AlternatingReducer:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def apply(
+            self,
+            before: Mapping[str, object],
+            update: Mapping[str, object],
+        ) -> dict[str, object]:
+            self.calls += 1
+            return {**before, **update, "reducer_revision": self.calls}
+
+    provider = (
+        NodeProviderBuilder("reducer_fingerprint_pipeline")
+        .add_node(
+            existing_node,
+            node_id="echo",
+            input_model=_BuilderInput,
+            output_model=_BuilderOutput,
+            example_inputs={"value": "hello"},
+        )
+        .build()
+    )
+    app = NodeLabApplication(
+        store=NodeLabStore(tmp_path),
+        node_provider=provider,
+        state_reducer=AlternatingReducer(),
+        id_factory=_id_factory(["lab-1", "step-1", "step-2"]),
+        now=lambda: FIXED_NOW,
+        timer=_timer([1.0, 1.01, 2.0, 2.01]),
+    )
+    run = app.create_run(LabRunCreateRequest())
+    request = StepExecutionRequest(
+        lab_run_id=run.lab_run_id,
+        node_id="echo",
+        execution_mode="deterministic",
+        inputs={"value": "hello"},
+    )
+
+    first = await app.execute_step(request)
+    second = await app.execute_step(request)
+
+    assert first.output == second.output == {"echoed": "hello"}
+    assert first.state_diff.added["reducer_revision"] == 1
+    assert second.state_diff.added["reducer_revision"] == 2
+    assert first.execution_fingerprint != second.execution_fingerprint
+
+
+@pytest.mark.anyio
+async def test_runnable_adapter_omits_optional_config_when_not_configured(
+    tmp_path: Path,
+) -> None:
+    class Runnable:
+        def invoke(self, state: dict[str, object]) -> dict[str, object]:
+            return {"echoed": state["value"]}
+
+    provider = (
+        NodeProviderBuilder("one_arg_runnable_pipeline")
+        .add_node(
+            executor=RunnableNodeExecutor(Runnable()),
+            node_id="one-arg-runnable",
+            input_schema={
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": True,
+            },
+            output_schema={
+                "type": "object",
+                "properties": {"echoed": {"type": "string"}},
+                "required": ["echoed"],
+                "additionalProperties": False,
+            },
+            example_inputs={"value": "hello"},
+        )
+        .build()
+    )
+    app = NodeLabApplication(
+        store=NodeLabStore(tmp_path),
+        node_provider=provider,
+        id_factory=_id_factory(["lab-1", "step-1"]),
+        now=lambda: FIXED_NOW,
+        timer=_timer([1.0, 1.01]),
+    )
+    run = app.create_run(LabRunCreateRequest())
+    response = await app.execute_step(
+        StepExecutionRequest(
+            lab_run_id=run.lab_run_id,
+            node_id="one-arg-runnable",
+            execution_mode="deterministic",
+            inputs={"value": "hello"},
+        )
+    )
+
+    assert response.output == {"echoed": "hello"}
 
 
 def test_create_run_and_artifact_are_isolated_by_opaque_ids(tmp_path: Path) -> None:

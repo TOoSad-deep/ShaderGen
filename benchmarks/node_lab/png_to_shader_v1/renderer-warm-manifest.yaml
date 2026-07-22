@@ -3,7 +3,7 @@ pipeline_id: png_to_shader_v1
 suite_id: node_lab_renderer_warm_ai_off_v1
 repetitions: 20
 warmups: 1
-renderer_lifecycle: warm_per_suite
+resource_lifecycle: warm_per_suite
 cases:
   - case_id: render_pink_gel_warm
     target_type: capability

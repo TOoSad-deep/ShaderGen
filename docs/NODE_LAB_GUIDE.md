@@ -80,10 +80,47 @@ make dev-frontend
 Node Lab 内核只认通用 `NodeProvider`、`CapabilityExecutor` 和 Registry，不认 PNG-to-Shader 的具体文件、Graph、Renderer 或节点 ID。新增 Pipeline 或生产 Node 时：
 
 1. 在生产 Graph 中正常注册 Node，并完成 Graph 可视化与路由测试。
-2. 在所属功能命名空间的 Provider registry 显式声明相同 `pipeline_id`、descriptor、Schema 和机器可读示例；当前 V1 路径是 `src/agent/app/nodes/png_to_shader_v1/integrations/node_lab/registry.py`。
-3. 若 Node 只消费 JSON-safe State 并返回 JSON-safe partial State，可用 `DirectNodeExecutor` 绑定 callable。当前 V1 的 15 个非模型 descriptor 统一由 `DeterministicNodeExecutor` 负责 Artifact hydration、依赖生命周期、副作用门禁和输出投影，五个模型 descriptor 统一由 `ModelRoleExecutor` 提供 fixture/mock/real binding；不要把 descriptor 数量误写成独立 Adapter 数量。
+2. 普通 JSON-safe Node 优先用 `NodeProviderBuilder` 从 callable、Pydantic 输入/输出模型和调用示例生成 descriptor 与 binding；无需修改 Node。需要更精细元数据时，也可以在所属功能命名空间手写 Provider registry。当前 V1 路径是 `src/agent/app/nodes/png_to_shader_v1/integrations/node_lab/registry.py`。
+3. 按现有 Node 形状选择标准 Adapter：`DirectNodeExecutor` 处理 `node(state)`，`ContextNodeExecutor` 处理 `node(state, context)`，`RunnableNodeExecutor` 处理 `invoke/ainvoke`。三者都支持 Mapping、`NodeExecutionResult` 和带 `update`/`goto` 的 Command-like 返回值，并自动把被包装实现及工厂源码加入 benchmark fingerprint；自定义 Executor 若无法自动发现委托实现，应通过 Builder 的 `source_paths` 显式登记。若 Graph State 使用 append、去重等 reducer，在 Application 组合根注入对应 `StateReducer`，不改生产 Node；reducer 实现源码和归并后的 State hash 也会进入相应 fingerprint。
 4. Pipeline 若提供独立 capability、fixture 或内置 benchmark，分别装配自己的 `CapabilityRegistry`/Executor、`FixtureRegistry` 和 `SuiteRegistry`；不要把领域 Adapter 放入 `src/nodelab/`。新 manifest 应写入所属 `pipeline_id`。
-5. 不修改 `src/nodelab/`。一致性测试应要求 Provider descriptor 与生产 Graph 节点集合完全相等、所有声明模式都有 Executor，并验证 Node/capability/manifest 的 Pipeline 作用域一致。
+5. Artifact hydration、模型调用门禁、Renderer/数据库/Memory 生命周期、敏感输出投影等副作用必须留在 Pipeline 的薄 Executor 中显式实现。当前 V1 的 15 个非模型 descriptor 统一由 `DeterministicNodeExecutor` 处理这些边界，五个模型 descriptor 统一由 `ModelRoleExecutor` 提供 fixture/mock/real binding；不要把 descriptor 数量误写成独立 Adapter 数量。
+6. 不修改 `src/nodelab/`。一致性测试应要求 Provider descriptor 与生产 Graph 节点集合完全相等、所有声明模式都有 Executor，并验证 Node/capability/manifest 的 Pipeline 作用域一致。
+
+最小接入示例：
+
+```python
+from pydantic import BaseModel
+
+from nodelab import NodeLabApplication, NodeProviderBuilder
+
+
+class AddInput(BaseModel):
+    left: int
+    right: int
+
+
+class AddOutput(BaseModel):
+    total: int
+
+
+def add_node(state: dict[str, object]) -> dict[str, object]:
+    return {"total": int(state["left"]) + int(state["right"])}
+
+
+provider = (
+    NodeProviderBuilder("example_pipeline")
+    .add_node(
+        add_node,
+        input_model=AddInput,
+        output_model=AddOutput,
+        example_inputs={"left": 1, "right": 2},
+    )
+    .build()
+)
+application = NodeLabApplication(root="output/node-lab/example", node_provider=provider)
+```
+
+Runner 会按完整 JSON Schema Draft 2020-12 校验输入和输出，而不只是检查必填字段。默认 State 合并是顶层覆盖；只有生产 Graph 具有其他 reducer 语义时才需要额外注入。Builder 负责减少样板代码，不会反射 import Node、猜测资源依赖或自动授权副作用。
 
 这里的“解耦”是指 Harness 不感知 Node 实现。`create_node_lab_application()` 仅在未传 Provider 时兼容装配 V1；显式传入新 Provider 后，capability、fixture 和 suite 默认为空，不会静默继承 V1。Node Lab 仍通过 Provider 调用真实生产 Node，以保证测试的是生产语义，而不是第二套模拟实现。
 
@@ -179,10 +216,12 @@ make benchmark-node-lab-model
 make test-node-lab-ui
 ```
 
-- AI-off suite 分离 capability、真实 node target、scenario/pipeline、Renderer cold/warm 与 HTTP transport。
+- AI-off suite 分离 capability、真实 node target、scenario/pipeline、通用 resource cold/warm 与 HTTP transport；V1 的 warm resource 仍是 Renderer。
 - 模型 suite 默认用五角色固定 fixture，聚合 Parser、Schema/binding、timeout、latency、token、费用和模型身份；不会调用真实模型。
 - 每个 attempt 独立落盘；失败和中断保留在分母，恢复不能覆盖既有证据。
 - Node Lab 报告只用于模块诊断，不写入或修改 M5 report、gate 和人工评审文件。
+
+新 manifest 使用 `resource_lifecycle: cold_per_attempt|warm_per_suite`。旧 manifest 和 HTTP 响应中的 `renderer_lifecycle` 暂时保留兼容，但新 Pipeline 不应依赖 Renderer 命名。
 
 ## 如何读步骤响应
 

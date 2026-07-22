@@ -11,10 +11,14 @@ if TYPE_CHECKING:
     from nodelab.integration import (
         AsyncResource,
         CapabilityExecutor,
+        ContextNodeExecutor,
         DirectNodeExecutor,
         NodeExecutor,
         NodeExecutorBinding,
         NodeProvider,
+        RunnableNodeExecutor,
+        ShallowStateReducer,
+        StateReducer,
     )
     from nodelab.models import (
         ArtifactDescriptor,
@@ -27,6 +31,7 @@ if TYPE_CHECKING:
         StepExecutionRequest,
         StepExecutionResponse,
     )
+    from nodelab.provider import NodeProviderBuilder
     from nodelab.registry import NodeRegistry
     from nodelab.runner import NodeLabApplication
     from nodelab.store import NodeLabStore
@@ -40,6 +45,7 @@ __all__ = [
     "CapabilityRegistry",
     "CapabilityExecutionRequest",
     "CapabilityExecutionResponse",
+    "ContextNodeExecutor",
     "FixtureDefinition",
     "FixtureRegistry",
     "LabRunCreateRequest",
@@ -49,8 +55,12 @@ __all__ = [
     "NodeExecutorBinding",
     "NodeLabApplication",
     "NodeProvider",
+    "NodeProviderBuilder",
     "NodeLabStore",
     "NodeRegistry",
+    "RunnableNodeExecutor",
+    "ShallowStateReducer",
+    "StateReducer",
     "DirectNodeExecutor",
     "StepExecutionRequest",
     "StepExecutionResponse",
@@ -63,10 +73,14 @@ _EXPORT_MODULES = {
     "CapabilityRegistry": "nodelab.capabilities",
     "AsyncResource": "nodelab.integration",
     "CapabilityExecutor": "nodelab.integration",
+    "ContextNodeExecutor": "nodelab.integration",
     "DirectNodeExecutor": "nodelab.integration",
     "NodeExecutor": "nodelab.integration",
     "NodeExecutorBinding": "nodelab.integration",
     "NodeProvider": "nodelab.integration",
+    "RunnableNodeExecutor": "nodelab.integration",
+    "ShallowStateReducer": "nodelab.integration",
+    "StateReducer": "nodelab.integration",
     "ArtifactDescriptor": "nodelab.models",
     "CapabilityDescriptor": "nodelab.models",
     "CapabilityExecutionRequest": "nodelab.models",
@@ -77,6 +91,7 @@ _EXPORT_MODULES = {
     "StepExecutionRequest": "nodelab.models",
     "StepExecutionResponse": "nodelab.models",
     "NodeRegistry": "nodelab.registry",
+    "NodeProviderBuilder": "nodelab.provider",
     "NodeLabApplication": "nodelab.runner",
     "NodeLabStore": "nodelab.store",
     "SuiteRegistry": "nodelab.suites",

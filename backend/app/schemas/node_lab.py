@@ -315,6 +315,7 @@ class NodeLabBatchValidationResponse(NodeLabHttpModel):
     case_count: int
     repetitions: int
     warmups: int
+    resource_lifecycle: Literal["cold_per_attempt", "warm_per_suite"]
     renderer_lifecycle: Literal["cold_per_attempt", "warm_per_suite"]
     profiles: list[str]
 
@@ -347,6 +348,7 @@ class NodeLabBatchReportResponse(NodeLabHttpModel):
     duration_ms: NodeLabDurationSummaryResponse
     failed_attempts: list[str]
     profiles: list[str]
+    resource_lifecycle: Literal["cold_per_attempt", "warm_per_suite"]
     renderer_lifecycle: Literal["cold_per_attempt", "warm_per_suite"]
 
 

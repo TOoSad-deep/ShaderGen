@@ -12,7 +12,9 @@ import pytest
 
 from agent.app.services.node_lab import create_node_lab_application
 from nodelab.benchmark import (
+    BenchmarkCase,
     BenchmarkExpectation,
+    BenchmarkManifest,
     ValidatedBenchmarkSuite,
     compare_benchmark_reports,
     load_benchmark_manifest,
@@ -31,6 +33,30 @@ WARM_MANIFEST = (
 )
 REFERENCE = ROOT / "benchmarks/png_to_shader_v1/images/solid_circle.png"
 FIXED_NOW = datetime(2026, 7, 14, 10, 0, tzinfo=timezone.utc)
+
+
+def test_warm_resource_profile_is_pipeline_defined_and_not_renderer_specific() -> None:
+    manifest = BenchmarkManifest(
+        schema_version="node_lab_benchmark_manifest_v1",
+        pipeline_id="database_pipeline",
+        suite_id="database_pool_warm_v1",
+        repetitions=2,
+        warmups=1,
+        resource_lifecycle="warm_per_suite",
+        cases=[
+            BenchmarkCase(
+                case_id="query-warm",
+                target_type="capability",
+                capability_id="query-database",
+                profile="database_pool_warm",
+                inputs={"query": "select-one"},
+                expect=BenchmarkExpectation(outcome="success"),
+            )
+        ],
+    )
+
+    assert manifest.resource_lifecycle == "warm_per_suite"
+    assert manifest.cases[0].profile == "database_pool_warm"
 
 
 class SequentialIds:

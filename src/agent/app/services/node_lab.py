@@ -41,6 +41,7 @@ from nodelab.integration import (
     NodeProvider,
     RouteCapabilityProvider,
     RouteDecider,
+    StateReducer,
 )
 from nodelab.models import (
     ArtifactDescriptor,
@@ -87,6 +88,7 @@ def create_node_lab_application(
     benchmark_resource_factory: BenchmarkResourceFactory | None = None,
     capability_runtime_factory: CapabilityRuntimeFactory | None = None,
     executors: Mapping[ExecutionMode, NodeExecutor] | None = None,
+    state_reducer: StateReducer | None = None,
     renderer_factory: RendererFactory = default_renderer_factory,
     memory_reader: MemoryReader | None = None,
     resource_cleaner: ResourceCleaner | None = None,
@@ -156,8 +158,19 @@ def create_node_lab_application(
         capability_executor_factory=capability_executor_factory,
         suite_registry=suite_registry,
         executors=executors,
+        state_reducer=state_reducer,
         benchmark_resource_factory=benchmark_resource_factory,
         capability_runtime_factory=capability_runtime_factory,
+        benchmark_workspace_root=ROOT,
+        benchmark_source_paths=(Path(__file__),),
+        benchmark_dependency_names=(
+            "jsonschema",
+            "numpy",
+            "pillow",
+            "playwright",
+            "pydantic",
+            "PyYAML",
+        ),
     )
     return application
 
