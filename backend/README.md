@@ -25,7 +25,7 @@
 - Agent 过程数据落业务表；运行内需要查询的安全诊断摘要可写入 `agent_logs`。
 - LangGraph Checkpointer/Store 使用独立 psycopg pool，并在每次借出连接前执行 `AsyncConnectionPool.check_connection`；远端关闭的陈旧连接必须在进入 Graph 前淘汰，不能通过重试整个 Graph 恢复，以免重复模型调用或候选写入。
 - FastAPI lifespan 在每项资源初始化前登记对应补偿清理：启动任一步失败也会逆序回滚，关闭 Agent Memory 失败不得跳过 asyncpg 过程账本连接池关闭。关闭函数先从 `app.state` 脱离资源再等待底层 pool，以免关闭异常留下可继续借用的失效对象。
-- `BackendSettings` 在应用组合根一次性读取根目录 `.env`，并把数据库、日志、CORS 与 Node Lab 开关作为不可变配置注入 lifespan、Router 和 Service；底层数据库或 Node Lab 模块不得再次读取环境变量。`SHADERGEN_CORS_ORIGINS` 使用逗号分隔的显式 Origin，禁止通配符 `*`。
+- `BackendSettings` 在应用组合根一次性读取根目录 `.env`，并把数据库、日志与 CORS 作为不可变配置注入 lifespan、Router 和 Service；`SHADERGEN_CORS_ORIGINS` 使用逗号分隔的显式 Origin，禁止通配符 `*`。Node Lab 使用独立进程配置，不进入 Backend settings。
 - `POST /api/shader/generate` 在数据库连接池可用时，会写入 `agent_runs`、`agent_events` 和 `agent_logs`。
 - `procedural_v1` 把模式、质量档位和补充约束写入 run input，把停止原因、current_best、评分和公开 Artifact URL 写入 run result；Graph 返回的每个阶段事件与 `current_best_updated` 逐项写入 `agent_events`。
 - 生成终态的模型调用、阶段事件、Agent 日志和 `agent_runs` 更新使用同一个 asyncpg 显式事务；任一步失败必须整体回滚。事务先 `FOR UPDATE` 锁定 run：相同终态重放直接 no-op，不同终态重放显式报冲突，禁止静默覆盖。
@@ -61,17 +61,9 @@
 - 新增路由必须注册到 `app/api/router.py`。
 - 新增业务 route 文件按领域命名，例如 `shader.py`、`health.py`；不要创建没有真实 endpoint 的空 route。
 
-### Node Lab 本地调试 API
+### Node Lab 服务边界
 
-- Node Lab HTTP/Swagger 默认不注册；只有后端进程启动前显式设置 `SHADERGEN_NODE_LAB_ENABLED=true` 才开放 `/api/lab/v1/*`。`SHADERGEN_NODE_LAB_ROOT` 可覆盖私有 LabRun/Artifact 根目录，默认是 `output/node-lab/http`；`SHADERGEN_NODE_LAB_BATCH_ROOT` 可覆盖 HTTP batch 报告根目录，默认是 `output/benchmarks/node-lab-http`。
-- HTTP 的节点、capability 和 suite 目录来自当前 Agent Application 的 Pipeline Registry；默认 V1 提供 20 个节点、八个 capability 和三个 AI-off suite。其余接口包括 LabRun 创建/读取、不可变步骤执行/完整读取/DAG 摘要、同一 LabRun 内最多 8MB 的 Artifact 上传/descriptor 列表/下载，以及 suite discovery、校验、同步 batch 执行和报告读取。
-- HTTP batch 只接受当前 `SuiteRegistry` 返回的受限 suite id；默认是 `node_lab_ai_off_v1`、`node_lab_scenario_ai_off_v1` 和 `node_lab_renderer_warm_ai_off_v1`。客户端不能提交 manifest 路径、真实模型模式或模型开关；该入口不是任务队列。
-- Route 和 `backend/app/services/node_lab.py` 只做 HTTP DTO、状态码与调用转发；执行真相源是 `agent.app.services.node_lab`，禁止在 Backend 复制 Validator、Renderer、Oracle、Selector、路由或 benchmark 逻辑。
-- `execution_status=completed` 仍可能有 `outcome=rejected|stopped`，属于 HTTP 200 的正常领域结果；请求、Artifact、依赖或内部不变量错误使用稳定错误 envelope。
-- 模型节点默认使用 fixture/mock；`preview_only=true` 只返回安全 Prompt/Schema/预算摘要，不调用 Gateway。HTTP real 模式只有同时设置 `SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=true`，并在步骤请求中使用 `execution_mode=real`、`allow_model_call=true` 时才可调用；health 返回实际服务端开关状态。打开 Node Lab HTTP 开关本身不会调用模型或 Renderer。
-- Batch 报告统一使用 `resource_lifecycle` 描述通用 cold/warm 资源；响应暂时同时返回同值的 `renderer_lifecycle` 兼容旧客户端，新调用方只应读取前者。
-- `effect_mode=project_commit` 一律拒绝；策略 Memory 只生成 preview，不写真实项目 Memory。完整 ContextPack、GLSL、图片、模型原始 mock 和诊断只存同一 LabRun 的私有 Artifact。
-- V1.0 不提供 `/contracts/*` 或 `/roles/*` 第二套别名：node/capability descriptor 就是公开实验契约，五个模型角色统一走通用步骤入口，避免请求 Schema、预算默认值和错误语义分叉。逐节点 CLI 与 `/lab` 页面同样只调用公共 Application API/HTTP，不在 transport 中复制节点规则。
+Backend 不再拥有或注册 Node Lab Route、Schema、Service 和环境开关。`make dev-backend` 只开放产品 API；`/api/lab/v1/*` 由默认监听 `8090` 的 `nodelab_service` 独立进程提供。独立服务的配置、Application factory、安全规则与 HTTP 契约见 `src/nodelab_service/ARCHITECTURE.md`。
 
 ## Service 规则
 
@@ -98,7 +90,7 @@
 | 数据库生命周期、Checkpointer、Store、Memory 隔离或清理 | `make test-memory-postgres` |
 | Backend → Agent → ShaderForge 产品流程或 Artifact 契约 | `uv run pytest tests/integration_tests/test_png_to_shader_v1_api.py` |
 | 产品浏览器行为 | `npm --prefix frontend run e2e:procedural-v1`；Memory 行为再追加 `npm --prefix frontend run e2e:memory` |
-| Node Lab Route、schema 或 transport | 相关 unit/TestClient 测试，并追加 `make test-node-lab-ui` |
+| 独立 Node Lab transport 与前端连接 | `nodelab_service` 相关 unit/TestClient 测试，并追加 `make test-node-lab-ui` |
 
 跨多个范围时运行对应验证的并集；例如只改 health route 不要求 PostgreSQL 验收。
 

@@ -26,7 +26,7 @@ dev-backend:
 	uv run uvicorn backend.app.main:app --reload --port 8088
 
 dev-node-lab:
-	SHADERGEN_NODE_LAB_ENABLED=true uv run uvicorn backend.app.main:app --reload --port 8088
+	uv run uvicorn nodelab_service.main:create_app --factory --reload --port 8090
 
 dev-frontend:
 	npm --prefix frontend run dev
@@ -124,7 +124,7 @@ help:
 	@echo 'setup-memory-postgres        - initialize LangGraph PostgreSQL persistence tables'
 	@echo 'dev-agent                    - run LangGraph dev server'
 	@echo 'dev-backend                  - run FastAPI backend on port 8088'
-	@echo 'dev-node-lab                 - run FastAPI with the local Node Lab API enabled'
+	@echo 'dev-node-lab                 - run the standalone Node Lab Service'
 	@echo 'dev-frontend                 - run Vite frontend'
 	@echo 'check                        - run unit tests, LangGraph validation, frontend build'
 	@echo 'docs-check                   - verify harness docs and architecture boundaries'

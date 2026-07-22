@@ -1,8 +1,8 @@
-"""默认关闭的 Node Lab 本地调试与模块测试 HTTP API."""
+"""独立 Node Lab Service 的 HTTP API."""
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import (
     APIRouter,
@@ -16,8 +16,7 @@ from fastapi import (
 )
 from pydantic import ValidationError
 
-from backend.app.core.settings import BackendSettings
-from backend.app.schemas.node_lab import (
+from nodelab_service.schemas import (
     NODE_LAB_RUN_OPENAPI_EXAMPLES,
     NODE_LAB_STEP_OPENAPI_EXAMPLES,
     NodeLabArtifactListResponse,
@@ -39,10 +38,9 @@ from backend.app.schemas.node_lab import (
     NodeLabStepListResponse,
     NodeLabStepResponse,
 )
-from backend.app.services.node_lab import (
-    NodeLabBackendService,
+from nodelab_service.service import (
     NodeLabError,
-    create_default_node_lab_backend_service,
+    NodeLabHttpService,
 )
 
 router = APIRouter(prefix="/api/lab/v1", tags=["node-lab"])
@@ -59,18 +57,23 @@ ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 }
 
 
-def _service(request: Request) -> NodeLabBackendService:
-    """按 FastAPI 生命周期惰性持有单个 Node Lab Application."""
+def _service(request: Request) -> NodeLabHttpService:
+    """读取独立服务组合根已冻结的 Node Lab Application."""
     service = getattr(request.app.state, "node_lab_service", None)
     if service is None:
-        settings = getattr(request.app.state, "settings", BackendSettings())
-        service = create_default_node_lab_backend_service(
-            root=settings.node_lab_root,
-            batch_output_root=settings.node_lab_batch_root,
-            real_model_enabled=settings.node_lab_real_model_enabled,
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Node Lab Service 尚未完成 Application 装配。",
+                "code": "service_not_configured",
+                "stage": "service_startup",
+                "retryable": False,
+                "lab_run_id": None,
+                "step_id": None,
+                "node_id": None,
+            },
         )
-        request.app.state.node_lab_service = service
-    return service
+    return cast(NodeLabHttpService, service)
 
 
 def _status_for(code: str) -> int:
@@ -140,8 +143,13 @@ def _validation_http_error() -> HTTPException:
 @router.get("/health", response_model=NodeLabHealthResponse)
 def health(request: Request) -> NodeLabHealthResponse:
     """返回 Lab 与真实模型门禁状态，不触发 Renderer 或模型."""
+    service = _service(request)
     return NodeLabHealthResponse(
-        real_model_enabled=_service(request).real_model_enabled,
+        pipeline_id=service.application.pipeline_id,
+        node_count=len(service.application.describe_nodes()),
+        capability_count=len(service.application.describe_capabilities()),
+        suite_count=len(service.application.describe_suites()),
+        real_model_enabled=service.real_model_enabled,
     )
 
 

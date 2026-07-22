@@ -11,9 +11,11 @@ backend 产品 API
   -> agent.app.nodes
   -> agent.app.context / memory / contracts / prompts / parsers / messages / observability
 
-backend 诊断 API（仅显式开启）/ CLI / benchmark / tests
-  -> agent.app.services.node_lab
-  -> nodelab
+nodelab_service 独立进程
+  -> 启动时 Application factory -> nodelab
+
+V1 CLI / benchmark / tests
+  -> agent.app.services.node_lab（显式插件 helper）
   -> agent.app.nodes.png_to_shader_v1.integrations.node_lab（Provider + Executor binding）
      -> production Node factory / routing / Prompt / Parser
 
@@ -25,7 +27,7 @@ agent.app.llms
 
 Agent 只负责编排、LLM Gateway、Prompt 策略、运行时状态和公共用例服务。确定性 IR、DSL、Renderer、Oracle、Search、Store 等领域能力进入 `src/shaderforge/`。
 
-产品生成 service 是 Backend 默认路径；Node Lab service 是独立的 transport-free 诊断 Harness，可被 CLI、benchmark 和测试直接调用，但 Backend 只有在 `SHADERGEN_NODE_LAB_ENABLED=true` 时才注册诊断 Route。它不替代产品 Graph，也不进入产品请求链路。
+产品生成 service 是 Backend 默认路径。Node Lab 的 HTTP transport 由 `nodelab_service` 独立进程拥有，默认是空安全 Application；V1 Agent 侧只保留可显式装配的 Provider/helper。产品 Backend 不注册诊断 Route，Node Lab 也不替代产品 Graph 或进入产品请求链路。
 
 ## LLM Gateway
 
@@ -60,6 +62,7 @@ Agent 只负责编排、LLM Gateway、Prompt 策略、运行时状态和公共�
 - `src/agent/app/nodes/ARCHITECTURE.md`：Node 工厂和依赖规则。
 - `src/agent/app/nodes/png_to_shader_v1/ARCHITECTURE.md`：V1 模型、确定性 Node 和 Node Lab Provider 子架构。
 - `src/nodelab/ARCHITECTURE.md`：transport-free Node Lab Harness 内核和安全边界。
+- `src/nodelab_service/ARCHITECTURE.md`：独立 FastAPI 服务、Application factory 和 HTTP 安全边界。
 - `src/agent/app/benchmarks/ARCHITECTURE.md`：离线 Agent benchmark、真实模型预算和证据边界。
 - `src/agent/app/prompts/ARCHITECTURE.md`：Prompt YAML 和加载规则。
 - `src/agent/app/parsers/ARCHITECTURE.md`：模型输出解析规则。

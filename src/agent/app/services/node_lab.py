@@ -96,7 +96,7 @@ def create_node_lab_application(
     real_model_enabled: bool = False,
     model_fixture_path: str | Path = DEFAULT_MODEL_FIXTURE_PATH,
 ) -> NodeLabApplication:
-    """创建可供 Backend、CLI 或测试持有生命周期的 Node Lab Application."""
+    """创建可供 V1 CLI、benchmark 或测试持有生命周期的 Application."""
     use_default_v1 = node_provider is None and registry is None
     if use_default_v1:
         node_provider = create_png_to_shader_v1_node_provider(

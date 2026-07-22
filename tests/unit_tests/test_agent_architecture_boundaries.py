@@ -42,10 +42,13 @@ def _violations(package: str, forbidden: tuple[str, ...]) -> list[str]:
 
 
 def test_nodes_use_llm_contract_not_implementation() -> None:
-    assert _violations(
-        "nodes",
-        ("agent.app.llms", "agent.app.models"),
-    ) == []
+    assert (
+        _violations(
+            "nodes",
+            ("agent.app.llms", "agent.app.models"),
+        )
+        == []
+    )
 
 
 def test_typed_submodule_imports_do_not_eager_load_heavy_runtime() -> None:
@@ -80,16 +83,19 @@ print(json.dumps({
 
 
 def test_states_do_not_depend_on_agent_implementation_layers() -> None:
-    assert _violations(
-        "states",
-        (
-            "agent.app.llms",
-            "agent.app.models",
-            "agent.app.nodes",
-            "agent.app.graphs",
-            "agent.app.services",
-        ),
-    ) == []
+    assert (
+        _violations(
+            "states",
+            (
+                "agent.app.llms",
+                "agent.app.models",
+                "agent.app.nodes",
+                "agent.app.graphs",
+                "agent.app.services",
+            ),
+        )
+        == []
+    )
 
 
 def test_node_lab_core_is_transport_free_and_does_not_reflect_nodes() -> None:
@@ -117,6 +123,20 @@ def test_node_lab_core_is_transport_free_and_does_not_reflect_nodes() -> None:
     assert 'capability_id != "render-shader"' not in benchmark_source
     assert "src/agent/app/services/node_lab.py" not in benchmark_source
     assert 'for package in ("numpy", "pillow", "playwright"' not in benchmark_source
+
+
+def test_node_lab_service_does_not_depend_on_agent_backend_or_shaderforge() -> None:
+    service_root = ROOT / "src/nodelab_service"
+    forbidden = ("agent", "backend", "shaderforge")
+    violations = [
+        f"{path.relative_to(service_root).as_posix()}: {target}"
+        for path in sorted(service_root.rglob("*.py"))
+        for target in _import_targets(path)
+        if target.startswith(forbidden)
+    ]
+
+    assert violations == []
+    assert "nodelab_service" not in _import_targets(ROOT / "backend/app/main.py")
 
 
 def test_node_lab_node_execution_is_owned_by_production_provider() -> None:
@@ -253,22 +273,28 @@ def test_png_to_shader_v1_node_layers_keep_dependency_direction() -> None:
     feature = ROOT / "src/agent/app/nodes/png_to_shader_v1"
     feature_prefix = "agent.app.nodes.png_to_shader_v1"
 
-    assert _violations(
-        "nodes/png_to_shader_v1/model",
-        (
-            "agent.app.graphs",
-            f"{feature_prefix}.deterministic",
-            f"{feature_prefix}.integrations",
-        ),
-    ) == []
-    assert _violations(
-        "nodes/png_to_shader_v1/deterministic",
-        (
-            "agent.app.graphs",
-            f"{feature_prefix}.integrations",
-            f"{feature_prefix}.model",
-        ),
-    ) == []
+    assert (
+        _violations(
+            "nodes/png_to_shader_v1/model",
+            (
+                "agent.app.graphs",
+                f"{feature_prefix}.deterministic",
+                f"{feature_prefix}.integrations",
+            ),
+        )
+        == []
+    )
+    assert (
+        _violations(
+            "nodes/png_to_shader_v1/deterministic",
+            (
+                "agent.app.graphs",
+                f"{feature_prefix}.integrations",
+                f"{feature_prefix}.model",
+            ),
+        )
+        == []
+    )
 
     model_relative = [
         target

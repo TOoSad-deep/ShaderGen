@@ -10,7 +10,7 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 - 初始化 Memory PostgreSQL：`make setup-memory-postgres`
 - LangGraph：`make dev-agent`
 - 后端：`make dev-backend`
-- Node Lab 后端：`make dev-node-lab`（仅本地调试，显式开放 `/api/lab/v1/*`）
+- Node Lab 独立服务：`make dev-node-lab`（仅本地调试，默认监听 `127.0.0.1:8090` 并开放 `/api/lab/v1/*`）
 - 前端：`make dev-frontend`
 - 单元测试：`make test`
 - Memory PostgreSQL 验收：`make test-memory-postgres`

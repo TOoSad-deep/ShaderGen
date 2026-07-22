@@ -45,7 +45,7 @@ backend 诊断 Route（仅显式开启）/ CLI / benchmark / tests
 - `context/`：不访问 Store 的纯 GSSC Context Builder。
 - `prompts/`：Prompt YAML 和加载器。
 - `parsers/`：模型输出纯解析器。
-- `services/`：应用层组合入口分为两类。M4 的产品 V1 service 映射 Graph 输入/输出、隔离 checkpoint thread，并提供固定 Artifact 名称访问，不暴露 Graph 或文件路径；诊断 Node Lab service 只选择并注入公共 Provider/Gateway，不维护节点目录或 dispatch，也不进入产品请求链路。Backend 仅在显式开关开启时注册后者的 HTTP Route，CLI/benchmark/测试可直接使用其 transport-free API。
+- `services/`：M4 的产品 V1 service 映射 Graph 输入/输出、隔离 checkpoint thread，并提供固定 Artifact 名称访问，不暴露 Graph 或文件路径；`node_lab.py` 只保留 V1 CLI/benchmark 显式装配 Provider/Gateway 的插件 helper，不维护节点目录或 dispatch，也不进入产品请求链路。独立 HTTP transport 位于 `nodelab_service`，产品 Backend 不注册其 Route。
 - `tools/`：Agent 可调用的外部动作能力。
 - `observability/`：reasoning 日志策略、回调、追踪和指标入口。
 

@@ -2,27 +2,30 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agent.app.services.node_lab import create_node_lab_application
-from backend.app.api.router import build_api_router
-from backend.app.services.node_lab import NodeLabBackendService
+from nodelab_service.main import create_app
+from nodelab_service.settings import NodeLabServiceSettings
 
 ROOT = Path(__file__).resolve().parents[2]
 REFERENCE = ROOT / "benchmarks/png_to_shader_v1/images/solid_circle.png"
 
 
-def test_http_to_agent_to_shaderforge_step_flow(
+def test_standalone_http_to_provider_to_shaderforge_step_flow(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
     """贯通 HTTP、Agent Application API、Artifact Store 和测量事实层."""
-    monkeypatch.setenv("SHADERGEN_NODE_LAB_ENABLED", "true")
+    del monkeypatch
     application = create_node_lab_application(root=tmp_path / "node-lab")
-    app = FastAPI()
-    app.state.node_lab_service = NodeLabBackendService(application)
-    app.include_router(build_api_router())
+    app = create_app(
+        NodeLabServiceSettings(
+            root=tmp_path / "node-lab",
+            pipeline_id=application.pipeline_id,
+        ),
+        application=application,
+    )
     client = TestClient(app)
 
     lab_run_id = client.post("/api/lab/v1/runs", json={}).json()["lab_run_id"]

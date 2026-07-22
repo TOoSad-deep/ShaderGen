@@ -1,10 +1,10 @@
 # Node Lab 使用与逐节点学习指南
 
-Node Lab 是可由不同 Agent Pipeline 注入 Provider 的本地实验工作台。它让人工、Codex、测试和 benchmark 使用同一份节点契约、Fixture、Artifact 与不可变步骤语义。当前默认组合仍是 PNG-to-Shader V1；它不会替代产品 `/api/shader/*`、M5 固定 10 例门禁或人工盲评。
+Node Lab 是可由不同 Pipeline 注入 Provider 的独立实验服务。它让人工、Codex、测试和 benchmark 使用同一份节点契约、Fixture、Artifact 与不可变步骤语义。服务默认是空安全 Application；PNG-to-Shader V1 只是仓库已有的显式插件/benchmark 组合，不再被 HTTP 服务隐式加载。Node Lab 不会替代产品 `/api/shader/*`、M5 固定 10 例门禁或人工盲评。
 
 ## 安全边界
 
-- 普通 Backend 默认不注册 `/api/lab/v1/*`；只有 `make dev-node-lab` 显式开启。
+- 产品 Backend 不注册 `/api/lab/v1/*`；`make dev-node-lab` 启动默认端口 `8090` 的独立服务。
 - 默认执行 deterministic 或 fixture，不调用真实模型。
 - `project_commit` 一律拒绝；交互式 LabRun 只写 `output/node-lab/` 下的私有证据，不写产品 run 或真实项目 Memory。模块 benchmark 另写 `output/benchmarks/node-lab*`，两者都不能覆盖 M5 证据。
 - 图片、完整 GLSL、渲染图、ContextPack 和 mock 原文以同一 LabRun 内的不透明 Artifact ID 传递。
@@ -14,13 +14,14 @@ Node Lab 是可由不同 Agent Pipeline 注入 Provider 的本地实验工作台
 
 | 场景 | 是否调用真实模型 | 显式门禁 | 预算范围 | 默认输出 |
 |---|---|---|---|---|
-| 浏览器、Swagger、CLI 的 deterministic/fixture/mock 单步 | 否 | Node Lab transport 必须显式开启 | descriptor 输入上限和 Lab 副作用门禁 | HTTP：`output/node-lab/http`；CLI：`output/node-lab/cli` |
-| 浏览器、Swagger、CLI 的 ad-hoc real 单步 | 是 | `SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=true`，且请求 `allow_model_call=true` 或 CLI `--allow-model-call` | 父 State `BudgetPolicy`；缺失时 balanced。没有冻结 suite 总 token/费用预算 | 对应 LabRun 目录 |
+| 浏览器、Swagger 的 deterministic/fixture/mock 单步 | 否 | 启动独立服务并配置需要的 Application factory | descriptor 输入上限和 Lab 副作用门禁 | HTTP：`output/node-lab/service` |
+| 浏览器、Swagger 的 ad-hoc real 单步 | 是 | `NODELAB_REAL_MODEL_ENABLED=true`，factory/Provider 也必须授权，且请求 `allow_model_call=true` | Provider 定义的单步预算；没有冻结 suite 总 token/费用预算 | 对应 LabRun 目录 |
+| 现有 V1 逐节点 CLI | 否或显式 real | CLI 自身参数及 V1 Provider 门禁 | V1 descriptor/父 State 预算 | `output/node-lab/cli` |
 | `make benchmark-node-lab-ai-off` | 否 | 无模型开关 | 固定 AI-off suite、attempt 与 Renderer/transport 预算 | `output/benchmarks/node-lab*` |
 | `make benchmark-node-lab-model` | 否 | 固定 fixture | 固定五角色 manifest 和离线 attempt 预算 | `output/benchmarks/node-lab-model` |
 | `run_node_lab_model_benchmark.py --execution-mode real` | 是 | 环境开关与 `--allow-model-calls` 同时提供 | 固定 manifest 下的调用、provider 输出 token、总 token、wall time、费用和价格版本硬预算 | `output/benchmarks/node-lab-model` |
 
-ad-hoc real 适合受控诊断单个生产模型节点，不等价于正式模型角色 benchmark，也不能引用单步结果宣称整套 manifest 通过。HTTP 使用 `execution_mode="real"` 与 `allow_model_call=true`；CLI 使用相同 execution mode 和 `--allow-model-call`。
+ad-hoc real 适合受控诊断单个生产模型节点，不等价于正式模型角色 benchmark，也不能引用单步结果宣称整套 manifest 通过。独立服务的 `NODELAB_REAL_MODEL_ENABLED=true` 只表达 transport 侧允许；factory 返回的 Provider 仍必须自行注入 Gateway、预算和权限。现有 V1 real-model benchmark 继续使用自己的 `SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED` 三重门禁，两类变量不能互相替代。
 
 ## 最快开始：浏览器工作台
 
@@ -34,7 +35,25 @@ make dev-frontend
 然后访问：
 
 - Node Lab 工作台：`http://127.0.0.1:5173/lab`
-- Swagger：`http://127.0.0.1:8088/docs`
+- Swagger：`http://127.0.0.1:8090/docs`
+
+默认启动后节点目录为空，这是防止服务静默耦合旧 Agent 的安全行为。要接入重构后的项目，在一个可安装模块中提供 factory，并在启动前配置：
+
+```python
+from nodelab import NodeLabApplication, NodeProviderBuilder
+from nodelab_service import NodeLabServiceSettings
+
+
+def create_application(settings: NodeLabServiceSettings) -> NodeLabApplication:
+    provider = NodeProviderBuilder("my_pipeline").add_node(...).build()
+    return NodeLabApplication.at_root(settings.root, node_provider=provider)
+```
+
+```bash
+NODELAB_APPLICATION_FACTORY=my_project.node_lab:create_application make dev-node-lab
+```
+
+Factory 是受信任的部署配置，模块及其 Node/Provider 必须安装在服务的 Python 环境里；HTTP 客户端不能提交 import path。独立服务当前不提供跨进程 Remote Executor。
 
 推荐第一次按以下顺序操作：
 
@@ -48,7 +67,7 @@ make dev-frontend
 
 页面底部 DAG 中，选中卡片只切换查看的输出；中间的 `base_step_id` 决定下一步从哪个不可变快照继续。这两个概念不要混淆。
 
-## 当前默认 V1 的 20 个生产节点
+## 现有 V1 插件的 20 个生产节点
 
 | 顺序 | 节点 | 先观察什么 |
 |---:|---|---|
@@ -117,12 +136,14 @@ provider = (
     )
     .build()
 )
-application = NodeLabApplication(root="output/node-lab/example", node_provider=provider)
+application = NodeLabApplication.at_root(
+    "output/node-lab/example", node_provider=provider
+)
 ```
 
 Runner 会按完整 JSON Schema Draft 2020-12 校验输入和输出，而不只是检查必填字段。默认 State 合并是顶层覆盖；只有生产 Graph 具有其他 reducer 语义时才需要额外注入。Builder 负责减少样板代码，不会反射 import Node、猜测资源依赖或自动授权副作用。
 
-这里的“解耦”是指 Harness 不感知 Node 实现。`create_node_lab_application()` 仅在未传 Provider 时兼容装配 V1；显式传入新 Provider 后，capability、fixture 和 suite 默认为空，不会静默继承 V1。Node Lab 仍通过 Provider 调用真实生产 Node，以保证测试的是生产语义，而不是第二套模拟实现。
+这里的“解耦”是指 Harness 与独立服务都不感知 Node 实现。服务通过启动时 factory 获得 Application；V1 的 `create_node_lab_application()` 只是现有 CLI/benchmark 使用的显式插件 helper。新服务不会静默继承 V1。Node Lab 仍通过 Provider 调用真实生产 Node，以保证测试的是生产语义，而不是第二套模拟实现。
 
 `prepare_measurement_seed` 应从已经包含规范化 `reference_artifact_id` 和 `target_measurements` 的父步骤执行；它把完整 GLSL、Author 和 provenance 留在私有 Artifact，只公开 ID/hash/摘要。随后从该步骤执行 `materialize_candidate`，得到的 `CandidateRecord` 必须保持 `parent_candidate_id=null`、`origin=deterministic` 和 `generator_version=measurement_affine_seed_v1`，即使父快照中已经存在 model current candidate，也不能把 seed 接到其后。
 
@@ -181,22 +202,22 @@ uv run python scripts/run_node_lab_cli.py download-artifact \
 启动后先确认路由和真实模型开关：
 
 ```bash
-curl -s http://127.0.0.1:8088/api/lab/v1/health
-curl -s http://127.0.0.1:8088/api/lab/v1/nodes
+curl -s http://127.0.0.1:8090/api/lab/v1/health
+curl -s http://127.0.0.1:8090/api/lab/v1/nodes
 ```
 
 创建 Run、上传 Artifact、执行节点：
 
 ```bash
-curl -s -X POST http://127.0.0.1:8088/api/lab/v1/runs \
+curl -s -X POST http://127.0.0.1:8090/api/lab/v1/runs \
   -H 'Content-Type: application/json' \
   -d '{"project_id":"tutorial","initial_state":{}}'
 
-curl -s -X POST http://127.0.0.1:8088/api/lab/v1/runs/<LAB_RUN_ID>/artifacts \
+curl -s -X POST http://127.0.0.1:8090/api/lab/v1/runs/<LAB_RUN_ID>/artifacts \
   -F kind=reference_png \
   -F file=@benchmarks/png_to_shader_v1/images/solid_circle.png
 
-curl -s -X POST http://127.0.0.1:8088/api/lab/v1/runs/<LAB_RUN_ID>/steps \
+curl -s -X POST http://127.0.0.1:8090/api/lab/v1/runs/<LAB_RUN_ID>/steps \
   -H 'Content-Type: application/json' \
   -d '{
     "node_id":"measure_target",

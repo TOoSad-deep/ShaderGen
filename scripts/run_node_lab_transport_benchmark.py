@@ -18,10 +18,10 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from agent.app.services.node_lab import create_node_lab_application
-from backend.app.api.routes.node_lab import router as node_lab_router
-from backend.app.services.node_lab import NodeLabBackendService
 from nodelab.benchmark import source_environment
 from nodelab.models import CapabilityExecutionRequest, LabRunCreateRequest
+from nodelab_service.routes import router as node_lab_router
+from nodelab_service.service import NodeLabHttpService
 from shaderforge.store import RunArtifactStore
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -378,9 +378,10 @@ async def run_transport_benchmark(
         extra_source_paths=(
             Path(__file__).resolve(),
             ROOT / "src/agent/app/services/node_lab.py",
-            ROOT / "backend/app/api/routes/node_lab.py",
-            ROOT / "backend/app/schemas/node_lab.py",
-            ROOT / "backend/app/services/node_lab.py",
+            ROOT / "src/nodelab_service/main.py",
+            ROOT / "src/nodelab_service/routes.py",
+            ROOT / "src/nodelab_service/schemas.py",
+            ROOT / "src/nodelab_service/service.py",
         )
     )
     config_base = {
@@ -406,7 +407,7 @@ async def run_transport_benchmark(
 
     application = create_node_lab_application(root=lab_root)
     app = FastAPI()
-    app.state.node_lab_service = NodeLabBackendService(
+    app.state.node_lab_service = NodeLabHttpService(
         application,
         batch_output_root=output_root / "http-batches-disabled",
     )

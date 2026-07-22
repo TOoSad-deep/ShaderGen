@@ -1,4 +1,4 @@
-"""Node Lab HTTP/Swagger 请求与响应契约."""
+"""独立 Node Lab Service 的 HTTP/Swagger 请求与响应契约."""
 
 from __future__ import annotations
 
@@ -274,10 +274,15 @@ class NodeLabArtifactListResponse(NodeLabHttpModel):
 
 
 class NodeLabHealthResponse(NodeLabHttpModel):
-    """Node Lab 本地实验边界状态."""
+    """Node Lab 独立服务及当前 Application 状态."""
 
     status: Literal["ok"] = "ok"
     enabled: Literal[True] = True
+    service_mode: Literal["standalone"] = "standalone"
+    pipeline_id: str
+    node_count: int
+    capability_count: int
+    suite_count: int
     real_model_enabled: bool = False
 
 

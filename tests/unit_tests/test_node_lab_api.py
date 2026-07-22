@@ -4,15 +4,14 @@ from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
-from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
 
 from agent.app.services.node_lab import create_node_lab_application
 from backend.app.api.router import build_api_router
-from backend.app.main import log_request_validation_error
-from backend.app.services.node_lab import NodeLabBackendService
 from nodelab.models import CapabilityExecutionRequest, LabRunCreateRequest
 from nodelab.runner import NodeLabApplication
+from nodelab_service.main import create_app as create_node_lab_service_app
+from nodelab_service.settings import NodeLabServiceSettings
 from shaderforge.rendering import CompileResult, RenderResult
 from shaderforge.validation import validate_shader
 
@@ -59,32 +58,38 @@ def _test_app(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> tuple[FastAPI, NodeLabApplication]:
-    monkeypatch.setenv("SHADERGEN_NODE_LAB_ENABLED", "true")
+    del monkeypatch
     image = REFERENCE.read_bytes()
     application = create_node_lab_application(
         root=tmp_path / "node-lab",
         renderer_factory=lambda: FakeRenderer(image),
     )
-    app = FastAPI()
-    app.add_exception_handler(RequestValidationError, log_request_validation_error)
-    app.state.node_lab_service = NodeLabBackendService(
-        application,
-        batch_output_root=tmp_path / "batches",
+    app = create_node_lab_service_app(
+        NodeLabServiceSettings(
+            root=tmp_path / "node-lab",
+            batch_root=tmp_path / "batches",
+            pipeline_id=application.pipeline_id,
+        ),
+        application=application,
     )
-    app.include_router(build_api_router())
     return app, application
 
 
 def test_node_lab_http_router_is_default_off(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.delenv("SHADERGEN_NODE_LAB_ENABLED", raising=False)
+    del monkeypatch
     app = FastAPI()
     app.include_router(build_api_router())
 
     paths = app.openapi()["paths"]
     assert not any(path.startswith("/api/lab/v1") for path in paths)
     assert TestClient(app).get("/api/lab/v1/health").status_code == 404
+    standalone = create_node_lab_service_app(
+        NodeLabServiceSettings(root=tmp_path / "standalone")
+    )
+    assert "/api/lab/v1/health" in standalone.openapi()["paths"]
 
 
 def test_node_lab_http_exposes_discovery_run_artifact_and_steps(
@@ -101,6 +106,11 @@ def test_node_lab_http_exposes_discovery_run_artifact_and_steps(
     assert health.json() == {
         "status": "ok",
         "enabled": True,
+        "service_mode": "standalone",
+        "pipeline_id": application.pipeline_id,
+        "node_count": 20,
+        "capability_count": 8,
+        "suite_count": 3,
         "real_model_enabled": False,
     }
     assert nodes.status_code == 200

@@ -1,11 +1,19 @@
 import { apiFetch, parseApiError, resolveApiUrl } from "./client";
 
+const NODE_LAB_API_BASE_URL =
+  import.meta.env.VITE_NODE_LAB_API_BASE_URL ?? "http://127.0.0.1:8090";
+
 export type NodeLabExecutionMode = "deterministic" | "fixture" | "mock" | "real";
 export type NodeLabEffectMode = "preview" | "lab_commit" | "project_commit";
 
 export interface NodeLabHealth {
   status: "ok";
   enabled: true;
+  service_mode: "standalone";
+  pipeline_id: string;
+  node_count: number;
+  capability_count: number;
+  suite_count: number;
   real_model_enabled: boolean;
 }
 
@@ -163,7 +171,7 @@ async function readError(response: Response): Promise<NodeLabApiError> {
 }
 
 async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await apiFetch(path, init);
+  const response = await apiFetch(path, init, NODE_LAB_API_BASE_URL);
   if (!response.ok) throw await readError(response);
   return response.json() as Promise<T>;
 }
@@ -171,6 +179,7 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
 export function resolveNodeLabArtifactUrl(labRunId: string, artifactId: string): string {
   return resolveApiUrl(
     `/api/lab/v1/runs/${encodeURIComponent(labRunId)}/artifacts/${encodeURIComponent(artifactId)}`,
+    NODE_LAB_API_BASE_URL,
   );
 }
 

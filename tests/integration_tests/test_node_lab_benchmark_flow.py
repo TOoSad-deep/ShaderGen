@@ -6,13 +6,10 @@ from hashlib import sha256
 from pathlib import Path
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import scripts.run_node_lab_transport_benchmark as transport_benchmark
 from agent.app.services.node_lab import create_node_lab_application
-from backend.app.api.routes.node_lab import router as node_lab_router
-from backend.app.services.node_lab import NodeLabBackendService
 from shaderforge.rendering import CompileResult, RenderResult
 from shaderforge.validation import validate_shader
 
@@ -65,12 +62,17 @@ def test_http_batch_runs_five_step_scenario_and_preserves_evidence(
         renderer_factory=lambda: ReferenceRenderer(image),
     )
     batch_root = tmp_path / "batch"
-    app = FastAPI()
-    app.state.node_lab_service = NodeLabBackendService(
-        application,
-        batch_output_root=batch_root,
+    from nodelab_service.main import create_app
+    from nodelab_service.settings import NodeLabServiceSettings
+
+    app = create_app(
+        NodeLabServiceSettings(
+            root=tmp_path / "lab",
+            batch_root=batch_root,
+            pipeline_id=application.pipeline_id,
+        ),
+        application=application,
     )
-    app.include_router(node_lab_router)
 
     with TestClient(app) as client:
         response = client.post(

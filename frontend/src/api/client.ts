@@ -14,12 +14,16 @@ function readString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
-export function resolveApiUrl(pathOrUrl: string): string {
-  return new URL(pathOrUrl, `${API_BASE_URL}/`).toString();
+export function resolveApiUrl(pathOrUrl: string, baseUrl = API_BASE_URL): string {
+  return new URL(pathOrUrl, `${baseUrl}/`).toString();
 }
 
-export function apiFetch(pathOrUrl: string, init?: RequestInit): Promise<Response> {
-  return fetch(resolveApiUrl(pathOrUrl), init);
+export function apiFetch(
+  pathOrUrl: string,
+  init?: RequestInit,
+  baseUrl = API_BASE_URL,
+): Promise<Response> {
+  return fetch(resolveApiUrl(pathOrUrl, baseUrl), init);
 }
 
 export async function parseApiError(

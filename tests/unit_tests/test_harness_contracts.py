@@ -66,9 +66,7 @@ def test_progress_is_bounded_current_handoff() -> None:
     assert "不是逐会话追加日志" in progress
     assert sum(line.startswith("- ") for line in recent_changes.splitlines()) <= 5
 
-    archive = _read(
-        "docs/progress/archive/PROGRESS-2026-07-07--2026-07-15.md"
-    )
+    archive = _read("docs/progress/archive/PROGRESS-2026-07-07--2026-07-15.md")
     assert "不代表当前" in archive
 
     stage_summary_path = "docs/progress/archive/STAGE-SUMMARY-2026-07-10.md"
@@ -80,9 +78,7 @@ def test_progress_is_bounded_current_handoff() -> None:
     assert "`PROGRESS.md`" in stage_summary_preamble
 
 
-def test_docs_check_rejects_unclassified_root_markdown(
-    tmp_path, monkeypatch
-) -> None:
+def test_docs_check_rejects_unclassified_root_markdown(tmp_path, monkeypatch) -> None:
     spec = importlib.util.spec_from_file_location(
         "docs_check_root_markdown_guard",
         ROOT / "scripts/docs_check.py",
@@ -100,9 +96,7 @@ def test_docs_check_rejects_unclassified_root_markdown(
     assert any("旧阶段总结.md" in error for error in docs_check.ERRORS)
 
 
-def test_docs_check_requires_archive_warning_in_preamble(
-    tmp_path, monkeypatch
-) -> None:
+def test_docs_check_requires_archive_warning_in_preamble(tmp_path, monkeypatch) -> None:
     spec = importlib.util.spec_from_file_location(
         "docs_check_archive_warning_guard",
         ROOT / "scripts/docs_check.py",
@@ -179,8 +173,7 @@ def test_langgraph_registry_only_exposes_png_to_shader_v1() -> None:
 
     assert graphs == {
         "png_to_shader_v1": (
-            "./src/agent/app/graphs/"
-            "png_to_shader_v1_graph.py:png_to_shader_v1_graph"
+            "./src/agent/app/graphs/png_to_shader_v1_graph.py:png_to_shader_v1_graph"
         )
     }
     for deprecated_path in (
@@ -373,9 +366,7 @@ def test_docs_check_enforces_bidirectional_langgraph_registration(
         json.dumps(
             {
                 "graphs": {
-                    "registered": (
-                        "./src/agent/app/graphs/registered_graph.py:graph"
-                    )
+                    "registered": ("./src/agent/app/graphs/registered_graph.py:graph")
                 }
             }
         ),
@@ -384,8 +375,7 @@ def test_docs_check_enforces_bidirectional_langgraph_registration(
     docs_check.ERRORS.clear()
     docs_check._check_langgraph_registration()
     assert any(
-        "存在未注册的 *_graph.py" in error
-        and "unregistered_graph.py" in error
+        "存在未注册的 *_graph.py" in error and "unregistered_graph.py" in error
         for error in docs_check.ERRORS
     )
 
@@ -393,9 +383,7 @@ def test_docs_check_enforces_bidirectional_langgraph_registration(
         json.dumps(
             {
                 "graphs": {
-                    "registered": (
-                        "./src/agent/app/graphs/registered_graph.py:graph"
-                    ),
+                    "registered": ("./src/agent/app/graphs/registered_graph.py:graph"),
                     "unregistered": (
                         "./src/agent/app/graphs/unregistered_graph.py:graph"
                     ),
@@ -408,8 +396,7 @@ def test_docs_check_enforces_bidirectional_langgraph_registration(
     docs_check.ERRORS.clear()
     docs_check._check_langgraph_registration()
     assert any(
-        "langgraph.json 注册了非 *_graph.py 入口" in error
-        and "legacy.py" in error
+        "langgraph.json 注册了非 *_graph.py 入口" in error and "legacy.py" in error
         for error in docs_check.ERRORS
     )
 
@@ -438,8 +425,7 @@ def test_docs_check_rejects_unknown_live_harness_commands(
     docs_check._check_documented_commands()
 
     assert any(
-        "不存在的 Make target：missing-target" in error
-        for error in docs_check.ERRORS
+        "不存在的 Make target：missing-target" in error for error in docs_check.ERRORS
     )
     assert any(
         "不存在的 frontend npm script：missing-script" in error
@@ -447,9 +433,7 @@ def test_docs_check_rejects_unknown_live_harness_commands(
     )
 
 
-def test_docs_check_rejects_missing_live_repository_path(
-    tmp_path, monkeypatch
-) -> None:
+def test_docs_check_rejects_missing_live_repository_path(tmp_path, monkeypatch) -> None:
     docs_check = _load_docs_check("docs_check_documented_paths")
     (tmp_path / "AGENTS.md").write_text(
         "# Harness\n\n入口：`src/missing/ARCHITECTURE.md`。\n",
@@ -568,9 +552,7 @@ def test_ci_harness_uses_locked_dependencies_and_disables_models() -> None:
     assert "--allow-model-calls" not in integration_ci
 
 
-def test_docs_check_rejects_unlocked_or_model_enabled_ci(
-    tmp_path, monkeypatch
-) -> None:
+def test_docs_check_rejects_unlocked_or_model_enabled_ci(tmp_path, monkeypatch) -> None:
     docs_check = _load_docs_check("docs_check_ci_harness")
     workflow_root = tmp_path / ".github/workflows"
     workflow_root.mkdir(parents=True)
@@ -596,9 +578,7 @@ def test_docs_check_rejects_unlocked_or_model_enabled_ci(
     assert any("pyproject.toml" in error for error in docs_check.ERRORS)
 
 
-def test_docs_check_rejects_private_shaderforge_imports(
-    tmp_path, monkeypatch
-) -> None:
+def test_docs_check_rejects_private_shaderforge_imports(tmp_path, monkeypatch) -> None:
     docs_check = _load_docs_check("docs_check_shaderforge_public_boundary")
     agent_root = tmp_path / "src/agent"
     backend_root = tmp_path / "backend"
@@ -711,11 +691,13 @@ def test_agent_harness_docs_separate_product_diagnostics_and_store_boundaries() 
     shaderforge_architecture = _read("src/shaderforge/ARCHITECTURE.md")
 
     assert "产品 service：`agent.app.services.png_to_shader_v1`" in readme
-    assert "诊断 Harness service：`agent.app.services.node_lab`" in readme
-    assert "SHADERGEN_NODE_LAB_ENABLED=true" in readme
+    assert "V1 Node Lab 插件 helper：`agent.app.services.node_lab`" in readme
+    assert "独立 Node Lab service：`nodelab_service`" in readme
+    assert "产品 Backend 永不注册 `/api/lab/v1/*`" in readme
     for architecture_path in (
         "src/agent/app/config/ARCHITECTURE.md",
         "src/nodelab/ARCHITECTURE.md",
+        "src/nodelab_service/ARCHITECTURE.md",
         "src/agent/app/nodes/png_to_shader_v1/ARCHITECTURE.md",
     ):
         assert architecture_path in readme

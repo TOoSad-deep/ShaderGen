@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
     build_png_to_shader_v1_registry,
 )
-from backend.app.schemas.node_lab import NodeLabStepListResponse
+from nodelab_service.schemas import NodeLabStepListResponse
 
 PORT = int(os.getenv("SHADERGEN_FAKE_API_PORT", "18090"))
 ORIGIN = os.getenv("SHADERGEN_E2E_ORIGIN", "http://127.0.0.1:15175")
@@ -112,7 +112,18 @@ class Handler(BaseHTTPRequestHandler):
         """返回 discovery、run、step 和 Artifact 假数据."""
         path = urlparse(self.path).path
         if path == "/api/lab/v1/health":
-            self._json({"status": "ok", "enabled": True, "real_model_enabled": False})
+            self._json(
+                {
+                    "status": "ok",
+                    "enabled": True,
+                    "service_mode": "standalone",
+                    "pipeline_id": "png_to_shader_v1",
+                    "node_count": 20,
+                    "capability_count": 8,
+                    "suite_count": 3,
+                    "real_model_enabled": False,
+                }
+            )
             return
         if path == "/api/lab/v1/nodes":
             descriptors = build_png_to_shader_v1_registry().describe_nodes()

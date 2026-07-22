@@ -1,6 +1,6 @@
 # Node Lab 内核架构
 
-`src/nodelab/` 是与具体 Agent、Graph 和 Shader 领域解耦的进程内 Python Harness 内核。它服务人工调试、Agent/Codex 自动化、模块化测试和 benchmark，但不注册 FastAPI Route，也不直接读取 HTTP DTO。空 Application 不默认注入任何生产 Node、Fixture、capability 或 suite。
+`src/nodelab/` 是与具体 Agent、Graph、HTTP 和 Shader 领域解耦的 Python Harness 内核。它服务人工调试、Agent/Codex 自动化、模块化测试和 benchmark，但不注册 FastAPI Route，也不直接读取 HTTP DTO。空 Application 不默认注入任何生产 Node、Fixture、capability 或 suite；独立 transport 与进程组合根位于 `src/nodelab_service/`。
 
 ## 当前能力
 
@@ -20,7 +20,7 @@
 - `benchmark.py`：冻结 manifest/hash、真实 capability/node target、scenario/pipeline 的前序 binding 与 `base_step_id` 分支、输入/输出 Artifact 自包含证据、通用 cold/warm resource、不可覆盖的中断恢复、JSON/Markdown report 和 fingerprint-aware comparison；workspace、生产源码路径与依赖版本均由组合根注入，不绑定仓库布局或 Renderer 依赖；
 - `runner.py`：在同一 Application API 上执行 capability、节点步骤和 suite，并通过 Provider 注入的通用异步资源协议管理 warm session；内核不认识 Renderer 类型。
 
-PNG-to-Shader V1 的 20 个 descriptor、八个 capability、Fixture、三个 AI-off suite、执行模式和具体 Executor 全部位于生产侧 `agent.app.nodes.png_to_shader_v1.integrations.node_lab`。其中 `capability_executor.py` 才允许依赖 `shaderforge.public` 和 Renderer；Harness 内核不再导入它。`agent.app.services.node_lab` 作为兼容组合根默认装配 V1，但显式传入其他 `NodeProvider` 时不会继承任何 V1 capability、Fixture 或 suite。
+PNG-to-Shader V1 的 20 个 descriptor、八个 capability、Fixture、三个 AI-off suite、执行模式和具体 Executor 全部位于生产侧 `agent.app.nodes.png_to_shader_v1.integrations.node_lab`。其中 `capability_executor.py` 才允许依赖 `shaderforge.public` 和 Renderer；Harness 内核不再导入它。`agent.app.services.node_lab` 只保留现有 V1 CLI/benchmark 使用的显式插件组合 helper；独立 HTTP 服务默认不导入它，也不会继承任何 V1 capability、Fixture 或 suite。
 
 PNG-to-Shader Provider 内的 `DeterministicNodeExecutor` 仍只做 JSON-safe State/不透明 Artifact 映射，然后直接调用与 Graph 相同的 Node factory/routing；初始化、测量、候选物化、render/evaluate、selection、best 重载、Review 持久化、finalize 和策略晋升预览没有 Lab 平行实现。`prepare_measurement_seed` 的 Author/GLSL/provenance 仍只写私有 Artifact，独立 root、origin、generator version 和 hash 绑定由生产 `materialize_candidate` 校验。
 
@@ -29,9 +29,13 @@ PNG-to-Shader Provider 内的 `DeterministicNodeExecutor` 仍只做 JSON-safe St
 ## 依赖方向
 
 ```text
-agent.app.services.node_lab
+nodelab_service（独立 FastAPI 进程）
+  -> 启动时受信任的 Application factory
   -> nodelab.runner + models/store/benchmark（通用 Harness）
-  -> 默认兼容装配 agent.app.nodes.png_to_shader_v1.integrations.node_lab
+
+agent.app.services.node_lab（V1 显式插件 helper）
+  -> nodelab.runner
+  -> agent.app.nodes.png_to_shader_v1.integrations.node_lab
 
 nodelab.runner
   -> NodeProvider / NodeExecutorBinding 通用协议
@@ -43,11 +47,14 @@ agent.app.nodes.png_to_shader_v1.integrations.node_lab
   -> Lab ArtifactStore facade（逻辑 ref 映射为不透明 artifact id）
   -> route_deciders() -> V1 capability executor
 
-HTTP / CLI transport
+HTTP transport
+  -> nodelab_service -> factory 返回的 Application
+
+V1 CLI / benchmark
   -> agent.app.services.node_lab
 ```
 
-`nodelab` 不依赖 FastAPI、Backend、LangGraph 编译图、具体 LLM Gateway、`agent.app.nodes.*`、`agent.app.graphs.*` 或 ShaderForge 算法/Renderer；路径安全和原子写入也由包内 `AtomicFileStore` 提供。它作为当前 `shadergen` distribution 中的独立 typed Python 包发布，而不是独立进程或远程服务；`agent.app.services.node_lab` 仍是仓库默认组合根，Backend 只是可选 transport。客户端只能选择当前 Provider/Registry 描述的 node、capability 和 suite id，禁止按字符串反射 import 或提交 manifest 路径。
+`nodelab` 不依赖 FastAPI、Backend、LangGraph 编译图、具体 LLM Gateway、`agent.app.nodes.*`、`agent.app.graphs.*` 或 ShaderForge 算法/Renderer；路径安全和原子写入也由包内 `AtomicFileStore` 提供。`nodelab_service` 是独立进程/部署单元，当前仍与内核一起由同一个 `shadergen` distribution 发布；它不是任意 Node 的远程执行协议。客户端只能选择当前 factory 返回的 Provider/Registry 描述的 node、capability 和 suite id，禁止按字符串反射 import 或提交 manifest 路径。
 
 接入复杂度按 Node 真实边界分层：JSON-safe `node(state) -> partial State` 可直接交给 `NodeProviderBuilder`，无需修改 Node；`node(state, context)`、Runnable 或 Command-like Node 只需在 Provider 选择标准 Executor，并可按 Pipeline 注入 reducer；Artifact hydration、模型门禁、Renderer/数据库/Memory 生命周期和输出脱敏仍由所属 Pipeline 的薄 Executor 显式处理。内核不会通过反射猜测依赖或自动放开副作用，因此“任意 Node”指可通过稳定协议接入，不等于对任意副作用实现零配置执行。
 

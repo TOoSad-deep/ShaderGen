@@ -1,6 +1,6 @@
 # Agent
 
-`src/agent/` 是 ShaderGen 的 LangGraph 智能体模块。它当前不独立启动 FastAPI 服务，而是作为 Python 包被后端调用：产品生成走 `agent.app.services.png_to_shader_v1`，Node Lab 则走独立的 transport-free 诊断 Harness service，不属于产品请求链路。
+`src/agent/` 是 ShaderGen 的 LangGraph 智能体模块。它当前不独立启动 FastAPI 服务，而是作为 Python 包被产品 Backend 调用。Node Lab 的通用内核和独立 HTTP 服务分别位于 `src/nodelab/` 与 `src/nodelab_service/`，不属于 Agent 产品请求链路。
 
 本 README 是 Agent 模块的 harness 入口：只保留接手路径、当前状态判断方式、验证门禁和交接要求。模块说明、目录边界、State/Node/Graph 细则放在对应 `ARCHITECTURE.md`。
 
@@ -11,7 +11,7 @@
 - 当前 Agent 不持有数据库连接池，不独立暴露 HTTP API。
 - 当前 LangGraph 配置在 `langgraph.json`，只注册 `png_to_shader_v1` 一个图。
 - 当前产品调用入口是 `agent.app.services.png_to_shader_v1`。
-- 当前诊断 Harness 入口是 `agent.app.services.node_lab`；Backend 默认不注册 `/api/lab/v1/*`，只有使用 `make dev-node-lab` 或在进程启动前显式设置 `SHADERGEN_NODE_LAB_ENABLED=true` 才开放诊断 HTTP/Swagger。
+- `agent.app.services.node_lab` 只保留 V1 Provider/benchmark 的显式插件组合 helper；独立 HTTP 入口是 `nodelab_service`，产品 Backend 永不注册 `/api/lab/v1/*`。
 - 当前 Shader Memory 使用任务内 Checkpointer、项目 Store 和纯 GSSC Context Builder；数据库连接由 Backend 生命周期注入。
 
 ## 开始前
@@ -27,7 +27,8 @@
 - LangGraph 配置：`langgraph.json`
 - PNG-to-Shader V1 有界图：`src/agent/app/graphs/png_to_shader_v1_graph.py`
 - 产品 service：`agent.app.services.png_to_shader_v1`
-- 诊断 Harness service：`agent.app.services.node_lab`
+- V1 Node Lab 插件 helper：`agent.app.services.node_lab`
+- 独立 Node Lab service：`nodelab_service`（`make dev-node-lab`，默认端口 `8090`）
 - Prompt 文件：`src/agent/app/prompts/*.yaml`
 - 模型输出解析：`agent.app.parsers`
 - Memory：`agent.app.memory`
@@ -55,6 +56,7 @@ Graph 可视化的触发条件、ASCII/Mermaid/路由表同步清单、自动检
 - Node 规则：`src/agent/app/nodes/ARCHITECTURE.md`
 - PNG-to-Shader V1 Node 子架构：`src/agent/app/nodes/png_to_shader_v1/ARCHITECTURE.md`
 - Node Lab Harness 规则：`src/nodelab/ARCHITECTURE.md`
+- Node Lab 独立服务规则：`src/nodelab_service/ARCHITECTURE.md`
 - 离线 Agent benchmark 规则：`src/agent/app/benchmarks/ARCHITECTURE.md`
 - Contracts 规则：`src/agent/app/contracts/ARCHITECTURE.md`
 - LLM Gateway 规则：`src/agent/app/llms/ARCHITECTURE.md`

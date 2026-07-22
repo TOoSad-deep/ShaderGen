@@ -22,12 +22,13 @@
 | D018 | updated | D036、D044 | V1 Checkpointer、Store 与 GSSC 仍有效，persistence 生命周期现由冻结配置与补偿清理栈管理。 |
 | D023 | updated | D036 | V1 产品化边界仍有效，legacy 分流和独立 Review 部分已删除。 |
 | D027 | updated | D036 | 可靠性与安全账本原则仍有效，legacy 兼容部分已删除。 |
-| D028 | updated | D032、D038、D048、D049、D050 | Node Lab Harness 原则仍有效，通用内核现为顶层 Python 包。 |
-| D032 | updated | D038、D048、D049、D050 | Node 是唯一语义实现仍有效，Provider 及其 capability/fixture/suite 归功能命名空间。 |
+| D028 | updated | D032、D038、D048、D049、D050、D051 | Node Lab Harness 原则仍有效，HTTP transport 已迁入独立服务。 |
+| D032 | updated | D038、D048、D049、D050、D051 | Node 是唯一语义实现仍有效，Provider 及其 capability/fixture/suite 由服务 factory 注入。 |
 | D034 | updated | D038 | 按职责拆分仍有效，文件已进一步迁入 V1 功能命名空间。 |
 | D035 | updated | D036、D044 | 薄 Route、Backend Service 和 Renderer 双层清理仍有效；Backend persistence 清理由 D044 加固。 |
-| D048 | updated | D049、D050 | Pipeline 作用域与无 V1 默认语义继续有效；通用内核已迁出 Agent 内部目录并补齐标准接入协议。 |
-| D049 | updated | D050 | 独立包、不独立部署的边界继续有效；包内不再复用 ShaderForge 存储实现。 |
+| D048 | updated | D049、D050、D051 | Pipeline 作用域与无 V1 默认语义继续有效；独立服务同样默认空安全。 |
+| D049 | updated | D050、D051 | 独立 typed 包仍有效，“暂不独立部署”取舍已由独立服务替代。 |
+| D050 | updated | D051 | 标准 Adapter、Reducer 与 Schema 继续属于 transport-free 内核，服务只组合和传输。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -396,3 +397,10 @@
 - 决策：`nodelab` 自有 `AtomicFileStore`，代码不得导入 `shaderforge`；benchmark 的 workspace、Provider 源码、补充源码和依赖版本由组合根注入，warm profile 统一命名为通用 `resource_lifecycle`，旧 `renderer_lifecycle` 仅保留只读兼容。普通 callable 通过 `NodeProviderBuilder` 从 Pydantic Model 或显式 JSON Schema 生成 descriptor/binding；标准 `DirectNodeExecutor`、`ContextNodeExecutor` 和 `RunnableNodeExecutor` 归一化 Mapping、`NodeExecutionResult` 与 Command-like 返回值。Runner 使用完整 JSON Schema Draft 2020-12 校验输入输出，并通过可注入 `StateReducer` 复现 Pipeline 的 State 合并语义。
 - 原因：仅把目录迁出 Agent 仍不足以证明可复用：存储和 benchmark 继续反向依赖 ShaderForge/仓库固定路径，接入方需要手写大量 descriptor，且原 Runner 只检查必填字段、固定浅合并，无法忠实承载带类型约束、context、Runnable、Command 或 reducer 的现有 Node。把这些差异收敛为稳定协议可以减少 Node 本体改造，同时保留生产语义唯一来源。
 - 影响：JSON-safe `node(state) -> partial State` 通常无需改造即可接入；已有 context/Runnable/Command Node 只需在 Provider 选择标准 Adapter，非浅合并 Graph 只需注入 reducer。标准 Adapter 自动登记委托实现与工厂源码，自定义 Executor 可显式补充 `source_paths`；reducer 源码进入 benchmark source fingerprint，归并后的 State hash 进入步骤 execution fingerprint，reducer 失败也提交安全证据。Artifact hydration、模型/数据库/Renderer/Memory 生命周期、权限门禁和敏感输出仍必须由所属 Pipeline 的薄 Executor 明示，内核不会反射 import、猜测依赖或自动授权副作用。Node Lab 继续随当前 distribution 进程内发布，本决策不引入远程服务、独立部署、Graph 变更或真实模型调用。
+
+## D051 - Node Lab HTTP 拆为独立服务并通过启动 factory 组合
+
+- 日期：2026-07-22
+- 决策：新增顶层 `nodelab_service` FastAPI 进程，独占 `/api/lab/v1/*` Route、HTTP Schema、CORS、数据根目录、batch 锁和 transport 配置，默认监听 `127.0.0.1:8090`。产品 Backend 删除 Node Lab Route、Schema、Service 与环境开关，不导入独立服务。服务默认创建空安全 `NodeLabApplication`；进程操作者可通过只在启动时读取的 `NODELAB_APPLICATION_FACTORY=module:callable` 注入已安装于同一 Python 环境的 Provider、Registry、reducer 与资源。客户端不得提交 import、manifest 或文件系统路径。
+- 原因：项目架构重构后不再复用原 Agent，继续让 Backend 或 V1 Agent service 成为 Node Lab 的组合根，会把通用 Harness 的启动、配置和发布生命周期重新绑回产品。独立进程让 Node Lab 可以单独运行和部署，同时保留 transport-free 内核与生产 Node 唯一语义；默认空 Application 避免未配置时静默加载旧 V1 或扩大副作用权限。
+- 影响：`make dev-node-lab` 与 `nodelab-service` 可在不启动 Backend、Agent、数据库或 ShaderForge 的情况下运行，前端通过独立的 `VITE_NODE_LAB_API_BASE_URL` 连接。现有 V1 Provider/CLI/benchmark 继续作为显式插件，不是服务默认语义；其 real-model benchmark 开关与服务的 `NODELAB_REAL_MODEL_ENABLED` 分离。当前 `nodelab` 与 `nodelab_service` 仍由同一个 `shadergen` wheel 发布，factory/Node 也必须存在于服务进程；本决策不引入跨进程 Remote Executor、多语言协议、远程鉴权或真实模型调用。D049 的独立包边界继续有效，但“暂不独立部署”和 Backend 可选 transport 已被本决策更新。

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import backend.sql
 import nodelab
+import nodelab_service
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -131,9 +132,7 @@ def test_backend_sql_is_an_explicit_packaged_resource_boundary() -> None:
 
     schema = files(backend.sql).joinpath("001_agent_process.sql")
     assert schema.is_file()
-    assert "CREATE TABLE IF NOT EXISTS agent_runs" in schema.read_text(
-        encoding="utf-8"
-    )
+    assert "CREATE TABLE IF NOT EXISTS agent_runs" in schema.read_text(encoding="utf-8")
 
 
 def test_node_lab_is_an_explicit_typed_top_level_package() -> None:
@@ -143,3 +142,12 @@ def test_node_lab_is_an_explicit_typed_top_level_package() -> None:
     assert '"nodelab" = "src/nodelab"' in pyproject
     assert not (ROOT / "src/agent/app/lab/__init__.py").exists()
     assert files(nodelab).joinpath("py.typed").is_file()
+
+
+def test_node_lab_service_is_an_explicit_typed_top_level_package() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert '    "nodelab_service",' in pyproject
+    assert '"nodelab_service" = "src/nodelab_service"' in pyproject
+    assert 'nodelab-service = "nodelab_service.cli:main"' in pyproject
+    assert files(nodelab_service).joinpath("py.typed").is_file()

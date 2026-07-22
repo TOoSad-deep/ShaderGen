@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from langchain_core.messages import BaseMessage
 
@@ -18,8 +17,6 @@ from agent.app.nodes.png_to_shader_v1.integrations.node_lab import (
     build_png_to_shader_v1_registry,
 )
 from agent.app.services.node_lab import NodeLabApplication, create_node_lab_application
-from backend.app.api.routes.node_lab import router as node_lab_router
-from backend.app.services.node_lab import NodeLabBackendService
 from nodelab.models import (
     LabRunCreateRequest,
     NodeLabError,
@@ -32,7 +29,9 @@ ROOT = Path(__file__).resolve().parents[2]
 REFERENCE_IMAGE = ROOT / "benchmarks/png_to_shader_v1/images/pink_gel.png"
 NODE_DESCRIPTORS = build_png_to_shader_v1_registry().describe_nodes()
 DETERMINISTIC_NODE_IDS = frozenset(
-    descriptor.node_id for descriptor in NODE_DESCRIPTORS if not descriptor.requires_model
+    descriptor.node_id
+    for descriptor in NODE_DESCRIPTORS
+    if not descriptor.requires_model
 )
 MODEL_NODE_IDS = frozenset(
     descriptor.node_id for descriptor in NODE_DESCRIPTORS if descriptor.requires_model
@@ -373,9 +372,16 @@ def test_http_stage_c_fixture_flow_lists_dag_and_private_artifacts(
     tmp_path: Path,
 ) -> None:
     application = create_node_lab_application(root=tmp_path / "node-lab")
-    app = FastAPI()
-    app.state.node_lab_service = NodeLabBackendService(application)
-    app.include_router(node_lab_router)
+    from nodelab_service.main import create_app
+    from nodelab_service.settings import NodeLabServiceSettings
+
+    app = create_app(
+        NodeLabServiceSettings(
+            root=tmp_path / "node-lab",
+            pipeline_id=application.pipeline_id,
+        ),
+        application=application,
+    )
 
     with TestClient(app) as client:
         lab_run_id = client.post(

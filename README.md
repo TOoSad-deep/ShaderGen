@@ -23,7 +23,8 @@ ShaderGen/
 │   └── sql/         # 后端启动时按文件名顺序执行的手写 SQL
 ├── src/
 │   ├── agent/       # LangGraph Agent 包，内部入口为 agent.app.*
-│   ├── nodelab/     # Pipeline 无关的进程内调试、证据与 benchmark Harness
+│   ├── nodelab/     # Pipeline 无关的调试、证据与 benchmark Harness 内核
+│   ├── nodelab_service/ # 可独立启动的 Node Lab FastAPI 服务与插件组合根
 │   └── shaderforge/ # 确定性领域核心：契约、测量、校验、渲染、评分、制品
 ├── tests/           # Python 单元测试和集成测试
 ├── docs/            # 架构、决策、功能状态
@@ -65,8 +66,10 @@ GitHub 主 CI 使用 Python 3.12、Node 22、`uv sync --locked` 和 `npm ci --pr
 - LangGraph Studio：`https://smith.langchain.com/studio/?baseUrl=http://127.0.0.1:2024`
 - FastAPI 后端：`http://127.0.0.1:8088`
 - FastAPI 文档：`http://127.0.0.1:8088/docs`
+- Node Lab Service：`http://127.0.0.1:8090`
+- Node Lab Swagger：`http://127.0.0.1:8090/docs`
 - Vite 前端：`http://127.0.0.1:5173`
-- Node Lab 工作台：`http://127.0.0.1:5173/lab`（Backend 需用 `make dev-node-lab` 显式开启）
+- Node Lab 工作台：`http://127.0.0.1:5173/lab`（需另行运行 `make dev-node-lab`）
 
 ## 配置
 
@@ -96,9 +99,13 @@ SHADERGEN_CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/DATABASE
 TEST_DATABASE_URL=postgresql://USER:PASSWORD@HOST:5432/SHADERGEN_TEST
 LANGGRAPH_STRICT_MSGPACK=true
-SHADERGEN_NODE_LAB_ENABLED=false
-SHADERGEN_NODE_LAB_ROOT=
-SHADERGEN_NODE_LAB_BATCH_ROOT=
+NODELAB_ROOT=output/node-lab/service
+NODELAB_BATCH_ROOT=output/benchmarks/node-lab-service
+NODELAB_PIPELINE_ID=node_lab
+NODELAB_APPLICATION_FACTORY=
+NODELAB_REAL_MODEL_ENABLED=false
+NODELAB_CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
+NODELAB_LOG_LEVEL=INFO
 SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=false
 ```
 
@@ -108,11 +115,13 @@ SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=false
 
 `SHADER_GEN_MODEL_NAME` 支持 `provider:model` 形式，例如 `dashscope:qwen3.7-plus`。`dashscope`、`openai`、`deepseek`、`glm` 表示凭据和 base URL 来源；真实模型名再决定使用 Qwen、GLM、DeepSeek 或 OpenAI 系列配置。
 
+`SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED` 只控制现有 PNG-to-Shader V1 real-model benchmark，不控制独立服务；独立服务使用 `NODELAB_REAL_MODEL_ENABLED`，且仍要求 factory/Provider 自身授权。
+
 F09 M5 的确定性 AI-off smoke 可直接运行；真实 benchmark 会产生按量模型调用，必须使用显式命令和硬预算。报告、逐例失败证据和盲评页面写入 `output/benchmarks/png-to-shader-v1/`。最新 gate、run、比例、证据 hash 和验证基线只在 `PROGRESS.md`、`docs/FEATURES.md` 与 `docs/evidence/registry.json` 维护。
 
-Node Lab 是可注入 Pipeline Provider 的通用 Harness；当前默认 Provider 仍是 PNG-to-Shader V1。该模块使用三项独立门禁：`make benchmark-node-lab-ai-off` 覆盖 capability、真实 node target、scenario/pipeline、Renderer cold/warm 和 direct-vs-HTTP transport；`make benchmark-node-lab-model` 用固定 fixture 离线检查五个模型角色；`make test-node-lab-ui` 用假 API 验收工作台。H02 的当前状态与证据见 `docs/FEATURES.md`。模型报告按角色聚合 Parser/Schema/binding/timeout、latency、token、费用和 requested/actual model；中断可恢复但仍留在分母，样本不足 20 时 p95 为 `null`。真实模型诊断必须运行 `SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=true uv run python scripts/run_node_lab_model_benchmark.py --execution-mode real --allow-model-calls`，并受 manifest 的调用、provider 输出 token、总 token、时间和费用硬预算限制。三类 CLI 只向 stdout 输出 suite/status/report path 单行 JSON，case 失败返回非零。所有 Node Lab 报告都不覆盖 M5 证据。
+Node Lab 由通用 `nodelab` Harness 和可独立启动的 `nodelab_service` 组成。独立服务默认使用空安全 Application，不再静默装配 PNG-to-Shader V1；重构后的项目通过进程启动配置 `NODELAB_APPLICATION_FACTORY=module:callable` 注入自己的 Provider、Registry 和资源。产品 Backend 不再注册 `/api/lab/v1/*`。模块仍使用三项独立门禁：`make benchmark-node-lab-ai-off`、`make benchmark-node-lab-model` 和 `make test-node-lab-ui`；V1 benchmark 只是显式测试插件，不是服务默认语义。所有 Node Lab 报告都不覆盖 M5 证据。
 
-人工学习可使用 `/lab` 页面、Swagger 或 `scripts/run_node_lab_cli.py`；生产 Provider 提供机器可读 descriptor 和输入示例，步骤列表可重建 `base_step_id` DAG，Artifact 列表只返回同一 LabRun 的私有 descriptor。启动 Backend 必须使用 `make dev-node-lab` 或在进程导入前设置 `SHADERGEN_NODE_LAB_ENABLED=true`；默认关闭。私有 LabRun/Artifact 默认写入 `output/node-lab/http`，HTTP batch 报告默认写入 `output/benchmarks/node-lab-http`，分别可用 `SHADERGEN_NODE_LAB_ROOT` 与 `SHADERGEN_NODE_LAB_BATCH_ROOT` 覆盖。完整教程见 `docs/NODE_LAB_GUIDE.md`。
+人工学习可使用 `/lab` 页面、独立 Swagger 或 `scripts/run_node_lab_cli.py`。运行 `make dev-node-lab` 后，空服务位于 `127.0.0.1:8090`；要执行项目 Node，先安装包含 factory/Provider 的项目包，再设置 `NODELAB_APPLICATION_FACTORY`。私有 LabRun/Artifact 默认写入 `output/node-lab/service`，HTTP batch 报告写入 `output/benchmarks/node-lab-service`。完整教程见 `docs/NODE_LAB_GUIDE.md`，服务边界见 `src/nodelab_service/ARCHITECTURE.md`。
 
 ## 开发规则
 
@@ -121,8 +130,8 @@ Node Lab 是可注入 Pipeline Provider 的通用 Harness；当前默认 Provide
 - 会话结束前原地刷新 `PROGRESS.md` 的当前交接信息；例行验证更新现有基线，只有状态、契约、门禁、里程碑或重要缺口变化时才新增最近变更。
 - 架构、目录边界、命令、环境变量、功能状态或前后端契约变化时，同步更新对应 Markdown。
 - 对仓库事实无法确定且会影响架构、契约、数据、安全或验收的问题，先向用户确认。
-- HTTP route 放 `backend/app/api/routes/`，并在 `backend/app/api/router.py` 注册。
+- 产品 HTTP route 放 `backend/app/api/routes/`；Node Lab HTTP 只放 `src/nodelab_service/`。
 - 后端请求/响应 schema 放 `backend/app/schemas/`，后端编排放 `backend/app/services/`。
 - 手写 SQL schema 放 `backend/sql/`，文件名按顺序编号并保持幂等。
 - Prompt 放在 `src/agent/app/prompts/*.yaml`，后端只调用 `agent.app.services.*`。
-- HTTP 边界放 `backend/`，前端交互放 `frontend/`，确定性领域核心后续放 `src/shaderforge/`。
+- 产品 HTTP 边界放 `backend/`，Node Lab HTTP 边界放 `src/nodelab_service/`，前端交互放 `frontend/`，确定性领域核心后续放 `src/shaderforge/`。

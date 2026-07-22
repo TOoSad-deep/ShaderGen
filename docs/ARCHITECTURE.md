@@ -36,7 +36,7 @@ ShaderGen/ShaderForge 将用户意图、参考图、约束和验收标准转成�
 
 当前仓库只保留 `png_to_shader_v1_graph.py` 一个对外 Graph。它先运行 `prepare_context` 和参考图确定性测量，再调用 Analyst/Author/Critic，通过静态 Validator、项目自有 Playwright/Chromium WebGL1 Renderer、Basic Oracle 和 LocalArtifactStore 形成有界 initial / compile-repair / visual-refine 循环。首个成功 model best 后还会生成一次与 case/manifest/gate 无关的 measurement affine 独立根候选；它不消耗模型或视觉迭代预算，但必须经过同一事实层与 Selector。生产 Oracle 保留确定性测量 ROI，并追加严格 VisualAnalysis 的语义 ROI。纯 Selector 只在硬约束通过、总损失达到最小改善且保护区不超退化时更新 `current_best`；Critic/refine 与 finalize 均从 best Artifact 重载 GLSL/PNG/metrics，模型或新候选失败不会覆盖已有 best。任务内轻量状态由 LangGraph Checkpointer 保存，图片、完整 GLSL、渲染图、ContextPack、Candidate 大对象和过程摘要使用 `UntrackedValue`；项目长期 Memory 只保存精炼摘要，并且只晋升确定性验证过的 best 策略。`backend.app.services.shader_generation` 只编排 V1 用例，并通过 `agent.app.services.png_to_shader_v1` 调用 Graph；V1 使用稳定的 checkpoint thread 前缀和项目 Store。Backend 在组合根把环境解析为不可变 `BackendSettings`，再向 Router、Service 与 lifespan 注入；lifespan 使用补偿清理栈管理 asyncpg 与 Agent Memory persistence，初始化半失败、取消或某一关闭失败均不得跳过其余资源清理。Graph 与 Service 共享 run 级 Renderer registry，正常路径由 `finalize` 关闭，Graph 外异常由 Service `finally` 限时、幂等兜底。过程事件由公共结果交给 Backend 写入账本。HTTP 只开放 final-render/metrics/manifest 白名单，前端按服务端规范化尺寸重编译 GLSL 并比较像素 RMSE。旧基础对话图、legacy 生成/独立 Review 图及其产品入口已下线。
 
-Node Lab 以独立的 `nodelab` 进程内 Python 包提供 transport-free Application API 和通用 `NodeProvider`/`CapabilityExecutor` 协议。该包不属于 Agent 内部目录，不导入具体 Node、Graph、ShaderForge 算法或 Renderer，并自有路径安全原子存储；它也不默认登记 V1 的 Fixture、capability 和 suite。`pipeline_id`、descriptor、执行绑定、State reducer、warm benchmark 资源、源码/依赖 fingerprint 及 suite allowlist 都由功能命名空间在组合根注入。普通 callable 可通过 `NodeProviderBuilder` 和 Pydantic/JSON Schema 零改造登记；Context、Runnable、Command-like 返回值由标准 Executor 归一化，输入输出执行完整 Draft 2020-12 校验；具有 Artifact、模型、Renderer、数据库或 Memory 副作用的 Node 仍由 Pipeline 提供薄 Adapter。当前默认 PNG-to-Shader Provider 位于 `agent.app.nodes.png_to_shader_v1.integrations.node_lab`，暴露 20 个图节点、八个确定性 capability、三个 AI-off suite、机器可读示例和离线成功/拒绝路径；15 个非模型节点通过 Artifact facade 直接调用生产 Node factory/routing，五个模型节点调用生产角色 Node factory 与 bounded wrapper。新 Pipeline 可以独立装配自己的 Provider/Registry，不会继承 V1 语义。完整 ContextPack、GLSL、图片、模型原始内容只存 Lab Artifact，策略 Memory 只 preview；失败/中断证据不可覆盖。可选 `/api/lab/v1/*` 仍由 Backend 显式开启，不进入产品 API；当前没有独立 Node Lab 进程、远程协议或部署单元。HTTP batch 只接受当前 Application 注册的 suite id，不接受客户端 manifest 路径。`scripts/run_node_lab_cli.py`、Swagger 和 `/lab` 工作台只消费公共 Application API/descriptor。
+Node Lab 分为 transport-free 的 `nodelab` 内核和可独立启动的 `nodelab_service` FastAPI 服务。内核不属于 Agent，不导入具体 Node、Graph、ShaderForge 算法、Renderer 或 HTTP DTO，并自有路径安全原子存储；独立服务也不依赖产品 Backend、数据库或 Agent 生命周期。服务默认创建空安全 Application，不登记 V1 的 Node、Fixture、capability 或 suite；进程操作者只能在启动时通过受信任的 `NODELAB_APPLICATION_FACTORY=module:callable` 注入已安装于同一 Python 环境的 Application。`pipeline_id`、descriptor、执行绑定、State reducer、warm benchmark 资源、源码/依赖 fingerprint 及 suite allowlist 都由该 factory 所属功能命名空间注入。普通 callable 可通过 `NodeProviderBuilder` 和 Pydantic/JSON Schema 零改造登记；Context、Runnable、Command-like 返回值由标准 Executor 归一化，输入输出执行完整 Draft 2020-12 校验；具有 Artifact、模型、Renderer、数据库或 Memory 副作用的 Node 仍由 Pipeline 提供薄 Adapter。PNG-to-Shader V1 Provider 位于 `agent.app.nodes.png_to_shader_v1.integrations.node_lab`，仅作为显式插件和现有 benchmark 组合使用，不再是 HTTP 服务默认语义。完整 ContextPack、GLSL、图片、模型原始内容只存 Lab Artifact，策略 Memory 只 preview；失败/中断证据不可覆盖。`/api/lab/v1/*` 只由默认端口 `8090` 的独立服务提供，产品 Backend 不再拥有其 Route、Schema、配置或生命周期。HTTP batch 只接受当前 Application 注册的 suite id，不接受客户端 manifest/import/文件路径。当前服务实现独立进程和部署边界，但没有跨进程 Remote Executor 协议；需保留在其他进程或语言中的 Node 应在未来通过鉴权、超时、幂等和 Artifact 约束的远程协议接入。
 
 M5 以固定 10 例 manifest、AI-off smoke、成本受控 AI-on runner、运行前冻结 gate 和匿名 A/B 页面独立于产品请求执行；新 run 对 model initial 与 final 使用同一 manifest ROI objective，并严格区分 model/deterministic provenance。Node Lab benchmark 与 M5 证据互不覆盖。Intent IR、DSL、Search Engine 和完整 VLM/HITL 仍是后续工作。
 
@@ -88,7 +88,8 @@ ShaderGen/
 │   │       ├── services/     # 对后端开放的 Agent 用例服务
 │   │       ├── tools/        # Agent 工具注册入口
 │   │       └── observability/# Agent 回调、追踪、指标入口
-│   ├── nodelab/              # Pipeline 无关的进程内 Node 调试、证据与 benchmark Harness
+│   ├── nodelab/              # Pipeline 无关的 Node 调试、证据与 benchmark Harness 内核
+│   ├── nodelab_service/      # 可独立运行的 Node Lab FastAPI transport 与组合根
 │   └── shaderforge/          # 领域核心流水线，按真实功能逐步创建
 │       ├── routing/          # 任务拆解、路由策略、阶段选择
 │       ├── intent/           # Intent IR 类型、解析、约束结构化
@@ -118,6 +119,8 @@ ShaderGen/
 - `src/agent/ARCHITECTURE.md`：Agent 总体流向、当前图和子模块规范索引。
 - `src/agent/app/*/ARCHITECTURE.md`：Agent 子模块边界，例如 `nodes`、`states`、`graphs`、`services` 各自的实现规范。
 - `src/agent/README.md`：Agent 模块入口、运行命令和事实来源索引。
+- `src/nodelab/ARCHITECTURE.md`：Node Lab 通用内核、Provider 和证据边界。
+- `src/nodelab_service/ARCHITECTURE.md`：Node Lab 独立服务、配置、factory 和 HTTP 边界。
 - `src/shaderforge/ARCHITECTURE.md`：ShaderForge 当前已实现范围、公共入口和禁止依赖。
 
 如果模块旁边的 `ARCHITECTURE.md` 或目录 README 与本文档冲突，以本文档的分层边界为准，再更新模块文档。
@@ -125,7 +128,7 @@ ShaderGen/
 ## 分层职责
 
 - `frontend/` 只负责用户输入、交互状态、图片/Shader 预览和结果展示；不要放搜索、评分、Prompt 组装或后端业务规则。
-- `backend/` 只负责 HTTP API、上传校验、错误响应、鉴权/限流等应用边界，以及调用 service 编排流程；不要把核心算法写在 route 中，也不要直接依赖 Agent 内部模型、Prompt 或 LangChain 消息。
+- `backend/` 只负责产品 HTTP API、上传校验、错误响应、鉴权/限流等应用边界，以及调用产品 service 编排流程；不要把核心算法写在 route 中，也不要直接依赖 Agent 内部模型、Prompt、LangChain 消息或 `nodelab_service`。
 - `src/agent/` 负责 LangGraph 图、模型选择、Prompt 加载、Agent 节点、Context Engineering、Memory 数据结构/Store 接口操作和对后端开放的 `agent.app.services.*` 公共用例服务；运行过程摘要通过公共服务返回给后端落库。Agent 不创建或关闭数据库连接池，具体 persistence 资源由 Backend 生命周期注入；Agent 也不承载图像指标、搜索优化或 ShaderForge 产物存储。
 - `src/shaderforge/` 负责最终架构中的确定性领域能力：IR、DSL、渲染、评分、搜索、评审、存储。该层应尽量用普通 Python 类型和函数表达，不依赖 FastAPI，也不直接依赖 React。
 - `tests/` 按行为归属放测试。领域核心优先写单元测试；跨 backend、agent、shaderforge 的路径放集成测试。
@@ -150,7 +153,7 @@ frontend 用户输入
 - M5 人工质量门禁未通过期间，Frontend/HTTP 仍只提供 `procedural_v1`，但必须明确显示实验/no-go 状态；“唯一实现路径”不等于“已获准灰度发布”。
 - V1 的 wall-time 预算按阶段分配，模型不得占用留给确定性修复、Renderer、Evaluator 和 finalize 的保留时间。
 - Renderer registry 的正常释放属于 Graph `finalize`，越过 Graph 的未知异常由 Agent Service `finally` 使用同一 registry 再次幂等释放；清理故障不得遮蔽原始生成结果或异常。
-- Backend 只在应用组合根读取环境变量；数据库、日志、CORS 和 Node Lab 开关冻结后注入依赖。数据库与 Memory 的 open 函数负责回收自身半初始化资源，lifespan 再按逆序执行全部已登记 close；关闭前先从 `app.state` 脱离对象，避免失败资源继续被请求借用。
+- Backend 只在应用组合根读取产品数据库、日志与 CORS 环境变量；Node Lab 使用自己进程中冻结的 `NODELAB_*` 配置。数据库与 Memory 的 open 函数负责回收自身半初始化资源，lifespan 再按逆序执行全部已登记 close；关闭前先从 `app.state` 脱离对象，避免失败资源继续被请求借用。
 - `current_best` 只能来自 Selector。只有当 Evaluator 不可用且候选已经通过静态检查和真实 WebGL 时，才允许返回明确标记的 `unscored_fallback`；它没有评分、metrics、Critic 绑定或长期 Memory 晋升资格。
 - API 错误必须区分请求校验、Shader validation、模型供应商/配置/响应、Renderer、persistence、timeout 和内部 pipeline 错误。未知内部异常不得伪装成用户可修复的 422。
 - 过程终态在单个数据库事务中提交事件、日志和 run 状态；普通日志/事件禁止完整 GLSL、图片、reasoning、供应商原文或编译器原文。原始编译证据只进入私有 Artifact。
@@ -161,7 +164,7 @@ frontend 用户输入
 - 先有功能项，再有目录。没有对应 `docs/FEATURES.md` 功能，不创建 `src/shaderforge/*` 空子包。
 - 新建领域子包时，必须同时添加最小单元测试。
 - 共享类型只在两个以上模块需要时抽出；单模块内部类型留在本模块。
-- API 请求/响应 schema 放 `backend/app/schemas/`；HTTP route 放 `backend/app/api/routes/`；手写 SQL 放 `backend/sql/`，并以显式 `backend.sql` 资源包进入 wheel，不在其中放运行时 Python 编排。领域内部结构优先放 `src/shaderforge/*`，不要让后端 schema 泄漏进核心层。
+- 产品 API 请求/响应 schema 放 `backend/app/schemas/`，产品 HTTP route 放 `backend/app/api/routes/`；Node Lab 的 schema/route 只放 `src/nodelab_service/`。手写 SQL 放 `backend/sql/`，并以显式 `backend.sql` 资源包进入 wheel，不在其中放运行时 Python 编排。领域内部结构优先放 `src/shaderforge/*`，不要让 HTTP schema 泄漏进核心层。
 - 后端新增 route 必须在 `backend/app/api/router.py` 注册；新增 service 必须表达一个真实后端用例；不创建 `auth`、`user`、`file` 等空包。
 - Agent 新增对后端能力时，入口放在 `agent.app.services.*`；Node 只通过 `agent.app.contracts.llm.LLMGateway` 使用模型能力，具体实现由 Graph 从 `agent.app.llms` 注入。
 - 如果创建 `src/shaderforge/`，必须同步更新 `pyproject.toml` 的包发现配置，确保 `uv run` 和测试环境能导入。

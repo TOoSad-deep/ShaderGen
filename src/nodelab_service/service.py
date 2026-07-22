@@ -1,4 +1,4 @@
-"""Node Lab HTTP transport 到 Agent Application API 的后端编排层."""
+"""独立 Node Lab HTTP transport 的编排层."""
 
 from __future__ import annotations
 
@@ -9,28 +9,22 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-from agent.app.services.node_lab import (
+from nodelab.models import (
     CapabilityExecutionRequest,
     EffectMode,
     ExecutionMode,
     LabRunCreateRequest,
-    NodeLabApplication,
     NodeLabError,
     StepExecutionRequest,
-    create_default_model_node_lab_application,
-    describe_suites,
-    run_registered_suite,
-    validate_registered_suite,
 )
+from nodelab.runner import NodeLabApplication
 
-ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_NODE_LAB_ROOT = ROOT / "output/node-lab/http"
-DEFAULT_NODE_LAB_BATCH_ROOT = ROOT / "output/benchmarks/node-lab-http"
+DEFAULT_NODE_LAB_BATCH_ROOT = Path("output/benchmarks/node-lab-service").resolve()
 _BATCH_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 
 
-class NodeLabBackendService:
-    """保持 Route 只处理 HTTP，所有执行语义下沉到 Agent service."""
+class NodeLabHttpService:
+    """保持 Route 只处理 HTTP，所有执行语义下沉到通用 Application."""
 
     def __init__(
         self,
@@ -48,11 +42,11 @@ class NodeLabBackendService:
 
     def describe_suites(self) -> tuple[str, ...]:
         """列出 HTTP 可运行的固定 AI-off suite id."""
-        return describe_suites(application=self.application)
+        return self.application.describe_suites()
 
     def validate_batch_suite(self, suite_id: str) -> dict[str, object]:
         """校验 allowlist suite，不接受客户端 manifest 路径."""
-        return validate_registered_suite(suite_id, application=self.application)
+        return self.application.validate_suite(self.application.resolve_suite(suite_id))
 
     async def run_batch(
         self,
@@ -67,11 +61,10 @@ class NodeLabBackendService:
         try:
             async with lock:
                 try:
-                    return await run_registered_suite(
-                        suite_id,
+                    return await self.application.run_suite(
+                        self.application.resolve_suite(suite_id),
                         output_root=self.batch_output_root,
                         suite_run_id=run_id,
-                        application=self.application,
                     )
                 except ValueError as exc:
                     if "config hash" in str(exc):
@@ -187,6 +180,23 @@ class NodeLabBackendService:
         inputs: dict[str, Any],
     ) -> dict[str, Any]:
         """构造严格 Agent 请求并执行节点步骤."""
+        if (
+            execution_mode == "real"
+            and not preview_only
+            and effect_mode != "preview"
+            and (not self.real_model_enabled or not allow_model_call)
+        ):
+            raise NodeLabError(
+                "real_model_not_allowed",
+                "Node Lab 真实模型调用未满足独立服务和请求双重开关。",
+                stage="real_model_gate",
+                lab_run_id=lab_run_id,
+                node_id=node_id,
+                details={
+                    "server_enabled": self.real_model_enabled,
+                    "request_allowed": allow_model_call,
+                },
+            )
         return (
             await self.application.execute_step(
                 StepExecutionRequest(
@@ -252,31 +262,27 @@ class NodeLabBackendService:
         return descriptor.to_dict(), data
 
 
-def create_default_node_lab_backend_service(
+def create_node_lab_http_service(
     *,
-    root: str | Path | None = None,
+    application: NodeLabApplication,
     batch_output_root: str | Path | None = None,
     real_model_enabled: bool = False,
-) -> NodeLabBackendService:
-    """使用组合根传入的冻结配置创建本地 Node Lab Service."""
-    resolved_root = Path(root) if root is not None else DEFAULT_NODE_LAB_ROOT
+) -> NodeLabHttpService:
+    """使用组合根传入的 Application 创建独立 HTTP Service."""
     resolved_batch_root = (
         Path(batch_output_root)
         if batch_output_root is not None
         else DEFAULT_NODE_LAB_BATCH_ROOT
     )
-    return NodeLabBackendService(
-        create_default_model_node_lab_application(
-            root=resolved_root,
-            real_model_enabled=real_model_enabled,
-        ),
+    return NodeLabHttpService(
+        application,
         batch_output_root=resolved_batch_root,
         real_model_enabled=real_model_enabled,
     )
 
 
 __all__ = [
-    "NodeLabBackendService",
+    "NodeLabHttpService",
     "NodeLabError",
-    "create_default_node_lab_backend_service",
+    "create_node_lab_http_service",
 ]

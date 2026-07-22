@@ -20,7 +20,7 @@ trap cleanup EXIT
 SHADERGEN_FAKE_API_PORT="$API_PORT" SHADERGEN_E2E_ORIGIN="$VITE_ORIGIN" \
   uv run python "$ROOT/scripts/fake_node_lab_api.py" >"$ARTIFACT_DIR/node-lab-api.log" 2>&1 &
 API_PID=$!
-VITE_API_BASE_URL="http://127.0.0.1:$API_PORT" \
+VITE_NODE_LAB_API_BASE_URL="http://127.0.0.1:$API_PORT" \
   npm --prefix "$ROOT/frontend" run dev -- --host 127.0.0.1 --port "$VITE_PORT" --strictPort >"$ARTIFACT_DIR/node-lab-vite.log" 2>&1 &
 VITE_PID=$!
 
