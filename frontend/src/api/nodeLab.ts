@@ -1,6 +1,7 @@
 import { apiFetch, parseApiError, resolveApiUrl } from "./client";
 
-const NODE_LAB_API_BASE_URL =
+/** Node Lab 独立服务地址，页面状态栏和离线引导直接展示该值。 */
+export const NODE_LAB_API_BASE_URL: string =
   import.meta.env.VITE_NODE_LAB_API_BASE_URL ?? "http://127.0.0.1:8090";
 
 export type NodeLabExecutionMode = "deterministic" | "fixture" | "mock" | "real";
@@ -276,6 +277,7 @@ export async function uploadNodeLabArtifact(
   const response = await apiFetch(
     `/api/lab/v1/runs/${encodeURIComponent(labRunId)}/artifacts`,
     { method: "POST", body: formData },
+    NODE_LAB_API_BASE_URL,
   );
   if (!response.ok) throw await readError(response);
   return response.json() as Promise<NodeLabArtifact>;

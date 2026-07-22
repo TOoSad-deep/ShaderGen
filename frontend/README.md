@@ -6,7 +6,7 @@
 
 - `src/api/client.ts`：统一解析 `VITE_API_BASE_URL`、发起 `fetch` 并提取安全错误消息。
 - `src/api/`：领域 API 封装。页面和组件不得直接调用 `fetch` 或拼接后端 URL。
-- `src/components/`：可复用 UI 和 WebGL 预览组件。组件只接收 props，不直接了解后端业务流程。
+- `src/components/`：可复用 UI 和 WebGL 预览组件。组件只接收 props，不直接了解后端业务流程。Node Lab 工作台的纯展示子组件放在 `src/components/nodelab/`，页面状态和 API 调用仍集中在 `src/pages/NodeLabPage.tsx`。
 - `src/pages/`：页面级组合。页面可以管理页面状态和调用 `src/api/`。
 - `src/styles/`：全局样式和页面样式。避免把大量内联样式写进组件。
 - `public/`：静态资源。
@@ -46,8 +46,11 @@
 
 ## Node Lab 工作台
 
-- `/lab` 是本地调试页面，不改变产品 `/api/shader/*` 契约。必须另行运行 `make dev-node-lab`；只运行产品 Backend 时，页面会显示稳定的独立服务不可达错误。
-- 左侧目录动态读取 Application factory 注入的 Node descriptor；无 factory 时目录为空，不再默认显示 V1。中间输入编辑器使用机器可读示例、执行模式、Fixture、`base_step_id` 和显式模型门禁；右侧只展示安全 Output、State Diff、diagnostics/usage/provenance。
+- `/lab` 是本地调试页面，不改变产品 `/api/shader/*` 契约。必须另行运行 `make dev-node-lab`；只运行产品 Backend 时，页面顶部状态栏显示连接失败，并给出独立服务地址和启动命令。
+- 页面为容器加纯展示组件结构：`pages/NodeLabPage.tsx` 持有全部状态与 API 调用，`components/nodelab/` 下的 `LabStatusBar`、`RunControls`、`NodeCatalog`、`NodeInspector`、`StepResult`、`ArtifactPanel`、`StepDag` 只接收 props。
+- 顶部状态栏直接使用 health 返回的 `pipeline_id`、`node_count`、`capability_count`、`suite_count` 和 `real_model_enabled`，不改动字段语义；连接状态分为正在连接/已连接/连接失败。
+- 主体是目录 / 检查器 / 结果三栏工作台，各栏独立滚动，窄屏按两栏、单栏顺序退化，桌面开发体验优先。
+- 左侧目录动态读取 Application factory 注入的 Node descriptor；空 Application 是空安全默认值，目录内直接展示 factory 配置引导和 `NODELAB_APPLICATION_FACTORY` 用法，不默认显示 V1。中间检查器使用机器可读示例、执行模式、Fixture、`base_step_id` 和显式模型门禁，输入 JSON 编辑器带实时合法性提示和格式化；右侧只展示安全 Output、结构化 State Diff、diagnostics/usage/provenance 和本步骤 Artifact 下载。
 - 页面支持新建或恢复 LabRun、上传同 Run 私有 Artifact、从任意父步骤分支、下载不透明 Artifact，并在底部根据 summary 重建不可变步骤 DAG；完整步骤结果按选择惰性加载并缓存，Artifact descriptor 独立维护，不与 step list 混用。
 - Real 模型步骤仍需独立服务环境开关、Provider 门禁和页面单步确认。页面不会自动开启真实模型，也不提供 `project_commit` 选项。
 

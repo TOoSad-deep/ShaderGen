@@ -36,7 +36,7 @@
 ## 当前验证基线
 
 - 2026-07-22 当前工作树通过 `make check`：429 个 Python 单元测试、`docs-check`、LangGraph validate（1 个 Graph）与 Frontend production build 均成功；Integration 为 27 passed、1 skipped，全仓 Ruff、`mypy --strict src backend` 与 `git diff --check` 通过。独立 `nodelab-service` 进程 smoke 在未启动 Backend/Agent/数据库时完成 health 与 LabRun 创建；`uv build --wheel` 确认 `nodelab_service`、CLI entry point 和 `py.typed` 进入发布物，旧 Backend Node Lab 文件不在 wheel。未运行真实模型。
-- 数据库和浏览器追加验收通过：`make test-memory-postgres` 为 1 passed；产品 `npm --prefix frontend run e2e:procedural-v1` 与 Node Lab `make test-node-lab-ui` 均通过，使用隔离资源且没有真实模型调用。
+- 数据库和浏览器追加验收通过：`make test-memory-postgres` 为 1 passed；产品 `npm --prefix frontend run e2e:procedural-v1` 通过；2026-07-22 Node Lab 工作台前端重构后，`npm --prefix frontend run build` 与 Node Lab `make test-node-lab-ui` 通过，使用隔离资源且没有真实模型调用。
 - `H02` 权威验收命令 `make benchmark-node-lab-ai-off`、`make benchmark-node-lab-model`、`make test-node-lab-ui` 均通过；独立服务拆分后 capability/node、scenario、warm resource、transport 和离线五角色 run id 分别为 `node-lab-aa58da7bb2ed`、`node-lab-82357bb10add`、`node-lab-261c67b93db0`、`transport-c84acfa237ed`、`node-lab-model-3ec9ff76d542`。这些结果只覆盖 AI-off、离线 fixture 和页面流程，不构成真实模型质量证明。
 - 2026-07-16 wheel 审计确认 `backend.sql`、V1 嵌套包、Prompt、许可证和 typed 标记均进入发布包且无 package-discovery 警告；独立导入探针确认 `shaderforge.contracts`、`agent.app.contracts.llm` 与 `nodelab.models` 不再 eager-load Renderer、Runner、Playwright 或 V1 Agent 契约，同时根包兼容导出的对象 identity 保持不变。
 - 2026-07-15 离线基线：产品 AI-off 10 例 smoke `m5-20260715T155850Z` 完成且质量 gate 按设计为 `not-evaluated`；最终源码指纹下的 Node Lab capability/node、scenario、Renderer warm、transport 四组 suite-run `node-lab-21616b814e33`、`node-lab-164f8c9687af`、`node-lab-5a386968babc`、`transport-6176202caddc` 全部 passed；五模型角色 fixture `node-lab-model-fccee6297b34` passed。未调用真实模型。
@@ -45,11 +45,11 @@
 
 ## 最近重要变更
 
+- 2026-07-22：Node Lab 前端重构为“页面容器 + `frontend/src/components/nodelab/` 纯展示组件”的三栏工作台：顶部状态栏直接展示 health 的 pipeline_id、节点/capability/suite 计数和真实模型门禁，服务不可达给出启动指引，空 Application 在目录内显示 factory 接入引导，输入 JSON 带实时合法性提示；三栏布局桌面优先，1100px 以下才退化为两栏/单栏。同时修复 Artifact 上传误用产品 API base URL 的缺陷。产品页面与 Node Lab API 契约不变。
 - 2026-07-22：Node Lab HTTP 从产品 Backend 拆为可独立运行的 `nodelab_service`，默认端口 8090、默认空安全 Application，并通过仅启动时可配置的可信 factory 接入项目 Node；前端使用独立 base URL，Backend 删除全部 Lab route/schema/service/config，V1 只保留显式插件路径。
 - 2026-07-22：完成 Node Lab 任意 Node 薄接入与证据加固：移除通用包对 ShaderForge 存储和固定 benchmark 环境的依赖，新增 Provider Builder、三类标准 Executor、Command-like 归一化、完整 JSON Schema 与可注入 reducer；委托实现/reducer 源码和归并 State 均进入 fingerprint，reducer 失败可持久化；warm benchmark 改为通用 resource 语义，V1 行为和 Graph 不变。
 - 2026-07-21：完成 Node Lab 通用化与包边界重构：Harness 移除 V1 pipeline/capability/fixture/suite 默认语义，并从 `agent.app.lab` 迁为顶层 `nodelab` typed Python 包；ShaderForge Executor 与固定 suite 归属 V1 功能命名空间，Agent Service 只负责组合，暂不拆独立部署服务，V1 行为和 Graph 不变。
 - 2026-07-16：完成 V2–V5 实施方案的拆分后正式 Review，关闭多假设、ConstraintSet、版本化 State、SearchJournal、SelectionSnapshot、双 fencing 和可重复量化协议等设计缺口；结论仅允许从 V2.0 契约冻结开始实施。
-- 2026-07-16：完成跨模块结构修复：离线 benchmark 脱离在线 Service，共享 Fixture 脱离 unit test 层级，前端统一 API client 并消除 Node Lab 步骤 N+1 请求；新增依赖方向、直接 fetch、惰性导入和生命周期回归门禁。
 
 ## 历史索引
 

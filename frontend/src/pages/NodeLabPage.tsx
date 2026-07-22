@@ -11,8 +11,8 @@ import {
   listNodeLabArtifacts,
   listNodeLabNodes,
   listNodeLabSteps,
+  NODE_LAB_API_BASE_URL,
   NodeLabApiError,
-  resolveNodeLabArtifactUrl,
   summarizeNodeLabStep,
   uploadNodeLabArtifact,
   type NodeLabArtifact,
@@ -24,6 +24,13 @@ import {
   type NodeLabStep,
   type NodeLabStepSummary,
 } from "../api/nodeLab";
+import { ArtifactPanel } from "../components/nodelab/ArtifactPanel";
+import { LabStatusBar, type NodeLabConnection } from "../components/nodelab/LabStatusBar";
+import { NodeCatalog } from "../components/nodelab/NodeCatalog";
+import { NodeInspector } from "../components/nodelab/NodeInspector";
+import { RunControls } from "../components/nodelab/RunControls";
+import { StepDag } from "../components/nodelab/StepDag";
+import { StepResult } from "../components/nodelab/StepResult";
 
 function pretty(value: unknown): string {
   return JSON.stringify(value, null, 2);
@@ -56,6 +63,7 @@ function defaultMode(node: NodeLabNodeDescriptor): NodeLabExecutionMode {
 }
 
 export function NodeLabPage() {
+  const [connection, setConnection] = useState<NodeLabConnection>("connecting");
   const [health, setHealth] = useState<NodeLabHealth | null>(null);
   const [nodes, setNodes] = useState<NodeLabNodeDescriptor[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState("");
@@ -83,6 +91,7 @@ export function NodeLabPage() {
 
   const selectedNode = nodes.find((node) => node.node_id === selectedNodeId) ?? null;
   const selectedStep = selectedStepId ? stepDetails[selectedStepId] ?? null : null;
+  const stepLoading = Boolean(selectedStepId) && !selectedStep;
   const visibleNodes = useMemo(() => {
     const query = search.trim().toLowerCase();
     if (!query) return nodes;
@@ -90,6 +99,14 @@ export function NodeLabPage() {
       `${node.node_id} ${node.category} ${node.summary}`.toLowerCase().includes(query),
     );
   }, [nodes, search]);
+  const inputsError = useMemo(() => {
+    try {
+      parseObject(inputsText, "节点输入");
+      return null;
+    } catch (reason) {
+      return reason instanceof Error ? reason.message : "节点输入不是合法 JSON。";
+    }
+  }, [inputsText]);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,8 +120,9 @@ export function NodeLabPage() {
         setHealth(nextHealth);
         setNodes(nextNodes);
         setSelectedNodeId(nextNodes[0]?.node_id ?? "");
-      } catch (reason) {
-        if (!cancelled) setError(errorText(reason));
+        setConnection("online");
+      } catch {
+        if (!cancelled) setConnection("offline");
       }
     }
     void discover();
@@ -235,6 +253,14 @@ export function NodeLabPage() {
     });
   }
 
+  function handleFormatInputs() {
+    try {
+      setInputsText(pretty(parseObject(inputsText, "节点输入")));
+    } catch {
+      // 非法 JSON 由编辑器状态提示，不覆盖用户文本。
+    }
+  }
+
   async function handleUpload(file: File | undefined) {
     if (!run || !file) {
       setError("请先创建 LabRun，再选择 Artifact 文件。 ");
@@ -257,251 +283,88 @@ export function NodeLabPage() {
 
   return (
     <main className="node-lab-app">
-      <header className="node-lab-topbar">
-        <div>
-          <a href="/" className="node-lab-back">← ShaderGen</a>
-          <h1>Node Lab</h1>
-          <p>逐节点输入、观察输出、分支步骤并保留可复现证据。</p>
-        </div>
-        <div className="node-lab-health">
-          <span>{health ? `${nodes.length} 个节点可用` : "正在连接"}</span>
-          <span className={health?.real_model_enabled ? "is-warning" : ""}>
-            Real Model：{health?.real_model_enabled ? "服务端已开启" : "关闭"}
-          </span>
-        </div>
-      </header>
+      <LabStatusBar connection={connection} health={health} />
 
-      {error ? <div className="node-lab-error" role="alert">{error}</div> : null}
-
-      <section className="node-lab-runbar" aria-label="LabRun 控制">
-        <label>
-          <span>project_id（可选）</span>
-          <input value={projectId} onChange={(event) => setProjectId(event.target.value)} />
-        </label>
-        <label className="node-lab-initial-state">
-          <span>初始 State JSON</span>
-          <input value={initialStateText} onChange={(event) => setInitialStateText(event.target.value)} />
-        </label>
-        <button type="button" disabled={busy} onClick={() => void handleCreateRun()}>
-          新建 LabRun
-        </button>
-        <label>
-          <span>恢复 LabRun ID</span>
-          <input value={resumeRunId} onChange={(event) => setResumeRunId(event.target.value)} />
-        </label>
-        <button type="button" disabled={busy || !resumeRunId.trim()} onClick={() => void handleResumeRun()}>
-          恢复
-        </button>
-      </section>
-
-      <div className="node-lab-run-id">
-        <strong>当前 LabRun</strong>
-        <code>{run?.lab_run_id ?? "尚未创建"}</code>
-      </div>
-
-      <section className="node-lab-grid">
-        <aside className="node-lab-catalog">
-          <div className="node-lab-section-heading">
-            <h2>节点目录</h2>
-            <span>{visibleNodes.length}</span>
+      <div className="node-lab-body">
+        {connection === "offline" ? (
+          <div className="node-lab-error" role="alert">
+            无法连接 Node Lab 独立服务（{NODE_LAB_API_BASE_URL}）。请先在另一个终端运行
+            <code>make dev-node-lab</code>，再刷新本页；只运行产品 Backend 时本页面不可用。
           </div>
-          <input
-            aria-label="搜索节点"
-            className="node-lab-search"
-            value={search}
-            placeholder="搜索 node_id / 分类"
-            onChange={(event) => setSearch(event.target.value)}
+        ) : null}
+        {error ? <div className="node-lab-error" role="alert">{error}</div> : null}
+
+        <RunControls
+          projectId={projectId}
+          initialStateText={initialStateText}
+          resumeRunId={resumeRunId}
+          run={run}
+          stepCount={steps.length}
+          busy={busy}
+          disabled={connection !== "online"}
+          onProjectIdChange={setProjectId}
+          onInitialStateTextChange={setInitialStateText}
+          onResumeRunIdChange={setResumeRunId}
+          onCreateRun={() => void handleCreateRun()}
+          onResumeRun={() => void handleResumeRun()}
+        />
+
+        <section className="node-lab-workbench">
+          <NodeCatalog
+            connection={connection}
+            nodes={nodes}
+            visibleNodes={visibleNodes}
+            selectedNodeId={selectedNodeId}
+            search={search}
+            onSearchChange={setSearch}
+            onSelect={setSelectedNodeId}
           />
-          <div className="node-lab-node-list">
-            {visibleNodes.map((node, index) => (
-              <button
-                type="button"
-                key={node.node_id}
-                className={node.node_id === selectedNodeId ? "is-selected" : ""}
-                onClick={() => setSelectedNodeId(node.node_id)}
-              >
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <strong>{node.node_id}</strong>
-                <small>{node.category}{node.requires_model ? " · model" : ""}</small>
-              </button>
-            ))}
-          </div>
-        </aside>
-
-        <section className="node-lab-editor">
-          <div className="node-lab-section-heading">
-            <div>
-              <h2>{selectedNode?.node_id ?? "选择节点"}</h2>
-              <p>{selectedNode?.summary}</p>
-            </div>
-            {selectedNode ? <code>{selectedNode.implementation_status}</code> : null}
-          </div>
-
-          {selectedNode ? (
-            <>
-              <div className="node-lab-config-grid">
-                <label>
-                  <span>调用示例</span>
-                  <select aria-label="调用示例" value={exampleId} onChange={(event) => applyExample(event.target.value)}>
-                    {selectedNode.input_examples.map((example) => (
-                      <option key={example.example_id} value={example.example_id}>{example.example_id}</option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>execution_mode</span>
-                  <select
-                    aria-label="执行模式"
-                    value={executionMode}
-                    onChange={(event) => setExecutionMode(event.target.value as NodeLabExecutionMode)}
-                  >
-                    {selectedNode.execution_modes.map((mode) => <option key={mode}>{mode}</option>)}
-                  </select>
-                </label>
-                <label>
-                  <span>effect_mode</span>
-                  <select
-                    aria-label="副作用模式"
-                    value={effectMode}
-                    onChange={(event) => setEffectMode(event.target.value as NodeLabEffectMode)}
-                  >
-                    <option value="lab_commit">lab_commit</option>
-                    <option value="preview">preview</option>
-                  </select>
-                </label>
-                <label>
-                  <span>base_step_id（分支基点）</span>
-                  <select aria-label="分支基点" value={baseStepId} onChange={(event) => setBaseStepId(event.target.value)}>
-                    <option value="">Root State</option>
-                    {steps.map((step) => (
-                      <option key={step.step_id} value={step.step_id}>
-                        {step.step_id.slice(0, 8)} · {step.node_id}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              </div>
-
-              {executionMode === "fixture" ? (
-                <label className="node-lab-block-label">
-                  <span>fixture_id</span>
-                  <input value={fixtureId} onChange={(event) => setFixtureId(event.target.value)} placeholder="版本化 Fixture ID" />
-                </label>
-              ) : null}
-              {executionMode === "mock" ? (
-                <label className="node-lab-block-label">
-                  <span>mock_response_artifact_id</span>
-                  <input value={mockArtifactId} onChange={(event) => setMockArtifactId(event.target.value)} />
-                </label>
-              ) : null}
-              {selectedNode.requires_model ? (
-                <div className="node-lab-model-gates">
-                  <label><input type="checkbox" checked={previewOnly} onChange={(event) => setPreviewOnly(event.target.checked)} /> 仅预览 Prompt/Schema，不调用模型</label>
-                  {executionMode === "real" ? (
-                    <label className="is-danger"><input type="checkbox" checked={allowModelCall} onChange={(event) => setAllowModelCall(event.target.checked)} /> 我明确允许本步骤产生真实模型费用</label>
-                  ) : null}
-                </div>
-              ) : null}
-
-              <div className="node-lab-schema-summary">
-                <span>必需输入：{selectedNode.prerequisites.join(", ") || "无"}</span>
-                <span>副作用：{selectedNode.side_effects.join(", ") || "无"}</span>
-                {selectedNode.input_examples.find((example) => example.example_id === exampleId)?.base_step_node_id ? (
-                  <span>父节点：{selectedNode.input_examples.find((example) => example.example_id === exampleId)?.base_step_node_id}</span>
-                ) : null}
-              </div>
-              <label className="node-lab-json-editor">
-                <span>节点输入 JSON</span>
-                <textarea aria-label="节点输入 JSON" value={inputsText} onChange={(event) => setInputsText(event.target.value)} spellCheck={false} />
-              </label>
-              <details className="node-lab-schema-details">
-                <summary>查看 Input / Output Schema</summary>
-                <div>
-                  <pre>{pretty(selectedNode.input_schema)}</pre>
-                  <pre>{pretty(selectedNode.output_schema)}</pre>
-                </div>
-              </details>
-              <button className="node-lab-execute" type="button" disabled={busy || !run} onClick={() => void handleExecute()}>
-                {busy ? "执行中…" : "执行节点"}
-              </button>
-            </>
-          ) : null}
+          <NodeInspector
+            node={selectedNode}
+            hasRun={Boolean(run)}
+            busy={busy}
+            steps={steps}
+            exampleId={exampleId}
+            executionMode={executionMode}
+            effectMode={effectMode}
+            previewOnly={previewOnly}
+            allowModelCall={allowModelCall}
+            fixtureId={fixtureId}
+            mockArtifactId={mockArtifactId}
+            baseStepId={baseStepId}
+            inputsText={inputsText}
+            inputsError={inputsError}
+            onApplyExample={applyExample}
+            onExecutionModeChange={setExecutionMode}
+            onEffectModeChange={setEffectMode}
+            onPreviewOnlyChange={setPreviewOnly}
+            onAllowModelCallChange={setAllowModelCall}
+            onFixtureIdChange={setFixtureId}
+            onMockArtifactIdChange={setMockArtifactId}
+            onBaseStepIdChange={setBaseStepId}
+            onInputsTextChange={setInputsText}
+            onFormatInputs={handleFormatInputs}
+            onExecute={() => void handleExecute()}
+          />
+          <StepResult step={selectedStep} loading={stepLoading} />
         </section>
 
-        <section className="node-lab-output">
-          <div className="node-lab-section-heading">
-            <h2>输出与差异</h2>
-            {selectedStep ? <span className={`node-lab-outcome is-${selectedStep.outcome}`}>{selectedStep.outcome}</span> : null}
-          </div>
-          {selectedStep ? (
-            <>
-              <dl className="node-lab-step-facts">
-                <div><dt>step_id</dt><dd>{selectedStep.step_id}</dd></div>
-                <div><dt>duration</dt><dd>{selectedStep.duration_ms.toFixed(2)} ms</dd></div>
-                <div><dt>next_action</dt><dd>{selectedStep.next_action ?? "—"}</dd></div>
-              </dl>
-              <h3>Output</h3>
-              <pre>{pretty(selectedStep.output)}</pre>
-              <h3>State Diff</h3>
-              <pre>{pretty(selectedStep.state_diff)}</pre>
-              <details>
-                <summary>Diagnostics / Usage / Provenance</summary>
-                <pre>{pretty({ diagnostics: selectedStep.diagnostics, usage: selectedStep.usage, provenance: selectedStep.provenance })}</pre>
-              </details>
-            </>
-          ) : (
-            <div className="node-lab-empty">
-              {selectedStepId ? "正在读取步骤详情…" : "执行一个节点后在这里查看结果。"}
-            </div>
-          )}
-        </section>
-      </section>
+        <ArtifactPanel
+          artifacts={allArtifacts}
+          artifactKind={artifactKind}
+          disabled={!run || busy}
+          onArtifactKindChange={setArtifactKind}
+          onUpload={(file) => void handleUpload(file)}
+        />
 
-      <section className="node-lab-artifacts">
-        <div className="node-lab-section-heading">
-          <div><h2>Lab Artifacts</h2><p>只在当前 LabRun 内通过不透明 ID 访问。</p></div>
-          <div className="node-lab-upload">
-            <input aria-label="Artifact 类型" value={artifactKind} onChange={(event) => setArtifactKind(event.target.value)} />
-            <label>
-              上传 Artifact
-              <input type="file" disabled={!run || busy} onChange={(event) => {
-                const file = event.target.files?.[0];
-                void handleUpload(file);
-                event.currentTarget.value = "";
-              }} />
-            </label>
-          </div>
-        </div>
-        <div className="node-lab-artifact-list">
-          {allArtifacts.map((artifact) => (
-            <a key={artifact.artifact_id} href={resolveNodeLabArtifactUrl(artifact.lab_run_id, artifact.artifact_id)} target="_blank" rel="noreferrer">
-              <strong>{artifact.kind}</strong>
-              <code>{artifact.artifact_id}</code>
-              <span>{artifact.content_type} · {artifact.size_bytes} bytes</span>
-            </a>
-          ))}
-          {!allArtifacts.length ? <p>尚无 Artifact。</p> : null}
-        </div>
-      </section>
-
-      <section className="node-lab-dag">
-        <div className="node-lab-section-heading"><h2>不可变步骤 DAG</h2><span>{steps.length} steps</span></div>
-        <div className="node-lab-dag-track">
-          <button type="button" className={!baseStepId ? "is-base" : ""} onClick={() => setBaseStepId("")}>Root</button>
-          {steps.map((step) => (
-            <button
-              type="button"
-              key={step.step_id}
-              className={`${selectedStepId === step.step_id ? "is-selected" : ""} ${baseStepId === step.step_id ? "is-base" : ""}`}
-              onClick={() => setSelectedStepId(step.step_id)}
-            >
-              <small>← {step.base_step_id?.slice(0, 6) ?? "root"}</small>
-              <strong>{step.node_id}</strong>
-              <span>{step.outcome} · {step.step_id.slice(0, 8)}</span>
-            </button>
-          ))}
-        </div>
-      </section>
+        <StepDag
+          steps={steps}
+          selectedStepId={selectedStepId}
+          baseStepId={baseStepId}
+          onSelectStep={setSelectedStepId}
+          onResetBase={() => setBaseStepId("")}
+        />
+      </div>
     </main>
   );
 }
