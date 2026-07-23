@@ -37,22 +37,16 @@ build-backend = "setuptools.build_meta"
 packages = [
     "agent",
     "agent.app",
-    "agent.app.benchmarks",
     "agent.app.config",
     "agent.app.contracts",
     "agent.app.graphs",
-    "agent.app.lab",
     "agent.app.llms",
     "agent.app.llms.families",
     "agent.app.messages",
     "agent.app.memory",
     "agent.app.context",
     "agent.app.nodes",
-    "agent.app.nodes.png_to_shader_v1",
-    "agent.app.nodes.png_to_shader_v1.deterministic",
-    "agent.app.nodes.png_to_shader_v1.integrations",
-    "agent.app.nodes.png_to_shader_v1.integrations.node_lab",
-    "agent.app.nodes.png_to_shader_v1.model",
+    "agent.app.nodes.png_to_shader_min",
     "agent.app.observability",
     "agent.app.parsers",
     "agent.app.prompts",
@@ -70,11 +64,11 @@ packages = [
     "backend.app.services",
     "backend.sql",
     "shaderforge",
-    "shaderforge.analysis",
-    "shaderforge.benchmark",
     "shaderforge.contracts",
     "shaderforge.evaluation",
     "shaderforge.generation",
+    "shaderforge.optimization",
+    "shaderforge.perception",
     "shaderforge.rendering",
     "shaderforge.validation",
     "shaderforge.store",
@@ -86,6 +80,7 @@ packages = [
 
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
+"agent.app.config" = ["*.yaml"]
 "agent.app.prompts" = ["*.yaml"]
 "backend.sql" = ["*.sql"]
 
@@ -120,4 +115,5 @@ dev = [
     "mypy>=1.13.0",
     "pytest>=9.0.3",
     "ruff>=0.8.2",
+    "types-pyyaml>=6.0.12.20260518",
 ]

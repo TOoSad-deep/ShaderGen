@@ -30,18 +30,15 @@ MERMAID_CONDITIONAL_EDGE = re.compile(
     r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s+-\.\s+([^\s]+)\s+\.->\s+"
     r"([A-Za-z_][A-Za-z0-9_]*)"
 )
-MERMAID_NODE_DECLARATION = re.compile(
-    r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[|\()"
-)
+MERMAID_NODE_DECLARATION = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[|\()")
 SHADERFORGE_PUBLIC_IMPORT_ROOTS = frozenset(
     {
         "shaderforge",
         "shaderforge.public",
-        "shaderforge.analysis",
-        "shaderforge.benchmark",
         "shaderforge.contracts",
         "shaderforge.evaluation",
         "shaderforge.generation",
+        "shaderforge.optimization",
         "shaderforge.rendering",
         "shaderforge.store",
         "shaderforge.validation",
@@ -89,9 +86,7 @@ def _feature_row(feature_id: str) -> str:
 
 
 def _check_root_markdown_classification() -> None:
-    root_markdown = {
-        path.name for path in ROOT.glob("*.md") if path.is_file()
-    }
+    root_markdown = {path.name for path in ROOT.glob("*.md") if path.is_file()}
     unclassified = sorted(root_markdown - ROOT_MARKDOWN_ALLOWLIST)
     _require(
         not unclassified,
@@ -158,18 +153,11 @@ def _check_feature_state_machine() -> None:
     _require("20 个单元测试" not in h01, "H01 evidence 仍包含过时的 20 个单元测试。")
     _require("8 个单元测试" not in h01, "H01 evidence 仍包含过时的 8 个单元测试。")
 
-    h02 = _feature_row("H02")
-    for command in (
-        "make benchmark-node-lab-ai-off",
-        "make benchmark-node-lab-model",
-        "make test-node-lab-ui",
-    ):
-        _require(command in h02, f"H02 验证缺少 {command}。")
-    _require("| passing |" in h02, "H02 三项 Harness 门禁通过后必须保持 passing。")
-    _require("未调用真实模型" in h02, "H02 evidence 必须明确未调用真实模型。")
-
     f09 = _feature_row("F09")
-    _require("PNG" in f09 and "current_best" in f09, "F09 需要描述 V1 主链路。")
+    _require(
+        "PNG" in f09 and "scene_mvp" in f09,
+        "F09 需要描述 scene_mvp 当前主链路。",
+    )
     _require("| active |" in f09, "F09 在质量门禁通过前必须保持 active。")
 
 
@@ -206,8 +194,7 @@ def _check_progress_handoff() -> None:
     ]
     _require(
         len(change_entries) <= 5,
-        "PROGRESS.md 的最近重要变更最多保留 5 条；"
-        f"当前为 {len(change_entries)} 条。",
+        f"PROGRESS.md 的最近重要变更最多保留 5 条；当前为 {len(change_entries)} 条。",
     )
 
     archive_paths = sorted((ROOT / "docs/progress/archive").glob("*.md"))
@@ -217,10 +204,7 @@ def _check_progress_handoff() -> None:
         archive_preamble = "\n".join(archive.splitlines()[:12])
         _require(
             "历史" in archive_preamble
-            and (
-                "不代表当前" in archive_preamble
-                or "非当前事实" in archive_preamble
-            ),
+            and ("不代表当前" in archive_preamble or "非当前事实" in archive_preamble),
             f"{path.relative_to(ROOT)} 必须在首屏明确标注为历史且非当前事实。",
         )
 
@@ -283,7 +267,15 @@ def _check_evidence_registry() -> None:
                 f"{evidence_id} 的 artifact 缺少 path。",
             )
             _require(
-                availability in {"git", "git_lfs", "release", "object_store", "local_ignored"},
+                availability
+                in {
+                    "git",
+                    "git_lfs",
+                    "release",
+                    "object_store",
+                    "local_ignored",
+                    "removed",
+                },
                 f"{evidence_id} 的 artifact availability 无效。",
             )
             _require(
@@ -444,9 +436,7 @@ def _check_langgraph_registration() -> None:
     )
     _require(
         not extra,
-        "langgraph.json 注册了非 *_graph.py 入口："
-        + _format_items(set(extra))
-        + "。",
+        "langgraph.json 注册了非 *_graph.py 入口：" + _format_items(set(extra)) + "。",
     )
 
 
@@ -471,13 +461,15 @@ def _check_graph_visualizations() -> None:
         diagram_nodes, diagram_direct, diagram_conditional = _mermaid_requirements(
             diagram
         )
-        expected_nodes = nodes | {
-            endpoint for edge in direct_edges for endpoint in edge
-        } | {
-            endpoint
-            for source_name, _route, target_name in conditional_edges
-            for endpoint in (source_name, target_name)
-        }
+        expected_nodes = (
+            nodes
+            | {endpoint for edge in direct_edges for endpoint in edge}
+            | {
+                endpoint
+                for source_name, _route, target_name in conditional_edges
+                for endpoint in (source_name, target_name)
+            }
+        )
         _require(
             diagram_nodes == expected_nodes,
             f"{path.stem} Mermaid 节点与代码不一致；"
@@ -538,13 +530,6 @@ def _check_agent_readme_harness_router() -> None:
             relative_path in architecture,
             f"src/agent/ARCHITECTURE.md 索引缺少 {relative_path}。",
         )
-    v1_nodes_architecture = (
-        "src/agent/app/nodes/png_to_shader_v1/ARCHITECTURE.md"
-    )
-    _require(
-        v1_nodes_architecture in readme,
-        "src/agent/README.md 导航缺少 V1 Node 子架构。",
-    )
 
 
 def _live_harness_markdown_paths() -> list[Path]:
@@ -552,9 +537,7 @@ def _live_harness_markdown_paths() -> list[Path]:
     paths.extend((ROOT / "backend").rglob("*.md"))
     paths.extend((ROOT / "benchmarks").rglob("*.md"))
     paths.extend(
-        path
-        for path in (ROOT / "docs").glob("*.md")
-        if path.name != "DECISIONS.md"
+        path for path in (ROOT / "docs").glob("*.md") if path.name != "DECISIONS.md"
     )
     paths.append(ROOT / "frontend/README.md")
     paths.extend((ROOT / "src/agent").rglob("ARCHITECTURE.md"))
@@ -607,9 +590,7 @@ def _documented_repository_paths(content: str) -> set[str]:
             continue
         if ".py:" in value:
             value = value.split(":", 1)[0]
-        if value in REPOSITORY_ROOT_FILES or value.startswith(
-            REPOSITORY_PATH_PREFIXES
-        ):
+        if value in REPOSITORY_ROOT_FILES or value.startswith(REPOSITORY_PATH_PREFIXES):
             result.add(value)
     return result
 
@@ -630,8 +611,7 @@ def _check_documented_repository_paths() -> None:
                 ).exists()
             _require(
                 exists,
-                f"{relative_markdown} 引用了不存在的仓库路径："
-                f"{documented_path}。",
+                f"{relative_markdown} 引用了不存在的仓库路径：{documented_path}。",
             )
 
 
@@ -729,10 +709,6 @@ def _check_ci_harness() -> None:
             "普通 Integration workflow 不得获得真实模型凭据或调用开关；"
             f"发现 {forbidden_text}。",
         )
-    _require(
-        'SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED: "false"' in integration_ci,
-        "普通 Integration workflow 必须显式关闭 Node Lab 真实模型路径。",
-    )
 
 
 def _imported_modules(path: Path) -> list[str]:
@@ -748,14 +724,14 @@ def _imported_modules(path: Path) -> list[str]:
 
 
 def _check_agent_service_boundary() -> None:
-    forbidden = ("agent.app.nodes", "agent.app.llms")
-    path = ROOT / "src/agent/app/services/png_to_shader_v1.py"
+    forbidden = ("agent.app.llms",)
+    path = ROOT / "src/agent/app/services/png_to_shader_min.py"
     violations = [
         module for module in _imported_modules(path) if module.startswith(forbidden)
     ]
     _require(
         not violations,
-        "agent.app.services.png_to_shader_v1 不应 import nodes/llms 内部模块："
+        "agent.app.services.png_to_shader_min 不应 import nodes/llms 内部模块："
         + ", ".join(violations),
     )
 

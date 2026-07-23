@@ -1,4 +1,4 @@
-"""PNG-to-Shader V1 生成和项目 Memory 接口."""
+"""PNG-to-Shader 产品生成和项目 Memory 接口."""
 
 import logging
 import time
@@ -8,19 +8,17 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 
 from backend.app.schemas.shader import (
-    GenerationMode,
+    MinRunProgressResponse,
     QualityPresetName,
     ShaderGenerationErrorDetail,
     ShaderGenerationErrorResponse,
     ShaderResponse,
 )
+from backend.app.services.run_progress import RunProgressRegistry
 from backend.app.services.shader import (
-    MemoryUnavailableError,
-    ProjectBusyError,
     ProjectLockRegistry,
     PublicArtifactNotFoundError,
-    clear_png_to_shader_project_memory,
-    default_png_to_shader_v1_service,
+    get_default_png_to_shader_min_service,
     read_shader_run_artifact,
 )
 from backend.app.services.shader_generation import (
@@ -74,19 +72,24 @@ async def read_image_upload(file: UploadFile) -> bytes:
     return image
 
 
-def _runtime(request: Request) -> tuple[Any, ProjectLockRegistry]:
-    service = getattr(
-        request.app.state,
-        "png_to_shader_v1_service",
-        None,
-    )
+def _runtime(request: Request) -> tuple[Any | None, ProjectLockRegistry]:
     locks = getattr(request.app.state, "project_locks", None)
+    service = getattr(request.app.state, "png_to_shader_min_service", None)
     if service is None:
-        service = default_png_to_shader_v1_service
+        service = get_default_png_to_shader_min_service()
     if locks is None:
         locks = ProjectLockRegistry()
         request.app.state.project_locks = locks
     return service, locks
+
+
+def _progress_registry(request: Request) -> RunProgressRegistry:
+    """获取应用级运行进度注册表，缺省时惰性创建（与 project_locks 同模式）."""
+    registry = getattr(request.app.state, "run_progress", None)
+    if registry is None:
+        registry = RunProgressRegistry()
+        request.app.state.run_progress = registry
+    return registry
 
 
 @router.post(
@@ -107,14 +110,15 @@ async def generate_shader(
     request: Request,
     file: UploadFile = File(...),
     project_id: UUID | None = Form(None),
-    generation_mode: GenerationMode = Form("procedural_v1"),
+    run_id: UUID | None = Form(None),
     quality_preset: QualityPresetName = Form("balanced"),
     instruction: str = Form("", max_length=2_000),
 ) -> ShaderResponse:
-    """校验 HTTP 输入并调用 V1 生成用例服务."""
+    """校验 HTTP 输入并调用对应产品模式的生成用例服务."""
     started_at = time.perf_counter()
     resolved_project_id = project_id or uuid4()
-    run_id = uuid4()
+    # 客户端可显式携带 run_id，以便在 POST 阻塞期间轮询运行进度。
+    run_id = run_id or uuid4()
     try:
         image = await read_image_upload(file)
     except HTTPException as exc:
@@ -126,7 +130,7 @@ async def generate_shader(
             "duration_ms=%.2f",
             run_id,
             resolved_project_id,
-            generation_mode,
+            "scene_mvp",
             exc.status_code,
             duration_ms,
         )
@@ -147,15 +151,15 @@ async def generate_shader(
         content_type=file.content_type or "application/octet-stream",
         project_id=resolved_project_id,
         run_id=run_id,
-        generation_mode=generation_mode,
         quality_preset=quality_preset,
         instruction=instruction.strip(),
         started_at=started_at,
     )
     dependencies = ShaderGenerationDependencies(
         pool=getattr(request.app.state, "db_pool", None),
-        procedural_service=service,
+        min_service=service,
         locks=locks,
+        progress=_progress_registry(request),
     )
     try:
         return await execute_shader_generation(command, dependencies)
@@ -171,6 +175,33 @@ async def generate_shader(
         ) from exc
 
 
+@router.get("/runs/{run_id}/progress", response_model=MinRunProgressResponse)
+async def get_shader_run_progress(
+    request: Request,
+    run_id: UUID,
+    after: int = 0,
+) -> MinRunProgressResponse:
+    """增量读取 scene_mvp 运行进度；未知 run_id 返回 pending 空进度."""
+    data = _progress_registry(request).read(str(run_id), after=max(0, after))
+    return MinRunProgressResponse(run_id=run_id, **data)
+
+
+@router.get("/runs/{run_id}/progress/render")
+async def get_shader_run_progress_render(request: Request, run_id: UUID) -> Response:
+    """返回运行中最新渲染帧；尚无帧时 404."""
+    png, _render_seq = _progress_registry(request).read_render(str(run_id))
+    if png is None:
+        raise HTTPException(status_code=404, detail="当前运行还没有可展示的渲染帧。")
+    return Response(
+        content=png,
+        media_type="image/png",
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.get("/runs/{run_id}/artifacts/{artifact_name}")
 async def get_shader_run_artifact(
     request: Request,
@@ -179,6 +210,8 @@ async def get_shader_run_artifact(
 ) -> Response:
     """下载 final-render、metrics 或 manifest 三种白名单产物."""
     service, _locks = _runtime(request)
+    if service is None:
+        raise HTTPException(status_code=503, detail="scene_mvp 服务尚未就绪。")
     try:
         artifact = read_shader_run_artifact(
             str(run_id),
@@ -196,23 +229,3 @@ async def get_shader_run_artifact(
             "X-Content-Type-Options": "nosniff",
         },
     )
-
-
-@router.delete("/projects/{project_id}/memory", status_code=204)
-async def clear_project_memory(request: Request, project_id: UUID) -> Response:
-    """清除当前项目 V1 checkpoint 和长期 Memory，不删除过程账本."""
-    service, locks = _runtime(request)
-    try:
-        async with locks.hold(str(project_id)):
-            await clear_png_to_shader_project_memory(
-                str(project_id),
-                service=service,
-            )
-    except ProjectBusyError as exc:
-        raise HTTPException(
-            status_code=409, detail="当前项目已有任务正在执行。"
-        ) from exc
-    except MemoryUnavailableError as exc:
-        logger.exception("shader.memory.clear_failed")
-        raise HTTPException(status_code=503, detail="清除项目记忆失败。") from exc
-    return Response(status_code=204)

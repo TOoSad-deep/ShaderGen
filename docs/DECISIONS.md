@@ -8,6 +8,7 @@
 
 | 决策 | 状态 | 后续决策 | 当前解释 |
 |---|---|---|---|
+| D001 | superseded | D050 | SVG 降为最初设计参考，不再是当前架构的覆盖性权威。 |
 | D002 | superseded | D010、D037 | 阶段 1 的最小事实源已演进为模块就近文档和有界交接。 |
 | D005 | updated | D043 | 启动时执行幂等业务 SQL 的原则仍有效，SQL 现为显式 wheel 资源包。 |
 | D006 | updated | D035、D036 | Backend 只调用 Agent 公共 service 的边界仍有效，旧 service 路径已删除。 |
@@ -19,16 +20,25 @@
 | D014 | superseded | D017、D036 | 旧 runtime-context 模型配置随旧基础图和 models 层删除。 |
 | D015 | superseded | D016、D027、D036 | 默认采集、打印和写入 reasoning 的行为已取消。 |
 | D016 | superseded | D017、D027、D036 | 旧生成/评审 Node 工厂及其 config 已删除。 |
-| D018 | updated | D036、D044 | V1 Checkpointer、Store 与 GSSC 仍有效，persistence 生命周期现由冻结配置与补偿清理栈管理。 |
-| D023 | updated | D036 | V1 产品化边界仍有效，legacy 分流和独立 Review 部分已删除。 |
+| D018 | updated | D036、D044、D068 | Memory/checkpoint 实现和数据保留，但当前产品生命周期不再接入。 |
+| D023 | superseded | D036、D066 | V1 产品路径、Artifact 与项目 Memory API 已删除。 |
 | D027 | updated | D036 | 可靠性与安全账本原则仍有效，legacy 兼容部分已删除。 |
-| D028 | updated | D032、D038 | Node Lab Harness 原则仍有效，节点语义和 Provider 已收敛到生产功能命名空间。 |
-| D032 | updated | D038 | Node 是唯一语义实现仍有效，Provider 当前位于 V1 功能命名空间。 |
+| D028 | superseded | D032、D038、D065 | 旧 Node Lab 已退役，正文只保留历史审计价值。 |
+| D032 | superseded | D038、D065 | 旧 Node Lab Provider 已退役，正文只保留历史审计价值。 |
 | D034 | updated | D038 | 按职责拆分仍有效，文件已进一步迁入 V1 功能命名空间。 |
 | D035 | updated | D036、D044 | 薄 Route、Backend Service 和 Renderer 双层清理仍有效；Backend persistence 清理由 D044 加固。 |
+| D046 | updated | D065 | 统一前端 API Client 原则仍有效，旧 Node Lab 明细加载部分已退役。 |
+| D062 | accepted | — | `scene_mvp` 新增仅限独立实验的 manual 预算档。 |
+| D063 | accepted | — | 不接入多尺度 tile 最大回退 guard 的离线 replay 形式。 |
+| D064 | updated | D065 | 共享依赖解耦仍有效；旧 Node Lab 保留边界已由 D065 改为退役。 |
+| D065 | superseded | D066、D067 | 旧 Node Lab 已全量退役，其本地历史证据随后按授权删除。 |
+| D066 | updated | D067 | V1 可执行链路删除仍有效；历史本地产物保留策略由 D067 更新。 |
+| D067 | accepted | — | 按用户明确授权删除整个本地 `output/` 及陈旧缓存/打包产物。 |
+| D068 | accepted | — | Memory/checkpoint 实现与 PostgreSQL 数据休眠保留，不恢复旧 V1 接口。 |
 
 ## D001 - SVG 是最终架构来源
 
+- 状态：`superseded`，已由 D050 取代；以下内容只保留历史审计价值。
 - 日期：2026-07-07
 - 决策：`human_doc/shaderforge-technical-architecture-aligned(1).svg` 是权威架构。
 - 原因：这是用户指定的最终项目架构。
@@ -373,3 +383,150 @@
 - 决策：后续 PNG-to-Shader 演进采用 `human_doc/png-to-shader-v2-v5-plan/` 中已正式 Review 的总纲与四版本方案：V2 建立 TargetHypothesis、RequestConstraintSet、Intent IR、Effect Genome 和 Deterministic Compiler；V3 在固定拓扑上建立版本化 Oracle、SelectionKey、SearchJournal 和确定性参数搜索；V4 只在结构停滞后通过受限 GenomePatch、版本化 shortlist、Pairwise/HITL 和 staging SelectionSnapshot 改变结构或偏好；V5 再引入 Async Run、Ledger、Checkpoint/NodeCommit、RunJob/RendererJob 双 fencing、SSE、取消和恢复。Review 结论为 Conditional Go，仅允许先实施 V2.0 Schema、Hash、Artifact Adapter、golden fixture、数据 Manifest 和 State 恢复契约；不得跳过 V2.0 并行启动 Prompt、Compiler、Search 或新 Graph。
 - 原因：第一稿在多测量假设、ConstraintSet 集合级身份、跨版本 State、Search 恢复、evaluation revision 原子发布、Renderer 幂等与 durable 副作用等位置存在可编码性断层；把 V2–V5 合成一个大任务会迫使后续版本依赖仍在变化的根契约。正式 Review 已将事实、推断、约束、Genome、Evidence、选择语义和持久化边界拆成可独立冻结的版本层，并为质量、人工评测和恢复建立可重复判定协议。
 - 影响：当前 F09 仍是唯一 `active` 功能，F02–F05 及异步产品能力继续为 `not_started`；本决策和方案文档不改变现有 V1 Graph、API、RenderContract、`current_best`、checkpoint 或发布 gate。F09 M6.2 证据冻结后，首个实现 PR 只交付 V2.0 契约和测试资产；后续每个增量必须满足总纲的一次一个 active 功能、版本化 Manifest、V1 只读兼容和对应退出门槛。
+
+## D048 - 最小 scene/template/optimization Graph 先并行验证，不提前替换 V1 产品链路
+
+- 日期：2026-07-21
+- 决策：在 F09 内新增 `png_to_shader_min` 技术验证路线，以严格 scene JSON 作为唯一可编辑 Shader 表示，由模板生成参数化 WebGL1 GLSL，LLM 只生成初始 scene 和单个 typed patch，数值拟合交给节点内 CMA-ES。该路线先完成 prepared Renderer/typed uniform 与轻量 MAE 性能门禁，再按 12 节点、3 个纯路由函数实现 Graph/CLI。最小图与现有 `png_to_shader_v1` 并行注册；在独立产品切换里程碑完成前，V1 继续作为唯一 Backend/Frontend 产品路径。
+- 原因：V1 的自由 GLSL 路线已通过自动事实门禁但人工偏好率只有 30%，结构与数值耦合使确定性优化难以介入；scene/template 路线可以把模型结构决策与数值搜索分离。但当前 Renderer 每次重新编译并编码 PNG，不支持任意 uniform 热路径，且快速版只定义 CLI 验收，尚不足以安全替换 API、UI、Memory、Node Lab 和 benchmark。
+- 影响：D047 的 V2–V5 仍是目标架构输入，但在进入其大范围契约实施前先形成这条有界技术证据；快速版不改变 F09 的 `active` 状态，不把 F02–F05 标为已开始。现有 V1 代码、发布 gate、历史 benchmark 和失败证据不得因最小图开发而删除或覆盖。只有 M7 通过 Backend integration、浏览器 E2E、生命周期、Artifact 和文档门禁后，才能另行决定下线 V1。
+
+## D049 - 目标架构详细版取代 V2–V5 作为 F09 向前实施依据
+
+- 日期：2026-07-21
+- 决策：`human_doc/PNG转无贴图Shader-Agent-目标架构详细版.md` 成为 F09 后续算法与演进的权威目标，`human_doc/PNG转无贴图Shader-Agent-最小骨架快速版.md` 是当前 MVP 实施切片。旧 `human_doc/png-to-shader-v2-v5-plan/` 及 D047 继续保留为历史审计和概念参考，但不再规定向前实现顺序、Schema、Graph 或阶段冻结门禁。本决策取代 D048 中“D047 的 V2–V5 仍是目标架构输入”的表述；D048 关于最小图并行验证、V1 产品链路保留和 M7 切换门禁的其余部分继续有效。
+- 原因：用户已明确选择新的 scene/template/optimization 详细架构取代旧 V2–V5 路线。继续同时维护两套权威阶段会让 MVP 在 State、场景表示、优化调度和升级顺序上出现互斥约束，无法形成单一可执行路线。
+- 影响：F09 算法目标改由详细版约束。当前只有 F09 为 `active`，F02–F05 状态不变；详细版中的多假设、置信度标定、特征块调度、沙箱和完整评测仍是未实现目标。旧 V1 代码、API、UI、Node Lab、benchmark 和冻结失败证据在独立 M7 通过前继续保留，不因路线切换而删除或覆盖。总体架构材料的权威关系由 D050 进一步澄清。
+
+## D050 - 初始架构 SVG 降为历史设计参考
+
+- 日期：2026-07-21
+- 决策：`human_doc/shaderforge-technical-architecture-aligned(1).svg` 只作为项目最初产品设计和历史背景参考，不再是当前或最终架构的覆盖性权威。本决策取代 D001。当前实现事实由代码、运行配置、`docs/ARCHITECTURE.md` 和模块旁架构文档共同记录；F09 的目标与当前实施切片分别以目标架构详细版和最小骨架快速版为准。
+- 原因：SVG 反映的是项目早期设想，后续已经形成经过验证的 V1 实现和用户明确确认的新 scene/template/optimization 方案。继续规定“冲突时以 SVG 为准”会让历史草图反向覆盖新决策和可验证事实。
+- 影响：README、AGENTS 和全局架构文档不再使用“最终架构以 SVG 为准”的表述。SVG 文件继续原样保留，不删除、不静默改写；可以用于追溯最初产品概念，但不能据此否决后续方案、决策、契约或代码。
+
+## D051 - 先用确定性 scene_mvp 贯通产品垂直切片
+
+- 日期：2026-07-21
+- 决策：在保留 `procedural_v1` 默认路径的同时，增加显式 `scene_mvp` 模式并同步接入 Graph、Agent Service、Backend、Artifact API 和 Frontend。首个可运行增量保留快速版的 12 节点/3 路由结构，但用确定性感知 fallback 完成 Initial Author，模型预算固定为 0；typed uniform 先确定性烘焙为常量并复用现有 Renderer，基础优化仅做少量有界微调，不引入 CMA 依赖。
+- 原因：本阶段目标是尽快验证 scene → 模板 → 真实 Renderer → MAE → Artifact → HTTP → UI 的职责和追踪链路。prepared program、模型结构输出和 CMA-ES 同时落地会扩大故障面，也不符合当前“避免过度设计和过度优化”的实施要求。
+- 影响：`scene_mvp` 必须明确标记为实验路径，不能把当前轻量微调表述为 CMA-ES 或性能门禁已经完成；V1、Memory、Node Lab、既有 benchmark 和冻结失败证据全部保留。后续优先补 prepared program，再决定是否引入模型 Author 与 CMA-ES；F09 继续 `active`，发布 gate 仍为 no-go。
+
+## D052 - scene_mvp 使用同 run prepared uniform 热路径
+
+- 日期：2026-07-21
+- 决策：`scene_mvp` 在同一 run 内按模板源码、尺寸和 typed uniform schema 形成唯一 prepared program 签名，只静态校验、编译和链接一次；每个候选必须完整上传白名单内的 `float`、`vec2`、`vec3` 值集并直接读取左上角行序 RGB。未接受候选不编码 PNG；首个有效候选和最终接受候选保留 PNG，最终 WebGL1 GLSL 继续把 uniform 烘焙为常量，以兼容旧 `render()` 和独立预览。prepared 对象只由 run registry 持有，不进入 LangGraph State。
+- 原因：后续数值优化需要高频 draw，原有每候选重新编译、链接和 PNG base64 编码会把 Renderer 开销混入搜索预算。固定模板配合严格 uniform 全量上传既能缩短热路径，也能避免缺失值沿用上一帧；保留自包含最终 GLSL 则不把运行时 prepared 生命周期泄漏到 Artifact 和前端。
+- 影响：公开 `scene_mvp` 摘要、账本、metrics、manifest 和 finalize trace 固定增加 `renderer_path=prepared_uniforms_v1`、目标 MAE、是否达标、prepare 耗时、uniform draw 数及 P95。192x192 粉球 100 draw 探针必须显式运行并满足总耗时不超过 45 秒、P95 不超过 450 ms 和无陈旧帧；通过该先决门禁不等于 CMA-ES、2000 draw 生产预算或质量发布门禁已经完成。D051 的确定性 fallback、V1 默认路径和 F09 no-go 继续有效。
+
+## D053 - scene_mvp Model Author 只产出完整 scene 或单个 typed patch
+
+- 日期：2026-07-21
+- 决策：保持 `png_to_shader_min` 的 12 节点、直接边、条件边和路由结果不变，由 Graph Builder 复用 `LLMGateway`/`LangChainLLMGateway` 注入 Author。Initial 只有在 `llm_budget>0` 时调用模型并严格解析与参考图画布绑定的完整 MinScene；调用、结构修复或解析失败回退到确定性感知 scene。Refine 只接受恰好一个 Pydantic 联合类型 patch，白名单固定为 `/object/features` 的 add/remove 和 `/object/color_field/model` 的 replace，候选必须从 `current_best.scene` 派生，不能直接更新 best。
+- 原因：scene/template 路线需要先验证模型结构变更的最小安全面；允许任意 JSON Patch、多个操作或从工作 scene 连续派生会扩大模板不变量、prepared program 和 best 单调性的风险。完整 Initial 加单个 typed Refine 可把模型职责限制在结构选择，真实 Renderer/MAE 继续拥有接受权。
+- 影响：语义调用和最多一次同模型结构修复共用 run 级 6 次硬上限；显式 `scene_mvp` 产品模式使用该上限并限制 1 轮 Refine，未配置密钥或供应商失败时回退确定性感知 scene。普通测试只注入 Fake Gateway。Refine 的工作候选必须经真实渲染且 MAE 严格改善才能覆盖 `current_best`；非法 patch、供应商异常、解析失败和较差候选全部保留原 best。此增量不改变 F09 active/no-go、V1 默认产品路径或 M7 切换门禁。
+
+## D054 - scene_mvp 先接入小预算确定性参数搜索
+
+- 日期：2026-07-21
+- 决策：`optimize_base` 和 `optimize_feature` 通过 `shaderforge.optimization` 使用固定顺序、单参数、严格白名单的数值邻域候选。base 覆盖主体 center/axes、背景与径向渐变参数；feature 覆盖现有 rim/shadow 等特征的 center/axes/color/intensity。候选按剩余 draw 预算截断，单批硬上限 24，产品 `scene_mvp` 整 run 暂用 40 draw；所有候选串行真实渲染，只有 MAE 严格下降才更新 `current_best`。
+- 原因：prepared 性能门禁已经通过，但直接进入 2000 draw CMA-ES 会同时放大算法、预算和请求时延风险。小批确定性搜索足以先验证参数接线、预算记账、回滚与可观测 trace，并保持实现可读和故障范围有限。
+- 影响：`scene_mvp` 不再只有轴长两个占位微调，基础和 feature 节点都会产生真实 uniform draw；accepted parameter 与候选数写入 trace。该实现不是 CMA-ES、没有随机/并行搜索，也不构成质量发布证据；后续扩大到 2000 draw 必须作为独立增量重新验证时延、取消和 benchmark。
+
+## D055 - scene_mvp 以真实仲裁、多特征和局部复合 loss 加固最小闭环
+
+- 日期：2026-07-22
+- 决策：保持 12 节点与路由拓扑不变，但 Initial 模型 scene 与确定性感知 fallback 在预算允许时分别真实渲染并按 `min_scene_composite_v2` 择优；固定模板保留 8 个 feature slot，逐项消费 type/center/axes/color/intensity，优化队列来自获胜 scene 的稳定 feature id。参数 proposal 必须重放到最新 best，使同批接受结果累计生效。质量档位取代固定 40 draw/1 Refine：`fast|balanced|high` 的 render/LLM/Refine 硬预算分别为 `48/2/1`、`96/4/2`、`160/6/3`。`current_best` 选择与达标判断使用整图、前景、高光、阴影 MAE 按 `0.35/0.35/0.15/0.15` 组合的复合 loss，整图 MAE 只保留为兼容诊断。
+- 原因：真实 run 已证明模型初稿可能比确定性 fallback 更差；旧模板只消费首个 rim/shadow 且忽略部分 feature 参数，固定 feature queue 与从旧 baseline 生成整批候选也会造成优化无效或已接受变化丢失。单一整图 MAE 还会被大面积背景稀释，无法可靠表达主体、高光和阴影质量。
+- 影响：本决策取代 D053 的固定 1 轮 Refine 产品限制和 D054 的 24/40 固定搜索预算，但保留 6 次整 run 模型硬上限、typed patch、真实 Renderer 接受权与无 CMA-ES 边界。API、账本、metrics、manifest、trace 和前端摘要同步公开质量档位、预算用量、复合 loss 与局部指标。该改动提升最小骨架的可解释优化能力，但未运行新的真实模型质量 benchmark，F09 继续 `active`、灰度 no-go。
+
+## D056 - packed 三槽模板以 WebGL1 最低 uniform 容量为硬边界
+
+- 日期：2026-07-22
+- 决策：将 D055 的 8 个独立 uniform feature slot 收紧为 3 个 packed slot，并把不兼容 Scene/模板分别升级为 `png_to_shader_min_scene_v2` 和 `png_to_shader_min_template_v2`。Scene 基础参数固定使用 4 个 `vec4`，每个 feature 使用 meta/shape/color 3 个 `vec4`；加上 Renderer 管理且静态使用的 `u_resolution` 后，最坏为 14 个 active fragment uniform vectors，低于 WebGL1 最低保证的 16，物化时再次 fail-closed 校验。prepared Renderer 的 typed uniform 白名单扩展到 `vec4`。`rim`、`polar_arc`、`edge_line` 分别使用主体边界带、上半椭圆弧和有限长度线带，禁止不同 schema 类型退化为同一公式。
+- 原因：原 8 槽布局超过 WebGL1 最低 fragment uniform 容量，桌面 Chromium 通过不能证明约束设备可链接；同时旧 body feature 分支把三个类型合并为同一权重，模型声明的弧和线没有像素语义。沿用 v1 版本还会让不兼容 uniform/像素公式共享 provenance。
+- 影响：本决策取代 D055 的 8-slot 部分和 D052 中 prepared 白名单仅含 float/vec2/vec3 的限制；三槽上限进入 `MinScene` 严格 Schema，超过上限的模型输出安全回退。metrics、manifest、账本和 API 摘要显式记录 v2 模板版本。真实 Chromium 集成测试必须同时证明 legacy/prepared 像素一致和三种 body feature 像素互异；F09 状态与发布 no-go 不变。
+
+## D057 - scene_mvp 运行进度用进程内存事件缓冲加增量轮询
+
+- 日期：2026-07-22
+- 决策：scene_mvp 的运行时可观测采用“内存事件缓冲 + 前端增量轮询”，不引入 SSE/WebSocket。前端预生成 UUID `run_id` 随 POST 显式发送（服务端缺省自生成的行为不变，进行中 run_id 冲突返回 409 `run_conflict`），随后以约 1.2s 间隔轮询 `GET /api/shader/runs/{run_id}/progress?after=<seq>`。Agent service 把 `ainvoke` 换成 `astream(stream_mode="updates")`，逐节点产出严格白名单事件（trace 差分、counters、best、decide 路由），渲染帧字节经独立通道保存最近一帧；两者写入 `backend.app.services.run_progress.RunProgressRegistry`（单进程单 worker、重启即失、惰性 TTL 清扫）。
+- 原因：仓库此前没有任何流式基础设施，`agent_runs` schema 注释本就预留“前端轮询”语义；scene_mvp 单次运行 1–12 分钟，轮询足够且 TestClient 易测，SSE 的连接生命周期、重连和测试成本在现阶段不成比例。运行中途不写 `agent_events`：终态单事务账本语义保持不变，内存缓冲只服务运行中的页面观测。事件之所以必须白名单化，是因为 state update 直接携带图片、Scene、GLSL 与渲染字节。
+- 影响：`POST /api/shader/generate` 新增可选 `run_id` 表单字段；新增 `/progress` 与 `/progress/render` 两个只读端点，未知 run_id 返回 `pending` 以吸收客户端先于服务端登记的竞态。Graph 拓扑、路由和终态账本不变；`procedural_v1` 不发布进度。多 worker 部署下进度不可见（事件只存在于执行该 run 的进程），属于已接受的单 worker 限制，后续需要时再换共享事件总线。
+
+## D058 - scene_mvp 先做固定模板扩展，不引入动态 Compiler
+
+- 日期：2026-07-22
+- 决策：F09 的下一质量增量采用 `docs/superpowers/specs/2026-07-22-scene-mvp-fixed-template-expansion-design.md`。继续限定单主体 `circle|ellipse`，颜色场支持具有真实像素语义的 `solid|radial|linear`，feature 保留既有四类并新增主体内 `gaussian_lobe` 与主体外 `glow`；每个 feature 压成 2 个 `vec4`，四个槽连同基础 Scene、类型元数据和 `u_resolution` 最坏使用 15 个 fragment uniform vectors。Refine 新增按稳定 id 的原子 `replace_feature` 和完整 `replace_color_field`。Graph 拓扑、同 run 单 prepared program、默认 `procedural_v1` 和显式 `scene_mvp` 产品边界不变。该方案名不是项目阶段号，与已废弃为历史参考的旧 V3 Oracle/Search 方案无关；Scene/template/metric 的正式版本号在实现增量冻结。
+- 原因：粉色凝胶球实测证明当前单一 radial 场、三槽和亮度分位数 objective 存在明显表达与评价缺口，但一次引入动态结构编译、最多 8 个逻辑 feature、多几何、自动残差分类和自动 procedural fallback 会同时改写 Renderer 生命周期、资源规划、感知、Graph/Backend 编排和预算语义。固定模板扩展可以在 WebGL1 最低容量内增加通用颜色场与局部效果，同时保持 Initial/fallback/Refine 共用唯一 program 签名和现有 current_best 安全边界。
+- 影响：实现已分别冻结 `png_to_shader_min_scene_v3`、`png_to_shader_min_template_v3`、`min_scene_composite_v3`；固定 7 例 deterministic fallback 的内部 loss 中位数约 `0.0402`，据此冻结 `target_loss=0.04`。三类颜色场、circle/ellipse、六类 feature、四槽 15/16 资源边界和 replace patch 均有聚焦测试。相同 7 例用外部 `png_to_shader_score_v1` 对照 v2 fallback，v3 为 6/7 改善且其余 global/ROI/bbox 回归未越过预设容差。本轮仍不支持 `rounded_rect`、`ring`、`dual_disks`，不自动切换 `procedural_v1`，不引入 CMA-ES、动态 ROI、逐 feature 消融或多 program cache。该工程证据不等于真实模型或人工偏好门禁；F09 继续 `active/no-go`。
+
+## D059 - scene_mvp 目标与分档预算统一由 YAML 启动配置
+
+- 日期：2026-07-22
+- 决策：把 `scene_mvp` 的 `target_mae`、`target_loss` 以及 fast/balanced/high 三档 render/LLM/Refine 硬预算迁移到包资源 `src/agent/app/config/png_to_shader_min.yaml`。Agent 在进程导入时一次性加载，要求三个公开档位完整存在，并严格拒绝未知字段、错误类型、负预算以及超出 `[0,1]` 的目标；Model Author 的 run 级调用上限从三档最大 `llm_budget` 推导，不再保留独立数值常量。修改配置后必须重启进程。
+- 原因：目标和预算原本同时散落在 Service、Model Author 与节点缺省值中；仅修改一处可能被另一处的 6 次上限或 `0.08/0.04` fallback 截断，造成 UI 显示、实际停止和模型用量不一致。单一严格 YAML 能让 Backend 进度、Artifact、账本和前端继续记录实际注入值，同时保持配置入口可读。
+- 影响：默认行为仍为 MAE/loss `0.08/0.04`，三档 render/LLM/Refine 仍为 `48/2/1`、`96/4/2`、`160/6/3`；公开 API 和 Graph 拓扑不变。当前 `target_loss` 继续是停止与 `target_reached` 的唯一质量条件，`target_mae` 只用于诊断展示。D058 的 `0.04` 是现有 benchmark 证据对应的冻结默认值；运维可以改 YAML 做实验，但变更目标或预算后的 run 不得冒充原冻结配置的可比证据，正式 gate 必须记录实际值并重新验收。
+
+## D060 - scene_mvp Graph 安全上限由合法预算路径推导
+
+- 日期：2026-07-23
+- 决策：废止 `scene_mvp` 固定 `recursion_limit=64`。配置加载时按 `R=min(refine_budget,max(llm_budget-1,0))`、固定模板最多四个 feature 和当前 12 节点路由推导最坏节点步数 `9 + 2F + R × (6 + 2F)`，每个 run 注入该值加 4 步框架余量；推导结果超过全局防御上限 256 时拒绝启动。`GraphRecursionError` 继续作为 `internal_pipeline_error` fail-closed，不允许异常时静默导出 `current_best`。失败账本额外保存内存进度中的 `latest_seq/current_node/counters/best/budgets` 安全快照，不保存事件、图片、输入、Scene 或 GLSL。
+- 原因：run `9d10b919-25f6-41a2-a2cf-e88c23ad78be` 在 high 档实验预算 `640/9/9` 下于合法的 `decide_after_feature -> optimize_feature` 路径第 64 步被框架中断，当时 render/LLM/Refine 为 `333/6/5`，不是路由死循环。原 high 档 `160/6/3` 的四 feature 最坏路径约 59 步，固定 64 只是偶然覆盖旧预算；预算迁移到 YAML 后没有同步其二级安全边界。
+- 影响：当前 high 档最多八轮 Refine 的合法路径需要 129 步，run 级上限为 133；四 feature 最大预算集成测试必须真实执行超过 64 步并由业务预算正常结束。当前 YAML 的 `0.04/0.02` 目标与 `48/2/1`、`96/4/2`、`640/9/9` 预算是区别于 D058/D059 冻结基线的实验配置，相关 run 不得与旧七例 baseline 混算。Graph 节点、边、路由、终止路径和 `current_best` 安全语义均未改变。
+
+## D061 - scene_mvp Refine 使用可审计的有界候选成熟
+
+- 日期：2026-07-23
+- 决策：保持 `png_to_shader_min` 的 12 节点、直接边、条件边和路由结果不变，但改变 Refine 候选选择语义。每个合法且未与最近拒绝记录重复的 typed Patch 从只读 `current_best` 派生独立 branch，先执行 1 次 raw draw，再按 Patch 影响范围执行最多 11 次确定性局部 draw；add/replace feature 只调整该稳定 feature，replace color field 只调整颜色场 bindings，remove 只做 raw 重评分。只有 matured candidate 的 `min_scene_composite_v3` loss 严格更低才原子提交；非法、重复、Renderer 失败或成熟后仍较差的 branch 整体丢弃。Refine 后 `optimize_base` 仅作 no-op 过桥，不再重新执行完整 base/feature sweep。单 Patch 12 draw 全部计入现有 run 硬预算，不增加隐藏预算。
+- 原因：真实 run `85506ab8-12c4-4a20-8940-824875ea0f97` 中 Initial 像素结果与 fallback 等价，五次 Refine raw 候选全部在进入 feature optimizer 前被拒绝，而 320 次 draw 主要消耗在重复全量 sweep。首帧 Patch 同时猜中位置、尺寸、颜色与强度才可挑战已成熟 best 的规则，会系统性淘汰结构方向正确但初始参数不成熟的候选。终态又缺少 Patch operation/type、指纹、分量 delta 和拒绝历史，无法区分结构错误、参数未成熟或重复提案。
+- 影响：空间残差新增固定 4×4 top-2 tile 的 MAE 与 `rendered-reference` signed luminance/RGB bias，但不改变 scorer、权重或 metric version。Refine Prompt 同时获得主导 metric、active feature 和最近三个拒绝摘要。Trace、metrics/manifest、API 与终态账本只保存 operation、feature id/type、规范 SHA-256、raw/matured metric delta、拒绝原因、重复标记和耗时，禁止保存完整 Patch、图片、GLSL、用户输入、模型原始响应或 reasoning。YAML 必须显式声明 `frozen_benchmark|independent_experiment`、独立实验 ID 和报告版本，并生成配置指纹；冻结身份若偏离 D058/D059 的 `0.08/0.04` 与 `48/2/1`、`96/4/2`、`160/6/3` 则启动失败。当前 `0.04/0.02 + 48/2/1、96/4/2、640/9/9` 继续只属于独立实验。Refine 不再反复遍历 feature 后，D060 的路径公式由 `9+2F+R×(6+2F)` 修正为 `9+2F+6R`，当前 high 为 65 步、注入上限 69；D060 的 fail-closed 与全局 256 防御边界保留。该工程实现只证明机制与安全性，未证明真实模型质量收益；geometry 语义修正、固定 7 例真实模型 benchmark 和匿名人工偏好仍需独立执行，F09 保持 `active/no-go`。
+
+## D062 - scene_mvp 新增仅限独立实验的 manual 预算档
+
+- 日期：2026-07-23
+- 决策：保留 fast/balanced/high=`48/2/1`、`96/4/2`、`640/9/9` 的当前可比语义，新增 `scene_mvp` 专用 manual=`1000/32/30` render/LLM/Refine 档。独立实验 YAML 必须完整声明四档；D058/D059 冻结 benchmark 仍只允许原三档 `48/2/1`、`96/4/2`、`160/6/3`，携带 manual 必须 fail closed。Backend 表单契约接受 manual，但 `procedural_v1 + manual` 返回 422；Frontend 仅在 `scene_mvp` 下展示 Manual，从 Manual 切回 V1 时回落到 V1 high。
+- 原因：把 `1000/32/30` 直接覆盖 high 会破坏既有 high run、测试和报告的配置可比性，也会把显著更高的模型成本隐藏在原档位名称下。显式 manual 能让高成本探索保留实际身份、配置指纹和预算证据，同时避免扩张 V1 的冻结预算契约。
+- 影响：按 D061 路径公式，manual 最多执行 30 轮 Refine，合法最坏路径为 197 步、注入 recursion limit 201，仍低于全局 256 上限；Model Author 的进程级最大 LLM/Refine 包装预算相应为 32/30。浏览器 manual 默认等待上限为 30 分钟，但仍只是客户端停止等待，不提供服务端取消。manual 不得进入冻结 gate，其成本、质量和时延必须单独记录；本决策不改变 Graph 节点、边、路由、`current_best` 安全边界、scorer、Prompt 或 F09 active/no-go。
+
+## D063 - 不接入多尺度 tile 最大回退 guard 的离线 replay 形式
+
+- 日期：2026-07-23
+- 决策：不把本轮 `4×4/8×8` 全 tile RGB MAE 最大回退 guard 的 offline replay 形式接入生产 scorer 或候选选择。固定 7 例继续保留 strict total-loss Arm A 和预声明容差 `0/0.001/0.0025/0.005/0.01` 的完整负结果；下一质量增量改为在同一候选预算和 draw 预算下直接运行 geometry-first 字典序与 strict total-loss 两种 live acceptance 的单因素 A/B。
+- 原因：strict total-loss Arm A 的两个 watch ROI 没有达到冻结 `0.01` 回退阈值，offline Arm B 因而没有保护收益；较严格容差反而拦截 `color_lobes` 等明确改善，`t≤0.005` 时四例丢失全部改进，`t=0.01` 时 `shadow_disk` 和 `pink_gel` 仍全部拒绝。该证据足以否决当前 offline replay 形式的生产接入，但 Arm B 沿用 Arm A 生成的候选流；拒绝早期候选后 live candidate generation 会改变，不能据此因果性地证伪 live guard，或把两次实验的 ROI 差异直接归属为某一种 acceptance。
+- 影响：生产 `min_scene_composite_v3`、Prompt、Graph、预算、目标和 `current_best` 安全边界均不改变，F09 继续 `active/no-go`。该 runner、测试和规格仍直接依赖已由 D066 删除的 V1 benchmark manifest、ROI/Oracle 与 scorer calibration，因此同步 `a39e676` 后在当前重构工作树继续删除；455 次真实 Chromium draw、0 模型调用的本地报告也已在 D067 授权下删除，只由本决策保留负面结论与历史 commit 可追溯性。rim、弧形高光和双高光缺失仍是发布阻塞项，自动代理看片不替代独立人工偏好 gate。
+
+## D064 - 最小骨架重构先解除 V1 共享依赖并删除旧方案源文件
+
+- 日期：2026-07-23
+- 决策：以《PNG 转无贴图 GLSL Agent—最小骨架（快速版）》作为当前实施切片。第一波清理删除无运行时消费者的 V1 实现/Prompt 草案和旧 V2–V5 方案源文件；历史取舍继续由本文件和进度归档说明，不删除冻结 benchmark、失败证据或旧 run 数据。最小骨架复用的稳定 JSON/多模态消息构造迁入 `agent.app.messages.structured_multimodal`，通用 WebGL1 运行契约迁入 `shaderforge.contracts.webgl1`；历史 `contract_id=webgl1_static_no_texture_v1` 保持不变。
+- 原因：旧方案资料已不再指导当前实现，而最小骨架仍直接导入 V1 消息模块，Renderer、Validator 和测量层也直接导入 V1 业务契约。按文件名直接删除 V1 会破坏当前链路；先建立中立依赖方向，才能让后续 Graph/Service/Node 清理成为可验证的独立增量。
+- 影响：架构测试禁止 `png_to_shader_min` 导入 V1 业务命名空间，并禁止通用 analysis/rendering/validation 反向导入 V1 契约。V1 Graph、Service、Node Lab Provider、Memory/checkpoint、Backend/Frontend `procedural_v1` 和历史 Artifact 读取仍是当前消费者，本决策不授权在未确定外围能力与历史数据策略时删除它们。D062 后 high 继续为 `640/9/9`，`1000/32/30` 仅作为独立 manual 档存在。
+
+## D065 - 当前分支的旧 Node Lab 全量退役
+
+- 日期：2026-07-23
+- 决策：按用户确认选择 V1 退役计划的方案 B，从当前分支删除旧 Node Lab 的通用 Harness、V1 Provider、Agent/Backend Service、HTTP Route/Schema、Frontend 工作台、CLI、benchmark/fixture、运行配置、打包入口、测试和当前功能项。该实现已在其他分支重新建设，本分支不保留兼容入口或占位模块。
+- 原因：旧 Node Lab 不再服务当前最小骨架实施主线，继续维护会让 V1 Provider、独立 benchmark 和调试产品面成为无效耦合，并阻碍后续 V1 可执行链路清理。
+- 影响：`H02` 不再是当前功能，原验收命令和环境变量被删除；D028、D032 及 D046 中只针对旧 Node Lab 的部分转为历史。既有 ADR、进度归档和 `docs/evidence/registry.json` 的报告摘要/hash 保留，已生成的本地历史报告不主动覆盖或删除。此决策不授权删除或迁移 Memory/checkpoint、过程账本、M5 benchmark、历史 run 或 V1 默认产品链路；这些仍需独立策略和门禁。
+
+## D066 - 产品直接收敛到 scene_mvp 并删除 V1 可执行链路
+
+- 日期：2026-07-23
+- 决策：按用户明确授权，当前分支直接以 `scene_mvp` 最小骨架作为唯一产品路径。删除 V1 Graph/routing/State/Node/Parser/Prompt/Service/业务契约，删除 Backend/Frontend 的 `procedural_v1` 分流、旧 Artifact fallback、项目 Memory API/UI，删除 V1 benchmark manifest、图片、golden、gate、runner、CI、fixture 和对应测试；同时删除只服务 V1 的 TargetMeasurements、Basic Oracle、Selector 与 measurement-affine seed。`langgraph.json` 只注册 `png_to_shader_min`，Generate 请求不再接受 `generation_mode`。此决策取代 D048、D049、D051、D062、D064、D065 中要求继续保留 V1 默认产品链路或旧 benchmark 运行入口的部分。
+- 原因：V1–V5 旧方案不再服务当前最小骨架，保留完整可执行链路会继续扩散模式分流、Memory 绑定、旧评分契约和 benchmark 维护成本。最小骨架已经具备独立 Graph、Service、API、进度、Artifact 和 UI 垂直切片，可以作为唯一重构基线。
+- 影响：Memory/checkpoint 的 Python/SQL 实现和已有 PostgreSQL 数据暂不删除，但 Backend lifespan、当前 Graph、Service、HTTP 和 Frontend 均不再消费；其迁移、只读归档和保留期需要新决策。过程账本、历史 run、失败证据、`output/benchmarks`、ADR、进度归档和 evidence registry 保留。旧 V1 benchmark 结论只能用于历史审计，不能作为当前 scene_mvp 发布门禁；后续必须建立版本中立的新 benchmark。清理同时移除 `build/`、`.mypy_cache/`、Python `__pycache__`、旧 V2 `.DS_Store` 和其他删除模块缓存。
+
+## D067 - 明确删除本地历史输出与陈旧开发产物
+
+- 日期：2026-07-23
+- 决策：按用户针对精确范围的明确授权，删除整个本地 `output/`，包括旧 Node Lab 的运行与 benchmark 证据、V1/V2/M5 benchmark、历史 PNG-to-Shader run、Playwright 截图、review package 和其他本地产物；同时删除 `.pytest_cache/`、`.ruff_cache/`、`shadergen.egg-info/` 与 `frontend/dist/`。本次不制作额外归档。此决策取代 D065、D066 以及更早决策中要求继续保留这些本地 Artifact 的部分。
+- 原因：旧 V1–V5 与旧 Node Lab 已退出当前最小骨架主线，用户确认不再需要依赖本地历史产物复盘，并接受未跟踪文件删除后无法从仓库恢复。
+- 影响：约 777 MB 本地输出被删除；Git 曾跟踪的少量截图和 review package 仍可从历史 commit 恢复，其余忽略文件只能依赖仓库外备份。`docs/evidence/registry.json` 和进度归档继续保留原结论、路径、字节数与 SHA-256，但对应 evidence 降为 `missing`，不得用于复验旧 gate 或证明当前质量。Memory/checkpoint Python/SQL 实现、PostgreSQL 数据、`.venv/` 和 `frontend/node_modules/` 不在本次范围。
+
+## D068 - Memory/checkpoint 休眠保留
+
+- 日期：2026-07-23
+- 决策：按用户最终确认，保留 `src/agent/app/memory/`、`src/agent/app/context/`、Backend Memory 数据库适配与相关 SQL，以及 PostgreSQL 中已有 checkpoint/Memory 数据。当前 `scene_mvp` Graph、Backend lifespan、HTTP API 和 Frontend 继续不接入这套能力。
+- 原因：保留实现与数据可以避免在尚未确定 scene_mvp 新 Memory 契约和 namespace 前做不可逆迁移，同时不让旧 V1 语义重新进入当前产品路径。
+- 影响：Memory 代码和数据库数据不是待清理残留；未来重新启用必须建立 scene_mvp 专用契约、namespace、保留期和迁移验收，不能直接恢复旧 V1 Service/API。现有 `make setup-memory-postgres` 与 `make test-memory-postgres` 仅用于维护休眠基础设施，不代表在线产品已启用 Memory。

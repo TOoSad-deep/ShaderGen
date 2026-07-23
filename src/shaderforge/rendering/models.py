@@ -13,6 +13,15 @@ class RendererUnavailableError(RuntimeError):
     """表示浏览器渲染 worker 在一次重放后仍不可用."""
 
 
+class ShaderPreparationError(RuntimeError):
+    """表示 prepared Shader 未通过编译或链接门禁."""
+
+    def __init__(self, compile_result: CompileResult) -> None:
+        """保留可诊断的编译结果."""
+        self.compile_result = compile_result
+        super().__init__(compile_result.draw_error or "prepared_shader_compile_failed")
+
+
 @dataclass(frozen=True)
 class CompileResult:
     """静态校验、编译、链接和 draw 阶段的诊断."""
@@ -83,5 +92,32 @@ class RenderResult:
             "metadata": self.metadata.to_dict() if self.metadata else None,
             "duration_ms": self.duration_ms,
             "image_sha256": self.image_sha256,
+            "image_size_bytes": len(self.image_bytes) if self.image_bytes else 0,
+        }
+
+
+@dataclass(frozen=True)
+class PreparedRenderResult:
+    """prepared program 的单次 uniform 绘制结果."""
+
+    success: bool
+    rgb_bytes: bytes | None
+    image_bytes: bytes | None
+    width: int
+    height: int
+    console_errors: tuple[str, ...]
+    duration_ms: float
+    draw_error: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """返回不内嵌 RGB/PNG 大字段的诊断字典."""
+        return {
+            "success": self.success,
+            "width": self.width,
+            "height": self.height,
+            "console_errors": list(self.console_errors),
+            "duration_ms": self.duration_ms,
+            "draw_error": self.draw_error,
+            "rgb_size_bytes": len(self.rgb_bytes) if self.rgb_bytes else 0,
             "image_size_bytes": len(self.image_bytes) if self.image_bytes else 0,
         }

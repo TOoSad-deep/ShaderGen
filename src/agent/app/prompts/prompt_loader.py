@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from importlib.resources import files
 
-import yaml  # type: ignore[import-untyped]
+import yaml
 
 
 @dataclass(frozen=True)

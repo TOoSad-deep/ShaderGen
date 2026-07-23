@@ -11,7 +11,12 @@ from shaderforge.rendering import (
     PlaywrightWebGL1Renderer,
     RendererUnavailableError,
     RenderResult,
+    ShaderPreparationError,
     build_standalone_html,
+)
+from shaderforge.rendering.webgl1_renderer import (
+    _normalize_uniform_schema,
+    _validate_uniform_values,
 )
 from shaderforge.validation import validate_shader
 
@@ -54,6 +59,100 @@ async def test_static_rejection_does_not_start_browser_or_return_png():
         "texture_sampling"
     }
     assert renderer._page is None
+
+
+@pytest.mark.anyio
+async def test_prepare_static_rejection_does_not_start_browser() -> None:
+    renderer = PlaywrightWebGL1Renderer()
+    invalid = VALID_SHADER.replace(
+        "gl_FragColor = vec4(v_uv, 0.5, 1.0);",
+        "gl_FragColor = texture2D(u_image, v_uv);",
+    )
+
+    with pytest.raises(ShaderPreparationError) as raised:
+        await renderer.prepare(invalid, 64, 64, {})
+
+    assert raised.value.compile_result.draw_error == "static_validation_failed"
+    assert renderer._page is None
+
+
+def test_prepared_uniform_schema_and_values_are_strict() -> None:
+    schema = _normalize_uniform_schema(
+        {
+            "u_gain": "float",
+            "u_offset": "vec2",
+            "u_color": "vec3",
+            "u_packed": "vec4",
+        }
+    )
+
+    assert _validate_uniform_values(
+        schema,
+        {
+            "u_gain": 0.5,
+            "u_offset": (0.1, -0.2),
+            "u_color": [0.2, 0.4, 0.6],
+            "u_packed": (1.0, 2.0, 3.0, 4.0),
+        },
+    ) == {
+        "u_gain": 0.5,
+        "u_offset": [0.1, -0.2],
+        "u_color": [0.2, 0.4, 0.6],
+        "u_packed": [1.0, 2.0, 3.0, 4.0],
+    }
+
+    with pytest.raises(ValueError, match="missing=.*u_color"):
+        _validate_uniform_values(
+            schema,
+            {
+                "u_gain": 0.5,
+                "u_offset": (0.1, -0.2),
+                "u_packed": (1.0, 2.0, 3.0, 4.0),
+            },
+        )
+    with pytest.raises(ValueError, match="extra=.*u_other"):
+        _validate_uniform_values(
+            schema,
+            {
+                "u_gain": 0.5,
+                "u_offset": (0.1, -0.2),
+                "u_color": (0.2, 0.4, 0.6),
+                "u_packed": (1.0, 2.0, 3.0, 4.0),
+                "u_other": 1.0,
+            },
+        )
+    with pytest.raises(ValueError, match="长度 2"):
+        _validate_uniform_values(
+            schema,
+            {
+                "u_gain": 0.5,
+                "u_offset": (0.1, -0.2, 0.3),
+                "u_color": (0.2, 0.4, 0.6),
+                "u_packed": (1.0, 2.0, 3.0, 4.0),
+            },
+        )
+    with pytest.raises(ValueError, match="有限数值"):
+        _validate_uniform_values(
+            schema,
+            {
+                "u_gain": True,
+                "u_offset": (0.1, -0.2),
+                "u_color": (0.2, 0.4, 0.6),
+                "u_packed": (1.0, 2.0, 3.0, 4.0),
+            },
+        )
+    with pytest.raises(ValueError, match="长度 4"):
+        _validate_uniform_values(
+            schema,
+            {
+                "u_gain": 0.5,
+                "u_offset": (0.1, -0.2),
+                "u_color": (0.2, 0.4, 0.6),
+                "u_packed": (1.0, 2.0, 3.0),
+            },
+        )
+    with pytest.raises(ValueError, match="保留"):
+        _normalize_uniform_schema({"u_resolution": "vec2"})
 
 
 @pytest.mark.anyio
@@ -138,7 +237,7 @@ async def test_renderer_close_keeps_resources_for_retry_after_timeout() -> None:
     renderer._browser = browser  # type: ignore[assignment]
     renderer._playwright = playwright  # type: ignore[assignment]
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(renderer.close(), timeout=0.01)
 
     assert renderer._page is page

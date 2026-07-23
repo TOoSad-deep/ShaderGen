@@ -3,30 +3,24 @@ import "./styles/app.css";
 import { type DragEvent, useCallback, useEffect, useRef, useState } from "react";
 
 import {
-  clearProjectMemory,
+  fetchMinRunProgress,
   generateShader,
   resolveShaderApiUrl,
   ShaderApiError,
-  type MemoryStatus,
+  type MinRunProgressEvent,
+  type MinRunProgressResponse,
+  type MinRunProgressSnapshot,
   type QualityPreset,
   type ShaderApiFailure,
   type ShaderResponse,
 } from "./api/shader";
 import { FailureDetails } from "./components/FailureDetails";
-import { RunProgress } from "./components/RunProgress";
-import { ScoreSummary } from "./components/ScoreSummary";
+import { MinRunLivePanel } from "./components/MinRunLivePanel";
+import { SceneMvpSummary } from "./components/SceneMvpSummary";
 import {
   ShaderPreview,
   type ClientCompatibilityReport,
 } from "./components/ShaderPreview";
-
-const CURRENT_PROJECT_KEY = "shadergen.currentProjectId";
-const RECENT_PROJECTS_KEY = "shadergen.recentProjects";
-
-interface RecentProject {
-  id: string;
-  lastUsedAt: string;
-}
 
 type RequestStopKind = "user" | "timeout" | "unmount";
 
@@ -37,34 +31,35 @@ interface ActiveGenerationRequest {
   timeoutMs: number;
 }
 
+interface LiveMinRun {
+  runId: string;
+  events: MinRunProgressEvent[];
+  snapshot: MinRunProgressSnapshot | null;
+  status: string;
+}
+
+const MIN_RUN_POLL_INTERVAL_MS = 1200;
+const MIN_RUN_MAX_POLL_FAILURES = 3;
 const DEFAULT_REQUEST_TIMEOUT_MS: Record<QualityPreset, number> = {
   fast: 4 * 60 * 1000,
   balanced: 7 * 60 * 1000,
   high: 12 * 60 * 1000,
+  manual: 30 * 60 * 1000,
 };
+
+function newClientRunId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return "00000000-0000-4000-8000-000000000000".replace(/0/g, () =>
+    Math.floor(Math.random() * 16).toString(16),
+  );
+}
 
 function generationRequestTimeoutMs(qualityPreset: QualityPreset): number {
   const configured = Number(import.meta.env.VITE_GENERATION_REQUEST_TIMEOUT_MS);
   if (Number.isFinite(configured) && configured >= 10_000) return configured;
   return DEFAULT_REQUEST_TIMEOUT_MS[qualityPreset];
-}
-
-function loadRecentProjects(): RecentProject[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(RECENT_PROJECTS_KEY) ?? "[]") as unknown;
-    if (!Array.isArray(value)) return [];
-    return value
-      .filter(
-        (item): item is RecentProject =>
-          typeof item === "object" &&
-          item !== null &&
-          typeof (item as RecentProject).id === "string" &&
-          typeof (item as RecentProject).lastUsedAt === "string",
-      )
-      .slice(0, 10);
-  } catch {
-    return [];
-  }
 }
 
 function formatBytes(bytes: number) {
@@ -80,51 +75,30 @@ export function App() {
   const [qualityPreset, setQualityPreset] = useState<QualityPreset>("balanced");
   const [instruction, setInstruction] = useState("");
   const [runResult, setRunResult] = useState<ShaderResponse | null>(null);
-  const [compatibility, setCompatibility] = useState<ClientCompatibilityReport | null>(null);
+  const [compatibility, setCompatibility] =
+    useState<ClientCompatibilityReport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [apiFailure, setApiFailure] = useState<ShaderApiFailure | null>(null);
   const [requestStopNotice, setRequestStopNotice] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [projectId, setProjectId] = useState<string | null>(() =>
-    localStorage.getItem(CURRENT_PROJECT_KEY),
-  );
-  const [recentProjects, setRecentProjects] = useState<RecentProject[]>(loadRecentProjects);
-  const [memoryStatus, setMemoryStatus] = useState<MemoryStatus | null>(null);
-  const [projectMessage, setProjectMessage] = useState("");
+  const [liveRun, setLiveRun] = useState<LiveMinRun | null>(null);
   const copyTimerRef = useRef<number | null>(null);
   const activeGenerationRef = useRef<ActiveGenerationRequest | null>(null);
 
-  useEffect(() => {
-    return () => {
-      if (imageUrl) URL.revokeObjectURL(imageUrl);
-    };
+  useEffect(() => () => {
+    if (imageUrl) URL.revokeObjectURL(imageUrl);
   }, [imageUrl]);
 
-  useEffect(() => {
-    return () => {
-      if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
-      const active = activeGenerationRef.current;
-      if (active) {
-        active.stopKind = "unmount";
-        window.clearTimeout(active.timeoutId);
-        active.controller.abort();
-      }
-    };
-  }, []);
-
-  const rememberProject = useCallback((id: string) => {
-    setRecentProjects((current) => {
-      const next = [
-        { id, lastUsedAt: new Date().toISOString() },
-        ...current.filter((project) => project.id !== id),
-      ].slice(0, 10);
-      localStorage.setItem(CURRENT_PROJECT_KEY, id);
-      localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(next));
-      return next;
-    });
-    setProjectId(id);
+  useEffect(() => () => {
+    if (copyTimerRef.current) window.clearTimeout(copyTimerRef.current);
+    const active = activeGenerationRef.current;
+    if (active) {
+      active.stopKind = "unmount";
+      window.clearTimeout(active.timeoutId);
+      active.controller.abort();
+    }
   }, []);
 
   function clearRunOutput() {
@@ -135,6 +109,7 @@ export function App() {
     setApiFailure(null);
     setRequestStopNotice("");
     setCopied(false);
+    setLiveRun(null);
   }
 
   async function handleFile(file: File) {
@@ -143,24 +118,14 @@ export function App() {
       setError("请上传图片文件。");
       return;
     }
-
     setImageUrl(URL.createObjectURL(file));
     setSelectedFile(file);
     setFileInfo(`${file.name} · ${formatBytes(file.size)}`);
     clearRunOutput();
   }
 
-  function resetWorkspace() {
-    setImageUrl(null);
-    setSelectedFile(null);
-    setFileInfo("");
-    clearRunOutput();
-    setMemoryStatus(null);
-  }
-
   async function handleRun() {
     if (!selectedFile || loading || activeGenerationRef.current) return;
-
     clearRunOutput();
     setLoading(true);
     const controller = new AbortController();
@@ -178,22 +143,53 @@ export function App() {
     }, timeoutMs);
     activeGenerationRef.current = active;
 
+    const runId = newClientRunId();
+    let pollStopped = false;
+    let pollFailures = 0;
+    let lastSeq = 0;
+
+    const mergeProgress = (data: MinRunProgressResponse) => {
+      lastSeq = Math.max(lastSeq, data.latest_seq ?? 0);
+      setLiveRun((current) => {
+        const base = current?.runId === runId ? current.events : [];
+        const seen = new Set(base.map((event) => event.seq));
+        return {
+          runId,
+          events: [...base, ...data.events.filter((event) => !seen.has(event.seq))],
+          snapshot: data.snapshot ?? current?.snapshot ?? null,
+          status: data.status,
+        };
+      });
+    };
+
+    const pollProgress = async () => {
+      if (pollStopped) return;
+      try {
+        mergeProgress(await fetchMinRunProgress(runId, lastSeq));
+        pollFailures = 0;
+      } catch {
+        pollFailures += 1;
+      }
+      if (!pollStopped && pollFailures < MIN_RUN_MAX_POLL_FAILURES) {
+        window.setTimeout(() => void pollProgress(), MIN_RUN_POLL_INTERVAL_MS);
+      }
+    };
+
+    setLiveRun({ runId, events: [], snapshot: null, status: "pending" });
+    window.setTimeout(() => void pollProgress(), 500);
     try {
       const result = await generateShader(selectedFile, {
-        projectId: projectId ?? undefined,
+        runId,
         qualityPreset,
         instruction: instruction.trim(),
         signal: controller.signal,
       });
-      rememberProject(result.project_id);
-      setMemoryStatus(result.memory_status);
-      setProjectMessage("");
       setRunResult(result);
       setGlsl(result.glsl);
     } catch (reason) {
       if (active.stopKind === "user") {
         setRequestStopNotice(
-          "已停止等待本次响应；这里只中止了浏览器请求，没有向服务端发送取消指令。服务端任务可能仍在运行，请先查看后端日志或稍后再重试。",
+          "已停止等待本次响应；这里只中止了浏览器请求，服务端任务可能仍在运行。",
         );
       } else if (active.stopKind === "timeout") {
         setRequestStopNotice(
@@ -204,6 +200,12 @@ export function App() {
         setError(reason instanceof Error ? reason.message : "生成失败。");
       }
     } finally {
+      pollStopped = true;
+      try {
+        mergeProgress(await fetchMinRunProgress(runId, lastSeq));
+      } catch {
+        // 收尾轮询失败不影响主流程。
+      }
       window.clearTimeout(active.timeoutId);
       if (activeGenerationRef.current === active) {
         activeGenerationRef.current = null;
@@ -222,43 +224,6 @@ export function App() {
   const handleCompatibility = useCallback((report: ClientCompatibilityReport) => {
     setCompatibility(report);
   }, []);
-
-  function handleNewProject() {
-    if (
-      projectId &&
-      !window.confirm("新建项目只会切换 project_id，旧项目记忆会继续保留在最近项目中。是否继续？")
-    ) {
-      return;
-    }
-    localStorage.removeItem(CURRENT_PROJECT_KEY);
-    setProjectId(null);
-    setProjectMessage("已准备新项目，下一次运行会创建新的 project_id。 ");
-    resetWorkspace();
-  }
-
-  async function handleClearMemory() {
-    if (!projectId) return;
-    if (!window.confirm("确认清除当前项目的任务记忆和长期记忆？过程审计记录不会删除。")) return;
-    try {
-      await clearProjectMemory(projectId);
-      const next = recentProjects.filter((project) => project.id !== projectId);
-      localStorage.removeItem(CURRENT_PROJECT_KEY);
-      localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(next));
-      setRecentProjects(next);
-      setProjectId(null);
-      resetWorkspace();
-      setProjectMessage("当前项目记忆已清除。 ");
-    } catch (reason) {
-      setProjectMessage(reason instanceof Error ? reason.message : "清除项目记忆失败。");
-    }
-  }
-
-  function restoreProject(id: string) {
-    if (!id) return;
-    rememberProject(id);
-    resetWorkspace();
-    setProjectMessage("已恢复项目记忆范围，请上传图片继续生成。 ");
-  }
 
   function handleDrop(event: DragEvent<HTMLLabelElement>) {
     event.preventDefault();
@@ -279,12 +244,11 @@ export function App() {
     }
   }
 
-  const review = runResult?.review ?? null;
   const serverRenderUrl = runResult?.final_render_url
     ? resolveShaderApiUrl(runResult.final_render_url)
     : null;
   const statusText = loading
-    ? "闭环运行中"
+    ? "最小管线运行中"
     : requestStopNotice
       ? "已停止等待"
       : error || compatibility?.status === "error"
@@ -294,11 +258,6 @@ export function App() {
           : selectedFile
             ? "准备运行"
             : "等待上传";
-  const runText = glsl ? "重新运行" : "开始运行";
-  const previewEmptyText = loading ? "正在生成" : selectedFile ? "等待运行" : "等待上传";
-  const codePlaceholder = selectedFile
-    ? "点击“开始运行”后会在这里显示生成的 fragment shader。"
-    : "上传图片后会在这里显示生成的 fragment shader。";
 
   return (
     <main className="app">
@@ -306,7 +265,7 @@ export function App() {
         <header className="topbar">
           <div>
             <h1>ShaderGen</h1>
-            <p>上传参考图，生成可评估、可复核的无贴图 fragment shader。</p>
+            <p>上传参考图，由 scene_mvp 最小管线生成无贴图 fragment shader。</p>
           </div>
           <div className="topbar-actions">
             <span className={`status ${loading ? "is-loading" : ""}`}>{statusText}</span>
@@ -316,20 +275,13 @@ export function App() {
               </button>
             ) : (
               <button type="button" className="run-button" disabled={!selectedFile} onClick={handleRun}>
-                {runText}
+                {glsl ? "重新运行" : "开始运行"}
               </button>
             )}
           </div>
         </header>
 
         <section className="run-config" aria-label="生成配置">
-          <label>
-            <span>生成模式</span>
-            <strong>程序化闭环 V1</strong>
-            <small className="experimental-note">
-              实验功能：当前质量门禁未通过，可能超时或无法生成可运行 Shader。
-            </small>
-          </label>
           <label>
             <span>质量档位</span>
             <select
@@ -341,7 +293,11 @@ export function App() {
               <option value="fast">Fast</option>
               <option value="balanced">Balanced</option>
               <option value="high">High</option>
+              <option value="manual">Manual（1000/32/30）</option>
             </select>
+            <small className="experimental-note">
+              scene_mvp 返回质量指标、预算用量、场景 JSON 与阶段追踪。
+            </small>
           </label>
           <label className="instruction-field">
             <span>补充约束</span>
@@ -356,37 +312,24 @@ export function App() {
           </label>
         </section>
 
-        <section className="project-bar" aria-label="项目记忆">
-          <div className="project-current">
-            <strong>项目记忆</strong>
-            <span title={projectId ?? ""}>{projectId ? projectId : "下一次运行时创建"}</span>
-          </div>
-          <div className="project-actions">
-            <select aria-label="最近项目" value={projectId ?? ""} onChange={(event) => restoreProject(event.target.value)}>
-              <option value="">最近项目</option>
-              {recentProjects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.id.slice(0, 8)} · {new Date(project.lastUsedAt).toLocaleString()}
-                </option>
-              ))}
-            </select>
-            <button type="button" onClick={handleNewProject} disabled={loading}>新建项目</button>
-            <button type="button" onClick={() => void handleClearMemory()} disabled={!projectId || loading}>
-              清除记忆
-            </button>
-          </div>
-        </section>
-        {memoryStatus === "ephemeral" ? <p className="memory-warning">当前使用临时记忆，后端重启后会丢失。</p> : null}
-        {memoryStatus === "degraded" ? <p className="memory-warning is-error">长期记忆本次降级，结果仍可使用但未保证持久化。</p> : null}
-        {projectMessage ? <p className="project-message">{projectMessage}</p> : null}
         {requestStopNotice ? <p className="request-stop-notice">{requestStopNotice}</p> : null}
         {apiFailure ? <FailureDetails message={error} failure={apiFailure} /> : null}
-
-        <RunProgress
-          loading={loading}
-          result={runResult}
-          compatibility={compatibility}
-        />
+        {liveRun ? (
+          <MinRunLivePanel
+            runId={liveRun.runId}
+            referenceUrl={imageUrl}
+            events={liveRun.events}
+            snapshot={liveRun.snapshot}
+            status={liveRun.status}
+          />
+        ) : null}
+        {runResult ? (
+          <SceneMvpSummary
+            runId={runResult.run_id}
+            stopReason={runResult.stop_reason}
+            minPipeline={runResult.min_pipeline}
+          />
+        ) : null}
 
         <section className={`panels ${serverRenderUrl ? "has-server-render" : ""}`}>
           <div className="panel">
@@ -423,42 +366,23 @@ export function App() {
                 serverRenderUrl={serverRenderUrl}
                 onCompatibility={handleCompatibility}
               />
-            ) : <div className="empty">{previewEmptyText}</div>}
+            ) : <div className="empty">{loading ? "正在生成" : selectedFile ? "等待运行" : "等待上传"}</div>}
           </div>
 
           {serverRenderUrl ? (
             <div className="panel server-render-panel">
-              <div className="panel-header">
-                <h2>服务端最终 Render</h2>
-                <span>{runResult?.unscored_fallback ? "WebGL fallback" : "current_best"}</span>
-              </div>
+              <div className="panel-header"><h2>服务端最终 Render</h2><span>scene_mvp</span></div>
               <img src={serverRenderUrl} alt="服务端最终渲染图" />
             </div>
           ) : null}
         </section>
 
-        <ScoreSummary score={runResult?.score} />
-
         <section className="code-panel">
           <div className="panel-header"><h2>GLSL</h2><button type="button" disabled={!glsl} onClick={copyGlsl}>{copied ? "已复制" : "复制"}</button></div>
-          {loading ? <p className="hint">正在分析、编译、渲染并按评分自动修订 GLSL...</p> : null}
+          {loading ? <p className="hint">正在感知、生成、渲染并评估 GLSL...</p> : null}
           {error && !apiFailure ? <p className="error">{error}</p> : null}
-          <pre>{glsl || codePlaceholder}</pre>
+          <pre>{glsl || (selectedFile ? "点击“开始运行”后会在这里显示生成结果。" : "上传图片后会在这里显示生成结果。")}</pre>
         </section>
-
-        {glsl || review ? (
-          <section className="review-panel">
-            <div className="panel-header">
-              <h2>自动闭环 Review</h2>
-            </div>
-            {review ? (
-              <div className="review-body">
-                <p>{review.evaluation}</p>
-                {review.suggestions.length ? <ul>{review.suggestions.map((suggestion, index) => <li key={`${index}-${suggestion}`}>{suggestion}</li>)}</ul> : null}
-              </div>
-            ) : <p className="hint">本次在进入 Critic 前已满足停止条件。</p>}
-          </section>
-        ) : null}
       </section>
     </main>
   );

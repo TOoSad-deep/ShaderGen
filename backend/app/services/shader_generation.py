@@ -1,35 +1,32 @@
-"""Shader 生成用例编排：锁、过程总账、Agent 调用和响应契约."""
+"""scene_mvp 生成用例编排：锁、过程总账、Agent 调用和响应契约."""
 
 from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
-from typing import Any, cast
+from dataclasses import asdict, dataclass, is_dataclass
+from typing import Any, Literal, cast
 from uuid import UUID
 
 from backend.app.schemas.shader import (
-    GenerationMode,
     QualityPresetName,
+    ShaderMinPipelineSummary,
     ShaderResponse,
-    ShaderReview,
-    ShaderScore,
 )
 from backend.app.services.agent_process_store import (
     record_shader_generation_failure,
     record_shader_generation_success,
     start_shader_generation_run,
 )
+from backend.app.services.run_progress import RunProgressRegistry
 from backend.app.services.shader import (
-    MemoryUnavailableError,
-    NoValidatedShaderError,
     ProjectBusyError,
     ProjectLockRegistry,
-    generate_procedural_shader_from_image,
-    get_png_to_shader_v1_models,
+    generate_scene_shader_from_image,
 )
 
 logger = logging.getLogger("backend.shader")
+GENERATION_MODE: Literal["scene_mvp"] = "scene_mvp"
 
 
 @dataclass(frozen=True)
@@ -41,7 +38,6 @@ class ShaderGenerationCommand:
     content_type: str
     project_id: UUID
     run_id: UUID
-    generation_mode: GenerationMode
     quality_preset: QualityPresetName
     instruction: str
     started_at: float
@@ -52,8 +48,9 @@ class ShaderGenerationDependencies:
     """由 Backend 应用生命周期注入的生成用例依赖."""
 
     pool: Any
-    procedural_service: Any
+    min_service: Any | None
     locks: ProjectLockRegistry
+    progress: RunProgressRegistry | None = None
 
 
 class ShaderGenerationUseCaseError(RuntimeError):
@@ -82,7 +79,7 @@ class ShaderGenerationUseCaseError(RuntimeError):
 
 
 class _GenerationRunPersistenceError(RuntimeError):
-    """表示生成 run 总账创建失败，且只保留安全异常类型."""
+    """表示生成 run 总账创建失败."""
 
     def __init__(self, error_type: str) -> None:
         self.error_type = error_type
@@ -111,116 +108,12 @@ def _generation_error(
     )
 
 
-def _no_validated_shader_error(
-    exc: NoValidatedShaderError,
-    *,
-    run_id: UUID,
-) -> ShaderGenerationUseCaseError:
-    """按停止原因和安全诊断把闭环失败映射到稳定用例语义."""
-    diagnostics = exc.diagnostics
-    stop_reason = exc.stop_reason
-    stage = str(diagnostics.get("failure_stage") or "generation")
-    error_type = str(diagnostics.get("failure_error_type") or "")
-
-    if stop_reason == "renderer_unavailable":
-        return _generation_error(
-            status_code=503,
-            message="服务端 WebGL Renderer 暂时不可用。",
-            code="renderer_unavailable",
-            run_id=run_id,
-            stage=stage if stage != "unknown" else "renderer",
-            retryable=True,
-            stop_reason=stop_reason,
-        )
-    if stop_reason == "wall_time_exhausted":
-        return _generation_error(
-            status_code=504,
-            message="Shader 自动闭环执行超时。",
-            code="generation_timeout",
-            run_id=run_id,
-            stage=stage,
-            retryable=True,
-            stop_reason=stop_reason,
-        )
-    if "timeout" in error_type.casefold():
-        return _generation_error(
-            status_code=504,
-            message="Shader 模型阶段响应超时。",
-            code="model_timeout",
-            run_id=run_id,
-            stage=stage,
-            retryable=True,
-            stop_reason=stop_reason,
-        )
-    if error_type == "LLMConfigurationError":
-        return _generation_error(
-            status_code=500,
-            message="Shader 模型服务配置无效。",
-            code="model_configuration_error",
-            run_id=run_id,
-            stage=stage,
-            retryable=False,
-            stop_reason=stop_reason,
-        )
-    if error_type == "LLMResponseError":
-        return _generation_error(
-            status_code=502,
-            message="Shader 模型返回了无法处理的响应。",
-            code="model_response_invalid",
-            run_id=run_id,
-            stage=stage,
-            retryable=True,
-            stop_reason=stop_reason,
-        )
-    provider_error_name = error_type.casefold().replace("_", "")
-    if any(
-        token in provider_error_name
-        for token in (
-            "llminvocation",
-            "apiconnection",
-            "ratelimit",
-            "modelgateway",
-            "providererror",
-        )
-    ):
-        return _generation_error(
-            status_code=503,
-            message="Shader 模型服务暂时不可用。",
-            code="model_unavailable",
-            run_id=run_id,
-            stage=stage,
-            retryable=True,
-            stop_reason=stop_reason,
-        )
-    if stop_reason == "model_budget_exhausted":
-        return _generation_error(
-            status_code=503,
-            message="Shader 模型调用预算已耗尽。",
-            code="model_budget_exhausted",
-            run_id=run_id,
-            stage=stage,
-            retryable=False,
-            stop_reason=stop_reason,
-        )
-    if stop_reason == "compile_repair_exhausted":
-        return _generation_error(
-            status_code=422,
-            message="Shader 编译修复次数已耗尽，未生成可运行结果。",
-            code="shader_validation_failed",
-            run_id=run_id,
-            stage=stage,
-            retryable=False,
-            stop_reason=stop_reason,
-        )
-    return _generation_error(
-        status_code=422,
-        message="自动闭环未生成通过 WebGL1 门禁的 Shader。",
-        code="no_validated_shader",
-        run_id=run_id,
-        stage=stage,
-        retryable=False,
-        stop_reason=stop_reason,
-    )
+async def _start_generation_run_or_raise(pool: Any, **kwargs: Any) -> None:
+    """创建生成 run；把数据库原始异常收敛为安全内部类型."""
+    try:
+        await start_shader_generation_run(pool, **kwargs)
+    except Exception as exc:
+        raise _GenerationRunPersistenceError(type(exc).__name__) from exc
 
 
 async def _record_failure_without_masking(
@@ -228,30 +121,28 @@ async def _record_failure_without_masking(
     *,
     run_id: UUID,
     project_id: UUID,
-    generation_mode: GenerationMode,
     stop_reason: str,
     failure_stage: str,
-    **record_kwargs: Any,
+    **kwargs: Any,
 ) -> None:
-    """失败账本不可用时保留原始业务错误，并额外打印持久化阶段."""
+    """失败账本不可用时保留原始业务错误."""
     try:
         await record_shader_generation_failure(
             pool,
             run_id=run_id,
             stop_reason=stop_reason,
-            **record_kwargs,
+            **kwargs,
         )
-    except Exception as persistence_error:
+    except Exception as exc:
         logger.error(
             "shader.generate.failure_persistence_failed run_id=%s project_id=%s "
-            "generation_mode=%s stop_reason=%s failure_stage=%s "
-            "persistence_stage=outcome_transaction error_type=%s",
+            "generation_mode=%s stop_reason=%s failure_stage=%s error_type=%s",
             run_id,
             project_id,
-            generation_mode,
+            GENERATION_MODE,
             stop_reason,
             failure_stage,
-            type(persistence_error).__name__,
+            type(exc).__name__,
         )
 
 
@@ -260,55 +151,64 @@ async def _record_success_without_masking(
     *,
     run_id: UUID,
     project_id: UUID,
-    generation_mode: GenerationMode,
-    **record_kwargs: Any,
+    **kwargs: Any,
 ) -> None:
-    """已生成 Shader 时，账本故障只告警，不覆盖可返回的成功结果."""
+    """已生成 Shader 时，账本故障只告警，不覆盖成功结果."""
     try:
-        await record_shader_generation_success(
-            pool,
-            run_id=run_id,
-            **record_kwargs,
-        )
-    except Exception as persistence_error:
+        await record_shader_generation_success(pool, run_id=run_id, **kwargs)
+    except Exception as exc:
         logger.error(
             "shader.generate.success_persistence_failed run_id=%s project_id=%s "
-            "generation_mode=%s stop_reason=persistence_failed "
-            "failure_stage=none persistence_stage=outcome_commit error_type=%s",
+            "generation_mode=%s error_type=%s",
             run_id,
             project_id,
-            generation_mode,
-            type(persistence_error).__name__,
+            GENERATION_MODE,
+            type(exc).__name__,
         )
 
 
-async def _start_generation_run_or_raise(pool: Any, **start_kwargs: Any) -> None:
-    """创建生成 run；把数据库原始异常收敛为安全内部类型."""
-    try:
-        await start_shader_generation_run(pool, **start_kwargs)
-    except Exception as persistence_error:
-        raise _GenerationRunPersistenceError(
-            type(persistence_error).__name__
-        ) from persistence_error
-
-
-def _procedural_review(value: dict[str, Any] | None) -> ShaderReview | None:
-    """把 Critic 结构化结果收敛为现有 Review 展示契约."""
+def _scene_value(value: Any) -> dict[str, Any] | None:
+    """把 Pydantic/dataclass scene 收敛为可持久化、可公开的字典."""
     if value is None:
         return None
-    suggestions = []
-    for item in value.get("recommended_changes", []):
-        if not isinstance(item, dict):
-            continue
-        target = str(item.get("target", "目标区域"))
-        direction = str(item.get("direction", "调整参数"))
-        reason = str(item.get("reason", ""))
-        suggestions.append(
-            f"{target}：{direction}" + (f"（{reason}）" if reason else "")
-        )
-    return ShaderReview(
-        evaluation=str(value.get("overall_assessment", "自动闭环评审已完成。")),
-        suggestions=suggestions,
+    if isinstance(value, dict):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if model_dump is not None:
+        return cast(dict[str, Any], model_dump(mode="json"))
+    if is_dataclass(value) and not isinstance(value, type):
+        return asdict(value)
+    raise TypeError("scene_mvp scene 必须是结构化对象。")
+
+
+def _scene_trace(value: Any) -> list[dict[str, Any]]:
+    """规范化最小流水线阶段 trace."""
+    trace: list[dict[str, Any]] = []
+    for item in value or ():
+        if isinstance(item, dict):
+            trace.append(dict(item))
+        elif (model_dump := getattr(item, "model_dump", None)) is not None:
+            trace.append(cast(dict[str, Any], model_dump(mode="json")))
+        elif is_dataclass(item) and not isinstance(item, type):
+            trace.append(asdict(item))
+        else:
+            raise TypeError("scene_mvp trace 必须由结构化阶段记录组成。")
+    return trace
+
+
+def _scene_trace_events(trace: list[dict[str, Any]]) -> tuple[dict[str, Any], ...]:
+    """把公开阶段摘要映射为过程账本事件."""
+    return tuple(
+        {
+            "stage": str(item.get("phase") or item.get("stage") or GENERATION_MODE),
+            "event_type": f"scene_mvp_{item.get('status') or 'completed'}",
+            "payload": {
+                key: value
+                for key, value in item.items()
+                if key not in {"phase", "stage", "status"}
+            },
+        }
+        for item in trace
     )
 
 
@@ -316,26 +216,45 @@ async def execute_shader_generation(
     command: ShaderGenerationCommand,
     dependencies: ShaderGenerationDependencies,
 ) -> ShaderResponse:
-    """执行一次完整生成用例并返回已通过公开契约校验的响应."""
+    """执行一次 scene_mvp 生成并返回公开契约."""
     project_id = command.project_id
     run_id = command.run_id
-    generation_mode = command.generation_mode
     quality_preset = command.quality_preset
     pool = dependencies.pool
-    glsl_model_name, vision_model_name = get_png_to_shader_v1_models()
+    progress = dependencies.progress
     run_started = False
-    result = None
+    result: Any = None
+    succeeded = False
+
+    if progress is not None:
+        try:
+            progress.begin(
+                str(run_id),
+                project_id=str(project_id),
+                generation_mode=GENERATION_MODE,
+                quality_preset=quality_preset,
+            )
+        except ValueError as exc:
+            raise _generation_error(
+                status_code=409,
+                message="相同 run_id 的运行正在执行中。",
+                code="run_conflict",
+                run_id=run_id,
+                stage="run_registry",
+                retryable=False,
+                stop_reason="run_conflict",
+            ) from exc
+
     logger.info(
         "shader.generate.started run_id=%s project_id=%s generation_mode=%s "
         "quality_preset=%s image_bytes=%s database_enabled=%s",
         run_id,
         project_id,
-        generation_mode,
+        GENERATION_MODE,
         quality_preset,
         len(command.image),
         pool is not None,
     )
-
     try:
         async with dependencies.locks.hold(str(project_id)):
             if pool is not None:
@@ -346,36 +265,35 @@ async def execute_shader_generation(
                     filename=command.filename,
                     content_type=command.content_type,
                     size_bytes=len(command.image),
-                    glsl_model_name=glsl_model_name,
-                    vision_model_name=vision_model_name,
-                    generation_mode=generation_mode,
+                    glsl_model_name=GENERATION_MODE,
+                    vision_model_name=GENERATION_MODE,
+                    generation_mode=GENERATION_MODE,
                     quality_preset=quality_preset,
                     instruction=command.instruction,
                 )
                 run_started = True
+            if dependencies.min_service is None:
+                raise RuntimeError("scene_mvp service 未就绪。")
 
-            result = await generate_procedural_shader_from_image(
+            def publish(event: dict[str, Any], render: bytes | None) -> None:
+                if progress is None:
+                    return
+                if render is not None:
+                    progress.publish_render(str(run_id), render)
+                progress.publish(str(run_id), event)
+
+            result = await generate_scene_shader_from_image(
                 command.image,
                 command.content_type,
                 project_id=str(project_id),
                 run_id=str(run_id),
                 quality_preset=quality_preset,
                 instruction=command.instruction,
-                service=dependencies.procedural_service,
+                service=dependencies.min_service,
+                on_progress=publish if progress is not None else None,
             )
-            if result is None:
-                raise RuntimeError("procedural_v1 未返回结果。")
+            succeeded = True
     except ProjectBusyError as exc:
-        duration_ms = (time.perf_counter() - command.started_at) * 1000
-        logger.warning(
-            "shader.generate.project_busy run_id=%s project_id=%s "
-            "generation_mode=%s stage=project_lock stop_reason=project_busy "
-            "retryable=true duration_ms=%.2f",
-            run_id,
-            project_id,
-            generation_mode,
-            duration_ms,
-        )
         raise _generation_error(
             status_code=409,
             message="当前项目已有任务正在执行。",
@@ -386,19 +304,10 @@ async def execute_shader_generation(
             stop_reason="project_busy",
         ) from exc
     except _GenerationRunPersistenceError as exc:
-        duration_ms = (time.perf_counter() - command.started_at) * 1000
         logger.error(
-            "shader.generate.persistence_unavailable run_id=%s project_id=%s "
-            "generation_mode=%s quality_preset=%s "
-            "stop_reason=persistence_unavailable failure_stage=persistence "
-            "persistence_stage=create_generation_run retryable=true "
-            "error_type=%s duration_ms=%.2f",
+            "shader.generate.persistence_unavailable run_id=%s error_type=%s",
             run_id,
-            project_id,
-            generation_mode,
-            quality_preset,
             exc.error_type,
-            duration_ms,
         )
         raise _generation_error(
             status_code=503,
@@ -409,265 +318,192 @@ async def execute_shader_generation(
             retryable=True,
             stop_reason="persistence_unavailable",
         ) from exc
-    except NoValidatedShaderError as exc:
-        duration_ms = (time.perf_counter() - command.started_at) * 1000
-        diagnostics = {
-            **exc.diagnostics,
-            "backend_duration_ms": round(duration_ms, 2),
-        }
-        if pool is not None and run_started:
-            await _record_failure_without_masking(
-                pool,
-                run_id=run_id,
-                project_id=project_id,
-                generation_mode=generation_mode,
-                stop_reason=exc.stop_reason,
-                failure_stage=str(diagnostics.get("failure_stage", "unknown")),
-                error=exc,
-                model_calls=exc.model_calls,
-                events=exc.events,
-                logs=exc.logs,
-                diagnostics=diagnostics,
-            )
-        logger.warning(
-            "shader.generate.no_validated_result run_id=%s project_id=%s "
-            "generation_mode=%s quality_preset=%s stop_reason=%s "
-            "failure_stage=%s failure_event=%s failure_error_type=%s "
-            "duration_ms=%.2f graph_elapsed_seconds=%s candidate_count=%s "
-            "model_call_count=%s recorded_model_calls=%s model_latency_ms=%s "
-            "compile_repair_count=%s",
-            run_id,
-            project_id,
-            generation_mode,
-            quality_preset,
-            exc.stop_reason,
-            diagnostics.get("failure_stage", "unknown"),
-            diagnostics.get("failure_event", "unknown"),
-            diagnostics.get("failure_error_type", "unknown"),
-            duration_ms,
-            diagnostics.get("elapsed_seconds", 0),
-            diagnostics.get("candidate_count", 0),
-            diagnostics.get("model_call_count", 0),
-            diagnostics.get("recorded_model_calls", 0),
-            diagnostics.get("model_latency_ms", 0),
-            diagnostics.get("compile_repair_count", 0),
-        )
-        raise _no_validated_shader_error(exc, run_id=run_id) from exc
-    except MemoryUnavailableError as exc:
-        duration_ms = (time.perf_counter() - command.started_at) * 1000
-        diagnostics = {
-            "failure_stage": "memory",
-            "failure_event": "memory_unavailable",
-            "failure_error_type": type(exc).__name__,
-            "backend_duration_ms": round(duration_ms, 2),
-        }
-        if pool is not None and run_started:
-            await _record_failure_without_masking(
-                pool,
-                run_id=run_id,
-                project_id=project_id,
-                generation_mode=generation_mode,
-                stop_reason="memory_unavailable",
-                failure_stage="memory",
-                error=exc,
-                diagnostics=diagnostics,
-            )
-        logger.exception(
-            "shader.generate.memory_unavailable run_id=%s project_id=%s "
-            "generation_mode=%s quality_preset=%s stop_reason=memory_unavailable "
-            "failure_stage=memory retryable=true duration_ms=%.2f",
-            run_id,
-            project_id,
-            generation_mode,
-            quality_preset,
-            duration_ms,
-        )
-        raise _generation_error(
-            status_code=503,
-            message="任务记忆暂时不可用。",
-            code="memory_unavailable",
-            run_id=run_id,
-            stage="memory",
-            retryable=True,
-            stop_reason="memory_unavailable",
-        ) from exc
+    except ShaderGenerationUseCaseError:
+        raise
     except Exception as exc:
         duration_ms = (time.perf_counter() - command.started_at) * 1000
         is_timeout = (
             isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.casefold()
         )
-        failure_stage = "model" if is_timeout else "pipeline"
+        stage = "model" if is_timeout else "pipeline"
         stop_reason = "model_timeout" if is_timeout else "internal_pipeline_error"
-        diagnostics = {
-            "failure_stage": failure_stage,
+        diagnostics: dict[str, Any] = {
+            "failure_stage": stage,
             "failure_event": stop_reason,
             "failure_error_type": type(exc).__name__,
             "backend_duration_ms": round(duration_ms, 2),
         }
+        if progress is not None:
+            snapshot = progress.diagnostic_snapshot(str(run_id))
+            if snapshot:
+                diagnostics["progress_snapshot"] = snapshot
         if pool is not None and run_started:
             await _record_failure_without_masking(
                 pool,
                 run_id=run_id,
                 project_id=project_id,
-                generation_mode=generation_mode,
                 stop_reason=stop_reason,
-                failure_stage=failure_stage,
+                failure_stage=stage,
                 error=exc,
                 diagnostics=diagnostics,
             )
         logger.error(
             "shader.generate.failed run_id=%s project_id=%s generation_mode=%s "
-            "quality_preset=%s stop_reason=%s failure_stage=%s "
-            "error_type=%s retryable=%s duration_ms=%.2f",
+            "quality_preset=%s stop_reason=%s failure_stage=%s error_type=%s",
             run_id,
             project_id,
-            generation_mode,
+            GENERATION_MODE,
             quality_preset,
             stop_reason,
-            failure_stage,
+            stage,
             type(exc).__name__,
-            str(is_timeout).lower(),
-            duration_ms,
         )
-        status_code = 504 if is_timeout else 500
-        message = (
-            "Shader 模型阶段响应超时。"
-            if is_timeout
-            else "Shader 自动闭环发生内部错误。"
-        )
-        code = "model_timeout" if is_timeout else "internal_pipeline_error"
         raise _generation_error(
-            status_code=status_code,
-            message=message,
-            code=code,
+            status_code=504 if is_timeout else 500,
+            message="Shader 模型阶段响应超时。"
+            if is_timeout
+            else "Shader 最小管线发生内部错误。",
+            code="model_timeout" if is_timeout else "internal_pipeline_error",
             run_id=run_id,
-            stage=failure_stage,
+            stage=stage,
             retryable=is_timeout,
             stop_reason=stop_reason,
         ) from exc
+    finally:
+        if progress is not None:
+            progress.finish(
+                str(run_id),
+                "succeeded" if succeeded else "failed",
+                str(getattr(result, "stop_reason", "") or "") or None,
+            )
 
-    if result is not None:
-        artifact_base = f"/api/shader/runs/{run_id}/artifacts"
-        metrics_available = result.score is not None
-        metrics_url = f"{artifact_base}/metrics" if metrics_available else None
-        try:
-            response = ShaderResponse(
-                project_id=project_id,
-                run_id=run_id,
-                glsl=result.glsl,
-                memory_status=result.memory_status,
-                generation_mode="procedural_v1",
-                quality_preset=cast(QualityPresetName, result.quality_preset),
-                iterations=result.iterations,
-                stop_reason=result.stop_reason,
-                best_candidate_id=result.best_candidate_id,
-                unscored_fallback=result.unscored_fallback,
-                render_width=result.render_width,
-                render_height=result.render_height,
-                final_render_url=f"{artifact_base}/final-render",
-                metrics_url=metrics_url,
-                manifest_url=f"{artifact_base}/manifest",
-                score=(
-                    ShaderScore.model_validate(result.score)
-                    if result.score is not None
-                    else None
-                ),
-                review=_procedural_review(result.review),
-            )
-        except Exception as exc:
-            duration_ms = (time.perf_counter() - command.started_at) * 1000
-            diagnostics = {
-                "failure_stage": "backend_response",
-                "failure_event": "response_contract_failed",
-                "failure_error_type": type(exc).__name__,
-                "stop_reason": result.stop_reason,
-                "model_call_count": len(result.model_calls),
-                "backend_duration_ms": round(duration_ms, 2),
-            }
-            if pool is not None and run_started:
-                await _record_failure_without_masking(
-                    pool,
-                    run_id=run_id,
-                    project_id=project_id,
-                    generation_mode="procedural_v1",
-                    stop_reason=result.stop_reason,
-                    failure_stage="backend_response",
-                    error=exc,
-                    model_calls=result.model_calls,
-                    events=result.events,
-                    logs=result.logs,
-                    diagnostics=diagnostics,
-                )
-            logger.error(
-                "shader.generate.response_contract_failed run_id=%s project_id=%s "
-                "generation_mode=procedural_v1 quality_preset=%s "
-                "stop_reason=%s failure_stage=backend_response "
-                "best_candidate_id=%s error_type=%s retryable=false duration_ms=%.2f",
-                run_id,
-                project_id,
-                result.quality_preset,
-                result.stop_reason,
-                result.best_candidate_id,
-                type(exc).__name__,
-                duration_ms,
-            )
-            raise _generation_error(
-                status_code=500,
-                message="生成已完成，但结果格式校验失败。",
-                code="response_contract_failed",
-                run_id=run_id,
-                stage="backend_response",
-                retryable=False,
-                stop_reason=result.stop_reason,
-            ) from exc
-        if pool is not None:
-            await _record_success_without_masking(
+    artifact_base = f"/api/shader/runs/{run_id}/artifacts"
+    try:
+        if str(result.project_id) != str(project_id) or str(result.run_id) != str(
+            run_id
+        ):
+            raise ValueError("scene_mvp 返回的 project_id/run_id 与请求不一致。")
+        if result.renderer_path != "prepared_uniforms_v1":
+            raise ValueError("scene_mvp 返回了未知 Renderer 路径。")
+        scene = _scene_value(result.scene)
+        trace = _scene_trace(result.trace)
+        response = ShaderResponse(
+            project_id=project_id,
+            run_id=run_id,
+            glsl=str(result.glsl),
+            generation_mode=GENERATION_MODE,
+            quality_preset=quality_preset,
+            stop_reason=str(result.stop_reason),
+            render_width=int(result.render_width),
+            render_height=int(result.render_height),
+            final_render_url=f"{artifact_base}/final-render",
+            metrics_url=f"{artifact_base}/metrics",
+            manifest_url=f"{artifact_base}/manifest",
+            min_pipeline=ShaderMinPipelineSummary(
+                mae=float(result.current_best_mae),
+                objective_loss=float(result.current_best_loss),
+                metric_breakdown=dict(result.metric_breakdown),
+                template_version=str(result.template_version),
+                render_count=int(result.render_count),
+                render_budget=int(result.render_budget),
+                llm_call_count=int(result.llm_call_count),
+                llm_budget=int(result.llm_budget),
+                refine_budget=int(result.refine_budget),
+                run_classification=result.run_classification,
+                experiment_id=result.experiment_id,
+                config_fingerprint=str(result.config_fingerprint),
+                report_schema_version=str(result.report_schema_version),
+                patch_candidate_draw_budget=int(result.patch_candidate_draw_budget),
+                patch_evidence=[dict(item) for item in result.patch_evidence],
+                renderer_path="prepared_uniforms_v1",
+                target_mae=float(result.target_mae),
+                target_loss=float(result.target_loss),
+                target_reached=bool(result.target_reached),
+                prepare_duration_ms=float(result.prepare_duration_ms),
+                uniform_render_count=int(result.uniform_render_count),
+                uniform_render_p95_ms=float(result.uniform_render_p95_ms),
+                scene=scene,
+                trace=trace,
+            ),
+        )
+    except Exception as exc:
+        if pool is not None and run_started:
+            await _record_failure_without_masking(
                 pool,
                 run_id=run_id,
                 project_id=project_id,
-                generation_mode="procedural_v1",
-                model_name=result.glsl_model_name,
-                glsl_chars=len(result.glsl),
-                model_calls=result.model_calls,
-                events=result.events,
-                logs=result.logs,
-                result_summary={
-                    "generation_mode": generation_mode,
-                    "quality_preset": result.quality_preset,
-                    "iterations": result.iterations,
-                    "stop_reason": result.stop_reason,
-                    "best_candidate_id": result.best_candidate_id,
-                    "unscored_fallback": result.unscored_fallback,
-                    "render_width": result.render_width,
-                    "render_height": result.render_height,
-                    "score": result.score,
-                    "metrics_available": metrics_available,
-                    "final_render_url": f"{artifact_base}/final-render",
-                    "metrics_url": metrics_url,
-                    "manifest_url": f"{artifact_base}/manifest",
-                },
+                stop_reason=str(
+                    getattr(result, "stop_reason", "response_contract_failed")
+                ),
+                failure_stage="backend_response",
+                error=exc,
+                diagnostics={"failure_error_type": type(exc).__name__},
             )
-        total_loss = (
-            f"{float(result.score.get('total_loss', 0.0)):.6f}"
-            if result.score is not None
-            else "unavailable"
-        )
-        logger.info(
-            "shader.generate.succeeded run_id=%s project_id=%s "
-            "generation_mode=procedural_v1 quality_preset=%s stop_reason=%s "
-            "failure_stage=none best_candidate_id=%s unscored_fallback=%s "
-            "iterations=%s metrics_available=%s total_loss=%s duration_ms=%.2f",
-            run_id,
-            project_id,
-            result.quality_preset,
-            result.stop_reason,
-            result.best_candidate_id,
-            str(result.unscored_fallback).lower(),
-            result.iterations,
-            str(metrics_available).lower(),
-            total_loss,
-            (time.perf_counter() - command.started_at) * 1000,
-        )
-        return response
+        raise _generation_error(
+            status_code=500,
+            message="生成已完成，但结果格式校验失败。",
+            code="response_contract_failed",
+            run_id=run_id,
+            stage="backend_response",
+            retryable=False,
+            stop_reason=str(getattr(result, "stop_reason", "unknown")),
+        ) from exc
 
-    raise AssertionError("受控生成路径必须返回结果或类型化失败。")
+    result_summary = {
+        "generation_mode": GENERATION_MODE,
+        "status": str(result.status),
+        "stop_reason": str(result.stop_reason),
+        "quality_preset": str(result.quality_preset),
+        "render_width": int(result.render_width),
+        "render_height": int(result.render_height),
+        "current_best_mae": float(result.current_best_mae),
+        "current_best_loss": float(result.current_best_loss),
+        "metric_breakdown": dict(result.metric_breakdown),
+        "template_version": str(result.template_version),
+        "render_count": int(result.render_count),
+        "render_budget": int(result.render_budget),
+        "llm_call_count": int(result.llm_call_count),
+        "llm_budget": int(result.llm_budget),
+        "refine_budget": int(result.refine_budget),
+        "run_classification": str(result.run_classification),
+        "experiment_id": result.experiment_id,
+        "config_fingerprint": str(result.config_fingerprint),
+        "report_schema_version": str(result.report_schema_version),
+        "patch_candidate_draw_budget": int(result.patch_candidate_draw_budget),
+        "patch_evidence": [dict(item) for item in result.patch_evidence],
+        "renderer_path": str(result.renderer_path),
+        "target_mae": float(result.target_mae),
+        "target_loss": float(result.target_loss),
+        "target_reached": bool(result.target_reached),
+        "prepare_duration_ms": float(result.prepare_duration_ms),
+        "uniform_render_count": int(result.uniform_render_count),
+        "uniform_render_p95_ms": float(result.uniform_render_p95_ms),
+        "scene": scene,
+        "trace": trace,
+        "final_render_url": f"{artifact_base}/final-render",
+        "metrics_url": f"{artifact_base}/metrics",
+        "manifest_url": f"{artifact_base}/manifest",
+    }
+    if pool is not None:
+        await _record_success_without_masking(
+            pool,
+            run_id=run_id,
+            project_id=project_id,
+            model_name=GENERATION_MODE,
+            glsl_chars=len(result.glsl),
+            events=_scene_trace_events(trace),
+            result_summary=result_summary,
+            record_default_model_call=False,
+        )
+    logger.info(
+        "shader.generate.succeeded run_id=%s project_id=%s generation_mode=%s "
+        "stop_reason=%s render_count=%s llm_call_count=%s duration_ms=%.2f",
+        run_id,
+        project_id,
+        GENERATION_MODE,
+        result.stop_reason,
+        result.render_count,
+        result.llm_call_count,
+        (time.perf_counter() - command.started_at) * 1000,
+    )
+    return response

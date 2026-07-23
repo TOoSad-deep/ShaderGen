@@ -1,24 +1,23 @@
-"""Shader 渲染结果的确定性基础评分."""
+"""scene_mvp 渲染结果的确定性评分."""
 
-from shaderforge.evaluation.models import MetricWeights, ScoreBreakdownV1
-from shaderforge.evaluation.oracle import (
-    ImageSizeMismatchError,
-    evaluate_render,
-    max_protected_regression,
-)
-from shaderforge.evaluation.selection import (
-    CandidateRecord,
-    CurrentBestDecision,
-    select_current_best,
+from shaderforge.evaluation.mae import (
+    MIN_SCENE_METRIC_VERSION,
+    MIN_SCENE_METRIC_WEIGHTS,
+    MinSceneMetricBreakdown,
+    decode_rgb,
+    dominant_metric_component,
+    evaluate_min_scene,
+    rgb_mae,
+    summarize_spatial_residual,
 )
 
 __all__ = [
-    "ImageSizeMismatchError",
-    "CandidateRecord",
-    "CurrentBestDecision",
-    "MetricWeights",
-    "ScoreBreakdownV1",
-    "evaluate_render",
-    "max_protected_regression",
-    "select_current_best",
+    "MIN_SCENE_METRIC_VERSION",
+    "MIN_SCENE_METRIC_WEIGHTS",
+    "MinSceneMetricBreakdown",
+    "decode_rgb",
+    "dominant_metric_component",
+    "evaluate_min_scene",
+    "rgb_mae",
+    "summarize_spatial_residual",
 ]

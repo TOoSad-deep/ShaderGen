@@ -6,9 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "e2e:memory": "bash ../scripts/e2e_memory.sh",
-    "e2e:node-lab": "bash ../scripts/e2e_node_lab.sh",
-    "e2e:procedural-v1": "bash ../scripts/e2e_png_to_shader_v1.sh",
+    "e2e:scene-mvp": "bash ../scripts/e2e_scene_mvp.sh",
     "preview": "vite preview"
   },
   "dependencies": {

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any, Literal, cast
 
 MemoryKind = Literal["review", "constraint", "decision", "strategy"]
@@ -16,13 +16,13 @@ _MEMORY_KINDS = {"review", "constraint", "decision", "strategy"}
 
 def utc_now() -> datetime:
     """返回带 UTC 时区的当前时间."""
-    return datetime.now(UTC)
+    return datetime.now(timezone.utc)
 
 
 def _normalize_datetime(value: datetime) -> datetime:
     if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 @dataclass(frozen=True)
