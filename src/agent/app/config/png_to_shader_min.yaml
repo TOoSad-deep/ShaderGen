@@ -17,6 +17,10 @@ quality_presets:
     llm_budget: 4
     refine_budget: 2
   high:
+    render_budget: 640
+    llm_budget: 9
+    refine_budget: 9
+  manual:
     render_budget: 1000
     llm_budget: 32
     refine_budget: 30

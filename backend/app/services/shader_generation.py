@@ -382,6 +382,16 @@ async def execute_shader_generation(
     generation_mode = command.generation_mode
     quality_preset = command.quality_preset
     pool = dependencies.pool
+    if generation_mode == "procedural_v1" and quality_preset == "manual":
+        raise _generation_error(
+            status_code=422,
+            message="manual 质量档位只支持 scene_mvp 独立实验。",
+            code="invalid_quality_preset",
+            run_id=run_id,
+            stage="request_validation",
+            retryable=False,
+            stop_reason="client_validation",
+        )
     if generation_mode == "procedural_v1":
         glsl_model_name, vision_model_name = get_png_to_shader_v1_models()
     else:

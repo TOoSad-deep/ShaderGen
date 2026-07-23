@@ -115,6 +115,45 @@ def test_generate_procedural_v1_contract(monkeypatch) -> None:
     }
 
 
+def test_scene_mvp_manual_quality_preset_reaches_use_case(monkeypatch) -> None:
+    async def fake_execute(command, _dependencies):
+        assert command.generation_mode == "scene_mvp"
+        assert command.quality_preset == "manual"
+        return {
+            "project_id": command.project_id,
+            "run_id": command.run_id,
+            "glsl": "precision mediump float; void main(){gl_FragColor=vec4(1.0);}",
+            "memory_status": "ephemeral",
+            "generation_mode": command.generation_mode,
+            "quality_preset": command.quality_preset,
+        }
+
+    monkeypatch.setattr(shader_route, "execute_shader_generation", fake_execute)
+
+    response = TestClient(app).post(
+        "/api/shader/generate",
+        files={"file": ("target.png", b"image", "image/png")},
+        data={"generation_mode": "scene_mvp", "quality_preset": "manual"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["quality_preset"] == "manual"
+
+
+def test_procedural_v1_rejects_scene_mvp_manual_quality_preset() -> None:
+    response = TestClient(app).post(
+        "/api/shader/generate",
+        files={"file": ("target.png", b"image", "image/png")},
+        data={"generation_mode": "procedural_v1", "quality_preset": "manual"},
+    )
+
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["code"] == "invalid_quality_preset"
+    assert detail["stage"] == "request_validation"
+    assert detail["retryable"] is False
+
+
 def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
     calls: dict[str, object] = {}
     project_id = uuid4()

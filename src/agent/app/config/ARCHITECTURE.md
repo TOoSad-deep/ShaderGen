@@ -5,8 +5,8 @@
 ## 当前文件
 
 - `model_config.py`：定义 `SHADER_GEN_MODEL_NAME`、布尔环境变量解析和冻结的 `NodeModelConfig`。
-- `png_to_shader_min.yaml`：`scene_mvp` 的 run 身份、实验 ID、报告版本、MAE/loss 目标与 fast/balanced/high 三档 render/LLM/Refine 硬预算；当前 `0.04/0.02` 和 `48/2/1`、`96/4/2`、`640/9/9` 显式标记为 `independent_experiment`。
-- `png_to_shader_min.py`：从包资源加载上述 YAML，严格校验字段、类型、值域、三档完整性和身份一致性，生成规范配置 SHA-256，按 LLM/Refine 预算与最多四个 feature 推导每档 Graph recursion limit，并向 Service/Model Author 提供不可变策略。声明 `frozen_benchmark` 时必须精确匹配 D058/D059 的目标与三档预算，否则 fail-fast；独立实验必须提供 `experiment_id`。
+- `png_to_shader_min.yaml`：`scene_mvp` 的 run 身份、实验 ID、报告版本、MAE/loss 目标与 fast/balanced/high/manual render/LLM/Refine 硬预算；当前 `0.04/0.02` 和 `48/2/1`、`96/4/2`、`640/9/9`、manual `1000/32/30` 显式标记为 `independent_experiment`。
+- `png_to_shader_min.py`：从包资源加载上述 YAML，严格校验字段、类型、值域、档位完整性和身份一致性，生成规范配置 SHA-256，按 LLM/Refine 预算与最多四个 feature 推导每档 Graph recursion limit，并向 Service/Model Author 提供不可变策略。声明 `frozen_benchmark` 时必须精确匹配 D058/D059 的目标与三档预算且禁止 manual，否则 fail-fast；独立实验必须提供 `experiment_id` 和四档配置。
 
 ## 边界规则
 

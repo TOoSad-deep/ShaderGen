@@ -74,7 +74,15 @@ def test_scene_mvp_runtime_policy_loads_packaged_yaml() -> None:
     assert high.target_loss == 0.02
     assert required_min_graph_steps(9, 9) == 65
     assert high.recursion_limit == 65 + MIN_GRAPH_RECURSION_SAFETY_MARGIN == 69
-    assert MIN_PIPELINE_CONFIG.max_recursion_limit == 69
+    manual = MIN_PIPELINE_CONFIG.quality_presets["manual"]
+    assert manual.render_budget == 1000
+    assert manual.llm_budget == 32
+    assert manual.refine_budget == 30
+    assert required_min_graph_steps(32, 30) == 197
+    assert manual.recursion_limit == 201
+    assert MIN_PIPELINE_CONFIG.max_llm_budget == 32
+    assert MIN_PIPELINE_CONFIG.max_refine_budget == 30
+    assert MIN_PIPELINE_CONFIG.max_recursion_limit == 201
 
 
 def test_scene_mvp_runtime_policy_accepts_custom_yaml(tmp_path: Path) -> None:
@@ -92,6 +100,7 @@ quality_presets:
   fast: {render_budget: 10, llm_budget: 1, refine_budget: 0}
   balanced: {render_budget: 20, llm_budget: 3, refine_budget: 2}
   high: {render_budget: 30, llm_budget: 9, refine_budget: 4}
+  manual: {render_budget: 40, llm_budget: 10, refine_budget: 5}
 """.strip(),
         encoding="utf-8",
     )
@@ -104,8 +113,8 @@ quality_presets:
     assert configured.report_schema_version == "test_report_v1"
     assert configured.quality_presets["fast"].render_budget == 10
     assert configured.quality_presets["high"].llm_budget == 9
-    assert configured.max_llm_budget == 9
-    assert configured.max_refine_budget == 4
+    assert configured.max_llm_budget == 10
+    assert configured.max_refine_budget == 5
     assert configured.quality_presets["high"].recursion_limit == 45
     assert configured.quality_presets["balanced"].target_mae == 0.12
     assert configured.quality_presets["balanced"].target_loss == 0.06
@@ -125,12 +134,17 @@ quality_presets:
   fast: {render_budget: 10, llm_budget: 1, refine_budget: 0}
   balanced: {render_budget: 20, llm_budget: 3, refine_budget: 2}
   high: {render_budget: 30, llm_budget: 9, refine_budget: 4}
+  manual: {render_budget: 40, llm_budget: 10, refine_budget: 5}
 """.strip(),
         encoding="utf-8",
     )
     second.write_text(
         """
 quality_presets:
+  manual:
+    refine_budget: 5
+    llm_budget: 10
+    render_budget: 40
   high:
     refine_budget: 4
     llm_budget: 9
@@ -177,6 +191,27 @@ quality_presets:
     assert configured.run_classification == "frozen_benchmark"
     assert configured.experiment_id is None
     assert configured.quality_presets["high"].render_budget == 160
+
+
+def test_scene_mvp_frozen_benchmark_rejects_manual_preset(tmp_path: Path) -> None:
+    config_path = tmp_path / "frozen-with-manual.yaml"
+    config_path.write_text(
+        """
+version: frozen_policy_with_manual_v1
+run_classification: frozen_benchmark
+report_schema_version: frozen_report_v1
+targets: {mae: 0.08, loss: 0.04}
+quality_presets:
+  fast: {render_budget: 48, llm_budget: 2, refine_budget: 1}
+  balanced: {render_budget: 96, llm_budget: 4, refine_budget: 2}
+  high: {render_budget: 160, llm_budget: 6, refine_budget: 3}
+  manual: {render_budget: 1000, llm_budget: 32, refine_budget: 30}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="frozen_benchmark quality_presets"):
+        load_min_pipeline_config(config_path)
 
 
 @pytest.mark.parametrize(
@@ -251,6 +286,7 @@ quality_presets:
   fast: {render_budget: -1, llm_budget: 1, refine_budget: 0}
   balanced: {render_budget: 20, llm_budget: 2, refine_budget: 1}
   high: {render_budget: 30, llm_budget: 3, refine_budget: 2}
+  manual: {render_budget: 40, llm_budget: 4, refine_budget: 3}
 """,
         """
 version: invalid_unknown_field
@@ -262,6 +298,7 @@ quality_presets:
   fast: {render_budget: 10, llm_budget: 1, refine_budget: 0}
   balanced: {render_budget: 20, llm_budget: 2, refine_budget: 1}
   high: {render_budget: 30, llm_budget: 3, refine_budget: 2}
+  manual: {render_budget: 40, llm_budget: 4, refine_budget: 3}
 """,
         f"""
 version: invalid_graph_bound
@@ -273,6 +310,7 @@ quality_presets:
   fast: {{render_budget: 10, llm_budget: 1, refine_budget: 0}}
   balanced: {{render_budget: 20, llm_budget: 2, refine_budget: 1}}
   high: {{render_budget: 999, llm_budget: {MAX_MIN_GRAPH_RECURSION_LIMIT}, refine_budget: {MAX_MIN_GRAPH_RECURSION_LIMIT}}}
+  manual: {{render_budget: 40, llm_budget: 4, refine_budget: 3}}
 """,
     ),
 )
@@ -299,6 +337,7 @@ quality_presets:
   fast: {render_budget: 48, llm_budget: 2, refine_budget: 1}
   balanced: {render_budget: 96, llm_budget: 4, refine_budget: 2}
   high: {render_budget: 160, llm_budget: 6, refine_budget: 3}
+  manual: {render_budget: 1000, llm_budget: 32, refine_budget: 30}
 """,
         """
 version: frozen_with_experiment_id

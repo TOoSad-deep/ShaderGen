@@ -12,6 +12,7 @@ from PIL import Image, ImageDraw
 
 from agent.app.config.png_to_shader_min import (
     MIN_PIPELINE_CONFIG,
+    max_min_refine_iterations,
     required_min_graph_steps,
 )
 from agent.app.contracts.llm import LLMResponse
@@ -77,8 +78,8 @@ class _WhiteRenderer:
 
 
 class _MaximumLoopGateway:
-    def __init__(self, initial_scene: str, patch: str) -> None:
-        self.responses = [initial_scene, *(patch for _ in range(8))]
+    def __init__(self, initial_scene: str, patch: str, *, llm_budget: int) -> None:
+        self.responses = [initial_scene, *(patch for _ in range(llm_budget - 1))]
         self.calls = 0
 
     async def ainvoke(self, _messages, _options):
@@ -95,8 +96,15 @@ class _MaximumLoopGateway:
 
 
 @pytest.mark.anyio
-async def test_high_policy_four_features_finishes_after_more_than_64_graph_steps(
+@pytest.mark.parametrize(
+    ("quality_preset", "expected_render_budget", "expected_steps"),
+    (("high", 640, 65), ("manual", 1000, 197)),
+)
+async def test_large_policy_four_features_finishes_before_graph_limit(
     tmp_path,
+    quality_preset: str,
+    expected_render_budget: int,
+    expected_steps: int,
 ) -> None:
     image = _small_orb_png()
     fallback = perceive_min_target(image).fallback_scene
@@ -120,7 +128,12 @@ async def test_high_policy_four_features_finishes_after_more_than_64_graph_steps
             },
         }
     )
-    gateway = _MaximumLoopGateway(initial.model_dump_json(), patch)
+    policy = MIN_PIPELINE_CONFIG.quality_presets[quality_preset]
+    gateway = _MaximumLoopGateway(
+        initial.model_dump_json(),
+        patch,
+        llm_budget=policy.llm_budget,
+    )
     artifacts = LocalArtifactStore(tmp_path / "artifacts")
     registry = MinRendererRegistry(_WhiteRenderer)  # type: ignore[arg-type]
     service = PngToShaderMinService(
@@ -131,8 +144,8 @@ async def test_high_policy_four_features_finishes_after_more_than_64_graph_steps
         ),
         artifacts,
         registry,
-        llm_budget=9,
-        refine_budget=9,
+        llm_budget=MIN_PIPELINE_CONFIG.max_llm_budget,
+        refine_budget=MIN_PIPELINE_CONFIG.max_refine_budget,
     )
     events: list[dict[str, object]] = []
 
@@ -140,21 +153,24 @@ async def test_high_policy_four_features_finishes_after_more_than_64_graph_steps
         image,
         "image/png",
         project_id="max-loop-project",
-        run_id="max-loop-run",
-        quality_preset="high",
+        run_id=f"max-loop-{quality_preset}",
+        quality_preset=quality_preset,
         on_progress=lambda event, _render: events.append(event),
     )
 
-    policy = MIN_PIPELINE_CONFIG.quality_presets["high"]
-    assert policy.recursion_limit == 69
     assert len(events) == required_min_graph_steps(
         llm_budget=policy.llm_budget,
         refine_budget=policy.refine_budget,
-    )
-    assert 64 < len(events) < policy.recursion_limit
+    ) == expected_steps
+    assert len(events) < policy.recursion_limit
     assert events[-1]["node"] == "finalize"
-    assert gateway.calls == 9
-    assert result.render_count < result.render_budget == 640
-    assert result.llm_call_count == result.llm_budget == 9
+    expected_calls = 1 + max_min_refine_iterations(
+        policy.llm_budget,
+        policy.refine_budget,
+    )
+    assert gateway.calls == expected_calls
+    assert result.render_count < result.render_budget == expected_render_budget
+    assert result.llm_call_count == expected_calls
+    assert result.llm_budget == policy.llm_budget
     assert result.stop_reason == "bounded_mvp_complete"
     assert result.target_reached is False

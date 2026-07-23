@@ -280,6 +280,7 @@ def _author_state(*, llm_budget: int = 2) -> dict[str, object]:
         ("fast", 48, 2, 1),
         ("balanced", 96, 4, 2),
         ("high", 640, 9, 9),
+        ("manual", 1000, 32, 30),
     ),
 )
 async def test_scene_mvp_quality_preset_selects_bounded_budgets(

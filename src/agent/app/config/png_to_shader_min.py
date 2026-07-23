@@ -15,7 +15,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from shaderforge.generation import MAX_MIN_FEATURES
 
-_EXPECTED_QUALITY_PRESETS = frozenset({"fast", "balanced", "high"})
+_FROZEN_QUALITY_PRESET_NAMES = frozenset({"fast", "balanced", "high"})
+_INDEPENDENT_QUALITY_PRESET_NAMES = frozenset(
+    {"fast", "balanced", "high", "manual"}
+)
 _DEFAULT_CONFIG_RESOURCE = "png_to_shader_min.yaml"
 _FROZEN_TARGETS = (0.08, 0.04)
 _FROZEN_QUALITY_PRESETS = {
@@ -115,12 +118,18 @@ class _RootConfig(BaseModel):
     @model_validator(mode="after")
     def validate_quality_presets(self) -> _RootConfig:
         """校验公开档位，并禁止漂移配置冒充冻结 benchmark."""
+        expected = (
+            _INDEPENDENT_QUALITY_PRESET_NAMES
+            if self.run_classification == "independent_experiment"
+            else _FROZEN_QUALITY_PRESET_NAMES
+        )
         actual = frozenset(self.quality_presets)
-        if actual != _EXPECTED_QUALITY_PRESETS:
-            missing = sorted(_EXPECTED_QUALITY_PRESETS - actual)
-            extra = sorted(actual - _EXPECTED_QUALITY_PRESETS)
+        if actual != expected:
+            missing = sorted(expected - actual)
+            extra = sorted(actual - expected)
             raise ValueError(
-                f"quality_presets 必须恰好包含 fast/balanced/high；"
+                f"{self.run_classification} quality_presets 必须恰好包含"
+                f" {sorted(expected)}；"
                 f"missing={missing} extra={extra}"
             )
         for name, budget in self.quality_presets.items():
@@ -184,17 +193,17 @@ class MinPipelineConfig:
 
     @property
     def max_llm_budget(self) -> int:
-        """返回三档配置中的最大模型调用预算."""
+        """返回配置中的最大模型调用预算."""
         return max(item.llm_budget for item in self.quality_presets.values())
 
     @property
     def max_refine_budget(self) -> int:
-        """返回三档配置中的最大 Refine 预算."""
+        """返回配置中的最大 Refine 预算."""
         return max(item.refine_budget for item in self.quality_presets.values())
 
     @property
     def max_recursion_limit(self) -> int:
-        """返回三档合法路径所需的最大 run 级递归上限."""
+        """返回全部合法路径所需的最大 run 级递归上限."""
         return max(item.recursion_limit for item in self.quality_presets.values())
 
 

@@ -68,6 +68,7 @@ const DEFAULT_REQUEST_TIMEOUT_MS: Record<QualityPreset, number> = {
   fast: 4 * 60 * 1000,
   balanced: 7 * 60 * 1000,
   high: 12 * 60 * 1000,
+  manual: 30 * 60 * 1000,
 };
 
 function generationRequestTimeoutMs(qualityPreset: QualityPreset): number {
@@ -413,7 +414,13 @@ export function App() {
               aria-label="生成模式"
               value={generationMode}
               disabled={loading}
-              onChange={(event) => setGenerationMode(event.target.value as GenerationMode)}
+              onChange={(event) => {
+                const nextMode = event.target.value as GenerationMode;
+                setGenerationMode(nextMode);
+                if (nextMode === "procedural_v1" && qualityPreset === "manual") {
+                  setQualityPreset("high");
+                }
+              }}
             >
               <option value="procedural_v1">程序化闭环 V1</option>
               <option value="scene_mvp">场景最小管线 MVP</option>
@@ -435,6 +442,9 @@ export function App() {
               <option value="fast">Fast</option>
               <option value="balanced">Balanced</option>
               <option value="high">High</option>
+              {generationMode === "scene_mvp" ? (
+                <option value="manual">Manual（1000/32/30）</option>
+              ) : null}
             </select>
           </label>
           <label className="instruction-field">
