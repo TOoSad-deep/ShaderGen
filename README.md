@@ -55,6 +55,7 @@ make benchmark-png-to-shader QUALITY_PRESET=balanced MODEL_CALL_BUDGET=80
 uv run python scripts/run_scene_mvp_run_diagnostics.py --run-dir <run-dir> --output-dir <new-output-dir>
 uv run python scripts/run_scene_mvp_scorer_calibration.py --output-dir <new-output-dir>
 uv run python scripts/run_scene_mvp_tile_guard_ab.py --output-dir <new-output-dir>
+uv run python scripts/run_scene_mvp_acceptance_live_ab.py --output-dir <new-output-dir>
 npm --prefix frontend run e2e:procedural-v1
 ```
 
@@ -65,6 +66,8 @@ npm --prefix frontend run e2e:procedural-v1
 `run_scene_mvp_scorer_calibration.py` 使用冻结的 7 个支持案例，对 fallback 与 geometry-first 反事实执行主体内部、边缘、主体外效果和关键 ROI 的方向一致性校准，并输出三列 contact sheet。它同样不调用模型、不修改生产 scorer，输出目录必须不存在。
 
 `run_scene_mvp_tile_guard_ab.py` 在相同冻结 7 例、相同 geometry-first 候选机制和相同 draw 预算上做 acceptance 单因素 A/B：Arm A 为 total_loss 严格改善即接受，Arm B 在 Arm A 实跑的同一批候选流上离线重放，附加 4×4/8×8 全 tile 最大回退不超过预先声明容差的 guard；benchmark ROI 只用于事后评价。它不调用模型、不修改生产 scorer/Prompt/预算/目标，输出目录必须不存在。
+
+`run_scene_mvp_acceptance_live_ab.py` 做 acceptance live 单因素直接 A/B：Arm G 为既有 geometry-first 字典序 acceptance，Arm T 为 strict total-loss acceptance，两臂从同一 fallback 快照出发、各自基于本臂 incumbent 实时生成/评估候选（不做 offline replay），stage 顺序、方向交错与每 stage 32 draw 预算两臂一致，判定门槛预先冻结，report 含机器可读 gate/decision（缺字段显式 fail closed）。它同样不调用模型、不修改生产代码，输出目录必须不存在；该实验是独立无模型诊断，不是 D058/D059 冻结 benchmark。output run iteration（输出目录代次）与 report `schema_version` 是两个独立版本轴，权威数字与 SHA 只以各文档标注的当前代次为准。
 
 GitHub 主 CI 使用 Python 3.12、Node 22、`uv sync --locked` 和 `npm ci --prefix frontend` 后执行完整 `make check`、全仓 Ruff 与 `mypy --strict src backend`，另以 Python 3.10/3.11 运行兼容性单测。定时集成测试和 PNG-to-Shader benchmark 才安装 Playwright Chromium；集成测试不注入模型密钥，真实模型 benchmark 仍只在仓库变量或手动输入显式开启时运行。
 
