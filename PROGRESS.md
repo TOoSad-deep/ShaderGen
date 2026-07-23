@@ -21,6 +21,7 @@
 
 ## 下一步
 
+- 审核 `docs/superpowers/specs/2026-07-23-minimal-shader-dsl-evolution-design.md` 的六项边界；草案获批前不改变当前 Scene、Graph、API、scorer 或功能状态。
 - 用相同候选与 draw 预算执行 geometry-first 字典序和 strict total-loss 的 live 单因素 A/B；离线 tile guard replay 不接入生产。
 - 为最小骨架重新定义版本中立的 benchmark manifest、质量指标和人工门禁，不恢复旧 V1 benchmark 包或复用其历史 gate 名义。
 - 在新质量门禁明确后，再运行真实模型固定样例与匿名人工盲评；通过前 F09 保持 `active`。
