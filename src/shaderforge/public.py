@@ -1,41 +1,8 @@
-"""ShaderForge 对其他应用层开放的稳定入口."""
+"""ShaderForge 对最小骨架开放的稳定入口."""
 
-from shaderforge.analysis import (
-    InvalidTargetImageError,
-    RegionOfInterest,
-    TargetMeasurements,
-    measure_target,
-    normalize_target_png,
-)
-from shaderforge.contracts.png_to_shader_v1 import (
-    DEFAULT_ACCEPTANCE_POLICY,
-    PROBLEM_DOMAINS,
-    QUALITY_PRESETS,
-    STOP_REASONS,
+from shaderforge.contracts.webgl1 import (
     WEBGL1_STATIC_NO_TEXTURE_V1,
-    AcceptancePolicy,
-    BudgetPolicy,
-    ProblemDomain,
-    QualityPreset,
     RenderContract,
-    StopReason,
-    budget_for_preset,
-)
-from shaderforge.evaluation import (
-    CandidateRecord,
-    CurrentBestDecision,
-    ImageSizeMismatchError,
-    MetricWeights,
-    ScoreBreakdownV1,
-    evaluate_render,
-    max_protected_regression,
-    select_current_best,
-)
-from shaderforge.generation import (
-    MEASUREMENT_AFFINE_SEED_VERSION,
-    MeasurementAffineSeed,
-    MeasurementSeedProvenance,
-    build_measurement_affine_seed,
 )
 from shaderforge.perception import MinPerception, perceive_min_target
 from shaderforge.rendering import (
@@ -72,25 +39,12 @@ from shaderforge.validation import (
 )
 
 __all__ = [
-    "DEFAULT_ACCEPTANCE_POLICY",
-    "PROBLEM_DOMAINS",
-    "QUALITY_PRESETS",
-    "STOP_REASONS",
     "WEBGL1_STATIC_NO_TEXTURE_V1",
-    "AcceptancePolicy",
     "ArtifactRef",
-    "BudgetPolicy",
-    "CandidateRecord",
     "CompileResult",
-    "CurrentBestDecision",
-    "ImageSizeMismatchError",
-    "InvalidTargetImageError",
     "LocalArtifactStore",
-    "MEASUREMENT_AFFINE_SEED_VERSION",
     "MinPerception",
     "MinScene",
-    "MeasurementAffineSeed",
-    "MeasurementSeedProvenance",
     "AddFeaturePatch",
     "CIRCLE_AXES_TOLERANCE",
     "Canvas",
@@ -98,12 +52,8 @@ __all__ = [
     "Feature",
     "LinearColorField",
     "MIN_SCENE_VERSION",
-    "MetricWeights",
     "PlaywrightWebGL1Renderer",
-    "ProblemDomain",
     "Primitive",
-    "QualityPreset",
-    "RegionOfInterest",
     "RenderContract",
     "RenderResult",
     "RendererMetadata",
@@ -114,21 +64,11 @@ __all__ = [
     "ReplaceFeaturePatch",
     "RadialColorField",
     "SceneObject",
-    "ScoreBreakdownV1",
-    "StopReason",
     "SolidColorField",
-    "TargetMeasurements",
     "ValidationResult",
     "ValidationViolation",
-    "budget_for_preset",
     "build_standalone_html",
     "apply_scene_patch",
-    "build_measurement_affine_seed",
-    "evaluate_render",
-    "max_protected_regression",
-    "measure_target",
     "perceive_min_target",
-    "normalize_target_png",
-    "select_current_best",
     "validate_shader",
 ]

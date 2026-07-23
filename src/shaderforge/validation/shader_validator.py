@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from shaderforge.contracts.png_to_shader_v1 import (
+from shaderforge.contracts.webgl1 import (
     WEBGL1_STATIC_NO_TEXTURE_V1,
     RenderContract,
 )

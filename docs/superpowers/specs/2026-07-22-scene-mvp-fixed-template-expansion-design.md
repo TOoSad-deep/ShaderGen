@@ -6,11 +6,11 @@
 - 状态：已实现并通过无模型/真实 Chromium 工程验收；真实模型与独立人工质量门禁尚未执行，未发布
 - 所属功能：`F09` PNG 转无贴图 Shader Agent V1
 - 适用路径：显式实验模式 `scene_mvp`
-- 不影响：默认 `procedural_v1`、现有 V1 Graph、Memory、Node Lab、历史 benchmark 与冻结失败证据
+- 不影响：默认 `procedural_v1`、现有 V1 Graph、Memory、历史 benchmark 与冻结失败证据
 
 本方案是在 `png_to_shader_min_scene_v2` 三槽固定模板基础上的有界扩展。目标不是建立任意 Shader DSL，而是在不改 Graph 拓扑、不引入 run 内多 program 生命周期的前提下，提高单主体解析式 2D 视觉的通用表达能力。
 
-本方案名称不是产品阶段或历史版本号，与已降为历史参考的 `human_doc/png-to-shader-v2-v5-plan/V3-Oracle-Search实现方案.md` 无关，也不继承旧 V3 的 Oracle、Search、State 或阶段门禁。实现若需要不兼容升级，Scene/template/metric 的正式版本标识由实现增量按各自当前版本顺序确定；本设计不提前用“V3”统称这些契约。
+本方案名称不是产品阶段或历史版本号，也不继承已删除旧 V3 方案的 Oracle、Search、State 或阶段门禁。实现若需要不兼容升级，Scene/template/metric 的正式版本标识由实现增量按各自当前版本顺序确定；本设计不提前用“V3”统称这些契约。
 
 本方案经两轮独立只读 Review 后收敛。Review 的共同结论是：动态 Compiler、最多 8 个逻辑 feature、自动残差语义分解、逐 feature 消融和自动切换 `procedural_v1` 不应与本增量同时实施。
 

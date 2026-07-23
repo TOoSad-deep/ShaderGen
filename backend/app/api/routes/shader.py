@@ -8,7 +8,6 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 
 from backend.app.schemas.shader import (
-    GenerationMode,
     MinRunProgressResponse,
     QualityPresetName,
     ShaderGenerationErrorDetail,
@@ -17,12 +16,8 @@ from backend.app.schemas.shader import (
 )
 from backend.app.services.run_progress import RunProgressRegistry
 from backend.app.services.shader import (
-    MemoryUnavailableError,
-    ProjectBusyError,
     ProjectLockRegistry,
     PublicArtifactNotFoundError,
-    clear_png_to_shader_project_memory,
-    default_png_to_shader_v1_service,
     get_default_png_to_shader_min_service,
     read_shader_run_artifact,
 )
@@ -77,22 +72,15 @@ async def read_image_upload(file: UploadFile) -> bytes:
     return image
 
 
-def _runtime(request: Request) -> tuple[Any, Any | None, ProjectLockRegistry]:
-    service = getattr(
-        request.app.state,
-        "png_to_shader_v1_service",
-        None,
-    )
+def _runtime(request: Request) -> tuple[Any | None, ProjectLockRegistry]:
     locks = getattr(request.app.state, "project_locks", None)
+    service = getattr(request.app.state, "png_to_shader_min_service", None)
     if service is None:
-        service = default_png_to_shader_v1_service
-    min_service = getattr(request.app.state, "png_to_shader_min_service", None)
-    if min_service is None:
-        min_service = get_default_png_to_shader_min_service()
+        service = get_default_png_to_shader_min_service()
     if locks is None:
         locks = ProjectLockRegistry()
         request.app.state.project_locks = locks
-    return service, min_service, locks
+    return service, locks
 
 
 def _progress_registry(request: Request) -> RunProgressRegistry:
@@ -123,7 +111,6 @@ async def generate_shader(
     file: UploadFile = File(...),
     project_id: UUID | None = Form(None),
     run_id: UUID | None = Form(None),
-    generation_mode: GenerationMode = Form("procedural_v1"),
     quality_preset: QualityPresetName = Form("balanced"),
     instruction: str = Form("", max_length=2_000),
 ) -> ShaderResponse:
@@ -143,7 +130,7 @@ async def generate_shader(
             "duration_ms=%.2f",
             run_id,
             resolved_project_id,
-            generation_mode,
+            "scene_mvp",
             exc.status_code,
             duration_ms,
         )
@@ -157,22 +144,20 @@ async def generate_shader(
             stop_reason="client_validation",
         ) from exc
 
-    service, min_service, locks = _runtime(request)
+    service, locks = _runtime(request)
     command = ShaderGenerationCommand(
         image=image,
         filename=file.filename,
         content_type=file.content_type or "application/octet-stream",
         project_id=resolved_project_id,
         run_id=run_id,
-        generation_mode=generation_mode,
         quality_preset=quality_preset,
         instruction=instruction.strip(),
         started_at=started_at,
     )
     dependencies = ShaderGenerationDependencies(
         pool=getattr(request.app.state, "db_pool", None),
-        procedural_service=service,
-        min_service=min_service,
+        min_service=service,
         locks=locks,
         progress=_progress_registry(request),
     )
@@ -224,13 +209,14 @@ async def get_shader_run_artifact(
     artifact_name: str,
 ) -> Response:
     """下载 final-render、metrics 或 manifest 三种白名单产物."""
-    service, min_service, _locks = _runtime(request)
+    service, _locks = _runtime(request)
+    if service is None:
+        raise HTTPException(status_code=503, detail="scene_mvp 服务尚未就绪。")
     try:
         artifact = read_shader_run_artifact(
             str(run_id),
             artifact_name,
             service=service,
-            min_service=min_service,
         )
     except (PublicArtifactNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail="未找到该运行产物。") from exc
@@ -243,23 +229,3 @@ async def get_shader_run_artifact(
             "X-Content-Type-Options": "nosniff",
         },
     )
-
-
-@router.delete("/projects/{project_id}/memory", status_code=204)
-async def clear_project_memory(request: Request, project_id: UUID) -> Response:
-    """清除当前项目 V1 checkpoint 和长期 Memory，不删除过程账本."""
-    service, _min_service, locks = _runtime(request)
-    try:
-        async with locks.hold(str(project_id)):
-            await clear_png_to_shader_project_memory(
-                str(project_id),
-                service=service,
-            )
-    except ProjectBusyError as exc:
-        raise HTTPException(
-            status_code=409, detail="当前项目已有任务正在执行。"
-        ) from exc
-    except MemoryUnavailableError as exc:
-        logger.exception("shader.memory.clear_failed")
-        raise HTTPException(status_code=503, detail="清除项目记忆失败。") from exc
-    return Response(status_code=204)

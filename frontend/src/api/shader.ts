@@ -1,8 +1,6 @@
 import { apiFetch, parseApiError, resolveApiUrl } from "./client";
 
-export type MemoryStatus = "durable" | "ephemeral" | "degraded";
 export type QualityPreset = "fast" | "balanced" | "high" | "manual";
-export type GenerationMode = "procedural_v1" | "scene_mvp";
 
 export interface MinPipelineTracePhase {
   phase: string;
@@ -44,44 +42,19 @@ export interface MinPipelineSummary {
   uniform_render_p95_ms?: number | null;
 }
 
-export interface ShaderScore {
-  metric_version: string;
-  total_loss: number;
-  global_rmse: number;
-  global_mae: number;
-  edge_loss: number;
-  geometry_loss: number | null;
-  representative_pixel_loss: number;
-  roi_losses: Record<string, number>;
-  protected_region_losses: Record<string, number>;
-  effective_weights: Record<string, number>;
-  diagnostics: string[];
-}
-
 export interface ShaderResponse {
   project_id: string;
   run_id: string;
   glsl: string;
-  memory_status: MemoryStatus;
-  generation_mode: GenerationMode;
-  quality_preset?: QualityPreset | null;
-  iterations: number;
+  generation_mode: "scene_mvp";
+  quality_preset: QualityPreset;
   stop_reason?: string | null;
-  best_candidate_id?: string | null;
   render_width?: number | null;
   render_height?: number | null;
   final_render_url?: string | null;
   metrics_url?: string | null;
   manifest_url?: string | null;
-  score?: ShaderScore | null;
-  min_pipeline?: MinPipelineSummary | null;
-  unscored_fallback?: boolean;
-  review?: ShaderReview | null;
-}
-
-export interface ShaderReview {
-  evaluation: string;
-  suggestions: string[];
+  min_pipeline: MinPipelineSummary;
 }
 
 export interface ShaderApiFailure {
@@ -127,10 +100,8 @@ async function readError(response: Response, fallback: string): Promise<ShaderAp
 }
 
 export interface GenerateShaderOptions {
-  projectId?: string;
   runId?: string;
   qualityPreset: QualityPreset;
-  generationMode?: GenerationMode;
   instruction: string;
   signal?: AbortSignal;
 }
@@ -141,9 +112,7 @@ export async function generateShader(
 ): Promise<ShaderResponse> {
   const formData = new FormData();
   formData.append("file", file);
-  if (options.projectId) formData.append("project_id", options.projectId);
   if (options.runId) formData.append("run_id", options.runId);
-  formData.append("generation_mode", options.generationMode ?? "procedural_v1");
   formData.append("quality_preset", options.qualityPreset);
   formData.append("instruction", options.instruction);
 
@@ -223,15 +192,4 @@ export function resolveMinRunRenderUrl(runId: string, renderSeq: number): string
   return resolveApiUrl(
     `/api/shader/runs/${encodeURIComponent(runId)}/progress/render?seq=${renderSeq}`,
   );
-}
-
-export async function clearProjectMemory(projectId: string): Promise<void> {
-  const response = await apiFetch(
-    `/api/shader/projects/${encodeURIComponent(projectId)}/memory`,
-    { method: "DELETE" },
-  );
-
-  if (!response.ok) {
-    throw await readError(response, "清除项目记忆失败。");
-  }
 }

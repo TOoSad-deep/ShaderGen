@@ -4,7 +4,6 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from langgraph.pregel import Pregel
 
 from agent.app.config import model_config
 from agent.app.config.png_to_shader_min import (
@@ -16,7 +15,6 @@ from agent.app.config.png_to_shader_min import (
     required_min_graph_steps,
 )
 from agent.app.contracts.llm import LLMCallOptions
-from agent.app.graphs.png_to_shader_v1_graph import png_to_shader_v1_graph
 from agent.app.llms import client_factory
 from backend.app.database import agent_memory
 from backend.app.main import app
@@ -26,15 +24,10 @@ def model_family_module(name: str):
     return importlib.import_module(f"agent.app.llms.families.{name}")
 
 
-def test_v1_graph_is_compiled() -> None:
-    assert isinstance(png_to_shader_v1_graph, Pregel)
-
-
 def test_request_validation_failure_logs_safe_field_diagnostics(caplog) -> None:
     response = TestClient(app).post(
         "/api/shader/generate",
         data={
-            "generation_mode": "unsupported-mode",
             "instruction": "PRIVATE_USER_TEXT",
         },
     )
@@ -42,7 +35,6 @@ def test_request_validation_failure_logs_safe_field_diagnostics(caplog) -> None:
     assert response.status_code == 422
     assert "request.validation_failed" in caplog.text
     assert "body.file" in caplog.text
-    assert "body.generation_mode" in caplog.text
     assert "PRIVATE_USER_TEXT" not in caplog.text
 
 

@@ -223,7 +223,7 @@ async def start_shader_generation_run(
     size_bytes: int,
     glsl_model_name: str,
     vision_model_name: str,
-    generation_mode: str = "procedural_v1",
+    generation_mode: str = "scene_mvp",
     quality_preset: str | None = None,
     instruction: str = "",
 ) -> None:

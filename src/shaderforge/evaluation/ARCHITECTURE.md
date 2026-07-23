@@ -1,28 +1,10 @@
-# ShaderForge Evaluation 架构
+# Evaluation 架构
 
-`evaluation/` 对参考图与候选渲染图执行确定性、可解释的基础评分。
+当前只保留 `scene_mvp` 复合评分与空间残差：
 
-## 当前能力
+- global、foreground、background、geometry、edge 和 worst-tile 指标；
+- `min_scene_composite_v3` 固定权重；
+- 4×4 worst-tile signed RGB/亮度 residual；
+- 稳定的 dominant metric 决策。
 
-- sRGB `[0, 1]` 全局 RMSE / MAE；
-- 灰度 Sobel 边缘损失；
-- 基于 TargetMeasurements 的 bbox、中心和面积几何损失；
-- 代表像素颜色损失；
-- ROI RMSE 与 protection region loss；
-- 按前景 mask 置信度衰减 geometry 权重并重新归一化总分；
-- 比较两轮 protection loss 的最大退化。
-- `scene_mvp` 使用 `min_scene_composite_v3` 记录 global/foreground/background MAE、geometry mask loss、edge loss 与固定 `4×4` 网格最坏 2 个 tile MAE，冻结权重为 `0.20/0.25/0.15/0.15/0.10/0.15`；前景证据不足时停用 background/geometry 并重新归一化，不再使用亮度分位数伪 highlight/shadow。
-- `summarize_spatial_residual()` 在不改变 scorer、权重或 metric version 的前提下，报告固定 `4×4` 网格误差最大的 2 个 tile、MAE、亮度与 RGB 有符号偏差；符号固定为 `rendered-reference`，正值表示候选过高、负值表示候选过低。`dominant_metric_component()` 按有效权重后的贡献选择主导分量，只供 Refine 诊断与审计。
-- `CandidateRecord` 强绑定 GLSL、Author/provenance、compile、render、metrics、review 与父候选引用，并把来源收紧为 `model | deterministic`；确定性来源必须由调用方同时保存 generator version；
-- `select_current_best()` 只接受硬约束通过、总损失达到最小改善且保护区最大退化不超阈值的候选；缺失既有保护证据直接拒绝。
-
-## 边界
-
-- 参考图与候选图尺寸必须一致，不在评分时静默 resize；
-- V1 在 sRGB 空间评分，Lab、CIEDE2000、SSIM 和多尺度指标属于后续增强；
-- 总分只是优化输入，调用方仍需保留完整评分向量；
-- `ScoreBreakdownV1` 内部用不可变 pair tuple 保存有序映射，但写入 metrics Artifact 或 API 前必须调用 `to_dict()`；不得直接依赖 dataclass `asdict()`，否则 JSON 会把映射编码为 pair-list；
-- Oracle 不调用 VLM、不选择问题域；`current_best` 更新由同包独立的纯 Selector 完成，Graph 只消费其决定；
-- Oracle 只评分调用方显式提供的 ROI；生产 Graph 可以把严格 `VisualAnalysis` 的语义 ROI 追加到确定性测量 ROI，但不得用同名语义区域覆盖测量事实；
-- 指标公式变化必须升级 `metric_version` 并重新校准 benchmark。
-- `scene_mvp` 的前景由参考图相对感知背景的固定色差阈值确定；背景使用主体膨胀后的保护区，geometry 比较参考/候选 mask IoU，edge 比较亮度邻域梯度。前景证据不足时退回整图，不能因空 mask 产生 NaN 或虚假零损失。
+评分函数只处理参考/候选 RGB 与背景信息，不调用模型、不选择 Graph 路由，也不持久化 Artifact。

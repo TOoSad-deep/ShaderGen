@@ -1,16 +1,5 @@
-# ShaderForge Contracts 架构
+# Contracts 架构
 
-`contracts/` 定义 PNG 转 Shader 各阶段共享的稳定、无副作用契约。
+当前只保留 `webgl1.py`：定义静态、无贴图 WebGL1 RenderContract 和 `WEBGL1_STATIC_NO_TEXTURE_V1`。
 
-## 当前文件
-
-- `png_to_shader_v1.py`：V1 WebGL1 无贴图运行时契约、问题域、停止原因、质量档位、预算和接受策略。
-
-## 规则
-
-- 类型使用不可变 dataclass、Enum 和 tuple 表达；
-- 默认值必须能在单元测试中确定性复现；
-- 阈值是初始工程默认值，后续只能依据 benchmark 证据校准；
-- contracts 不读取环境变量、不访问文件、不启动浏览器、不调用模型；
-- `import shaderforge.contracts` 是轻量契约边界，不得通过 `shaderforge` 父包的兼容导出间接加载 `shaderforge.rendering` 或 Playwright；
-- Prompt、Validator、Renderer、Graph 和 API 应引用同一个 canonical contract；当前 Validator 和 Renderer 只支持 `WEBGL1_STATIC_NO_TEXTURE_V1`，收到不等价的 `RenderContract` 必须拒绝，不能只回显其 contract id 后继续按 V1 规则执行。
+这里的 `V1` 是通用渲染合同版本，不是已删除的 PNG-to-Shader V1 产品方案。业务预算、问题域、停止原因和接受策略不再属于本包。

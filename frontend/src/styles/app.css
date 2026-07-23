@@ -58,18 +58,6 @@ body {
   gap: 10px;
 }
 
-.project-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  border: 1px solid #cbd5e1;
-  border-radius: 6px;
-  background: white;
-}
-
 .run-config {
   display: grid;
   grid-template-columns: minmax(170px, 0.8fr) minmax(150px, 0.7fr) minmax(280px, 2fr);
@@ -127,43 +115,6 @@ body {
   line-height: 1.45;
 }
 
-.project-current {
-  min-width: 0;
-  display: grid;
-  gap: 4px;
-}
-
-.project-current span {
-  overflow: hidden;
-  color: #64748b;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.project-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.project-actions select,
-.project-actions button {
-  min-height: 34px;
-  border: 1px solid #94a3b8;
-  border-radius: 4px;
-  padding: 0 10px;
-  background: white;
-  color: #0f172a;
-}
-
-.project-actions button:disabled {
-  color: #94a3b8;
-  cursor: not-allowed;
-}
-
-.memory-warning,
-.project-message,
 .request-stop-notice {
   margin: -6px 0 16px;
   padding: 10px 12px;
@@ -171,16 +122,6 @@ body {
   background: #fffbeb;
   color: #92400e;
   font-size: 14px;
-}
-
-.memory-warning.is-error {
-  background: #fef2f2;
-  color: #b91c1c;
-}
-
-.project-message {
-  background: #eff6ff;
-  color: #1d4ed8;
 }
 
 .request-stop-notice {
@@ -242,9 +183,6 @@ body {
 
 .panel,
 .code-panel,
-.review-panel,
-.run-progress,
-.score-panel,
 .scene-mvp-panel,
 .failure-panel {
   background: white;
@@ -252,10 +190,6 @@ body {
   border-radius: 6px;
   padding: 16px;
   box-shadow: 0 1px 2px rgb(15 23 42 / 5%);
-}
-
-.run-progress {
-  margin-bottom: 16px;
 }
 
 .failure-panel {
@@ -495,9 +429,7 @@ body {
   font-weight: 500;
 }
 
-.code-panel,
-.review-panel,
-.score-panel {
+.code-panel {
   margin-top: 16px;
 }
 
@@ -629,19 +561,6 @@ body {
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
-}
-
-.review-body p {
-  margin: 0 0 10px;
-  color: #111827;
-  line-height: 1.6;
-}
-
-.review-body ul {
-  margin: 0;
-  padding-left: 20px;
-  color: #334155;
-  line-height: 1.7;
 }
 
 .hint {
@@ -916,8 +835,6 @@ body {
     align-items: stretch;
   }
 
-  .project-bar,
-  .project-actions,
   .run-config {
     align-items: stretch;
     flex-direction: column;

@@ -59,21 +59,12 @@ require_text() {
 "$PWCLI" -s="$SESSION" open "$VITE_ORIGIN" >/dev/null
 "$PWCLI" -s="$SESSION" snapshot >/dev/null
 
-# 选择 scene_mvp 生成模式并上传 PNG
-MODE_REF="$(find_role_ref combobox '生成模式')"
-"$PWCLI" -s="$SESSION" select "$MODE_REF" scene_mvp >/dev/null
-require_text '实验功能：scene_mvp 最小管线，返回复合/局部误差'
+# 配置 scene_mvp 并上传 PNG
+require_text 'scene_mvp 返回质量指标、预算用量'
 QUALITY_REF="$(find_role_ref combobox '质量档位')"
 "$PWCLI" -s="$SESSION" select "$QUALITY_REF" manual >/dev/null
 "$PWCLI" -s="$SESSION" eval "el => el.value" "$QUALITY_REF" | grep -qF 'manual'
 
-# Manual 只属于 scene_mvp；切回 V1 时必须自动回落到 High。
-"$PWCLI" -s="$SESSION" select "$MODE_REF" procedural_v1 >/dev/null
-QUALITY_REF="$(find_role_ref combobox '质量档位')"
-"$PWCLI" -s="$SESSION" eval "el => el.value" "$QUALITY_REF" | grep -qF 'high'
-"$PWCLI" -s="$SESSION" select "$MODE_REF" scene_mvp >/dev/null
-QUALITY_REF="$(find_role_ref combobox '质量档位')"
-"$PWCLI" -s="$SESSION" select "$QUALITY_REF" manual >/dev/null
 INSTRUCTION_REF="$(find_role_ref textbox '补充约束')"
 "$PWCLI" -s="$SESSION" fill "$INSTRUCTION_REF" '保留纯白背景' >/dev/null
 UPLOAD_REF="$(find_upload_ref)"

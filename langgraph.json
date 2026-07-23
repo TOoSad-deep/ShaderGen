@@ -1,7 +1,6 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "png_to_shader_v1": "./src/agent/app/graphs/png_to_shader_v1_graph.py:png_to_shader_v1_graph",
     "png_to_shader_min": "./src/agent/app/graphs/png_to_shader_min_graph.py:png_to_shader_min_graph"
   },
   "env": ".env",

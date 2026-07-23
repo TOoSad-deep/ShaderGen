@@ -20,13 +20,21 @@
 | D014 | superseded | D017、D036 | 旧 runtime-context 模型配置随旧基础图和 models 层删除。 |
 | D015 | superseded | D016、D027、D036 | 默认采集、打印和写入 reasoning 的行为已取消。 |
 | D016 | superseded | D017、D027、D036 | 旧生成/评审 Node 工厂及其 config 已删除。 |
-| D018 | updated | D036、D044 | V1 Checkpointer、Store 与 GSSC 仍有效，persistence 生命周期现由冻结配置与补偿清理栈管理。 |
-| D023 | updated | D036 | V1 产品化边界仍有效，legacy 分流和独立 Review 部分已删除。 |
+| D018 | updated | D036、D044、D068 | Memory/checkpoint 实现和数据保留，但当前产品生命周期不再接入。 |
+| D023 | superseded | D036、D066 | V1 产品路径、Artifact 与项目 Memory API 已删除。 |
 | D027 | updated | D036 | 可靠性与安全账本原则仍有效，legacy 兼容部分已删除。 |
-| D028 | updated | D032、D038 | Node Lab Harness 原则仍有效，节点语义和 Provider 已收敛到生产功能命名空间。 |
-| D032 | updated | D038 | Node 是唯一语义实现仍有效，Provider 当前位于 V1 功能命名空间。 |
+| D028 | superseded | D032、D038、D065 | 旧 Node Lab 已退役，正文只保留历史审计价值。 |
+| D032 | superseded | D038、D065 | 旧 Node Lab Provider 已退役，正文只保留历史审计价值。 |
 | D034 | updated | D038 | 按职责拆分仍有效，文件已进一步迁入 V1 功能命名空间。 |
 | D035 | updated | D036、D044 | 薄 Route、Backend Service 和 Renderer 双层清理仍有效；Backend persistence 清理由 D044 加固。 |
+| D046 | updated | D065 | 统一前端 API Client 原则仍有效，旧 Node Lab 明细加载部分已退役。 |
+| D062 | accepted | — | `scene_mvp` 新增仅限独立实验的 manual 预算档。 |
+| D063 | accepted | — | 不接入多尺度 tile 最大回退 guard 的离线 replay 形式。 |
+| D064 | updated | D065 | 共享依赖解耦仍有效；旧 Node Lab 保留边界已由 D065 改为退役。 |
+| D065 | superseded | D066、D067 | 旧 Node Lab 已全量退役，其本地历史证据随后按授权删除。 |
+| D066 | updated | D067 | V1 可执行链路删除仍有效；历史本地产物保留策略由 D067 更新。 |
+| D067 | accepted | — | 按用户明确授权删除整个本地 `output/` 及陈旧缓存/打包产物。 |
+| D068 | accepted | — | Memory/checkpoint 实现与 PostgreSQL 数据休眠保留，不恢复旧 V1 接口。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -486,4 +494,39 @@
 - 日期：2026-07-23
 - 决策：不把本轮 `4×4/8×8` 全 tile RGB MAE 最大回退 guard 的 offline replay 形式接入生产 scorer 或候选选择。固定 7 例继续保留 strict total-loss Arm A 和预声明容差 `0/0.001/0.0025/0.005/0.01` 的完整负结果；下一质量增量改为在同一候选预算和 draw 预算下直接运行 geometry-first 字典序与 strict total-loss 两种 live acceptance 的单因素 A/B。
 - 原因：strict total-loss Arm A 的两个 watch ROI 没有达到冻结 `0.01` 回退阈值，offline Arm B 因而没有保护收益；较严格容差反而拦截 `color_lobes` 等明确改善，`t≤0.005` 时四例丢失全部改进，`t=0.01` 时 `shadow_disk` 和 `pink_gel` 仍全部拒绝。该证据足以否决当前 offline replay 形式的生产接入，但 Arm B 沿用 Arm A 生成的候选流；拒绝早期候选后 live candidate generation 会改变，不能据此因果性地证伪 live guard，或把两次实验的 ROI 差异直接归属为某一种 acceptance。
-- 影响：生产 `min_scene_composite_v3`、Prompt、Graph、预算、目标和 `current_best` 安全边界均不改变，F09 继续 `active/no-go`。离线脚本、11 个纯函数测试、455 次真实 Chromium draw、0 模型调用和报告 SHA-256 作为负证据保留；benchmark ROI 只做事后评价，不进入 guard。rim、弧形高光和双高光缺失仍是发布阻塞项，自动代理看片不替代独立人工偏好 gate。
+- 影响：生产 `min_scene_composite_v3`、Prompt、Graph、预算、目标和 `current_best` 安全边界均不改变，F09 继续 `active/no-go`。该 runner、测试和规格仍直接依赖已由 D066 删除的 V1 benchmark manifest、ROI/Oracle 与 scorer calibration，因此同步 `a39e676` 后在当前重构工作树继续删除；455 次真实 Chromium draw、0 模型调用的本地报告也已在 D067 授权下删除，只由本决策保留负面结论与历史 commit 可追溯性。rim、弧形高光和双高光缺失仍是发布阻塞项，自动代理看片不替代独立人工偏好 gate。
+
+## D064 - 最小骨架重构先解除 V1 共享依赖并删除旧方案源文件
+
+- 日期：2026-07-23
+- 决策：以《PNG 转无贴图 GLSL Agent—最小骨架（快速版）》作为当前实施切片。第一波清理删除无运行时消费者的 V1 实现/Prompt 草案和旧 V2–V5 方案源文件；历史取舍继续由本文件和进度归档说明，不删除冻结 benchmark、失败证据或旧 run 数据。最小骨架复用的稳定 JSON/多模态消息构造迁入 `agent.app.messages.structured_multimodal`，通用 WebGL1 运行契约迁入 `shaderforge.contracts.webgl1`；历史 `contract_id=webgl1_static_no_texture_v1` 保持不变。
+- 原因：旧方案资料已不再指导当前实现，而最小骨架仍直接导入 V1 消息模块，Renderer、Validator 和测量层也直接导入 V1 业务契约。按文件名直接删除 V1 会破坏当前链路；先建立中立依赖方向，才能让后续 Graph/Service/Node 清理成为可验证的独立增量。
+- 影响：架构测试禁止 `png_to_shader_min` 导入 V1 业务命名空间，并禁止通用 analysis/rendering/validation 反向导入 V1 契约。V1 Graph、Service、Node Lab Provider、Memory/checkpoint、Backend/Frontend `procedural_v1` 和历史 Artifact 读取仍是当前消费者，本决策不授权在未确定外围能力与历史数据策略时删除它们。D062 后 high 继续为 `640/9/9`，`1000/32/30` 仅作为独立 manual 档存在。
+
+## D065 - 当前分支的旧 Node Lab 全量退役
+
+- 日期：2026-07-23
+- 决策：按用户确认选择 V1 退役计划的方案 B，从当前分支删除旧 Node Lab 的通用 Harness、V1 Provider、Agent/Backend Service、HTTP Route/Schema、Frontend 工作台、CLI、benchmark/fixture、运行配置、打包入口、测试和当前功能项。该实现已在其他分支重新建设，本分支不保留兼容入口或占位模块。
+- 原因：旧 Node Lab 不再服务当前最小骨架实施主线，继续维护会让 V1 Provider、独立 benchmark 和调试产品面成为无效耦合，并阻碍后续 V1 可执行链路清理。
+- 影响：`H02` 不再是当前功能，原验收命令和环境变量被删除；D028、D032 及 D046 中只针对旧 Node Lab 的部分转为历史。既有 ADR、进度归档和 `docs/evidence/registry.json` 的报告摘要/hash 保留，已生成的本地历史报告不主动覆盖或删除。此决策不授权删除或迁移 Memory/checkpoint、过程账本、M5 benchmark、历史 run 或 V1 默认产品链路；这些仍需独立策略和门禁。
+
+## D066 - 产品直接收敛到 scene_mvp 并删除 V1 可执行链路
+
+- 日期：2026-07-23
+- 决策：按用户明确授权，当前分支直接以 `scene_mvp` 最小骨架作为唯一产品路径。删除 V1 Graph/routing/State/Node/Parser/Prompt/Service/业务契约，删除 Backend/Frontend 的 `procedural_v1` 分流、旧 Artifact fallback、项目 Memory API/UI，删除 V1 benchmark manifest、图片、golden、gate、runner、CI、fixture 和对应测试；同时删除只服务 V1 的 TargetMeasurements、Basic Oracle、Selector 与 measurement-affine seed。`langgraph.json` 只注册 `png_to_shader_min`，Generate 请求不再接受 `generation_mode`。此决策取代 D048、D049、D051、D062、D064、D065 中要求继续保留 V1 默认产品链路或旧 benchmark 运行入口的部分。
+- 原因：V1–V5 旧方案不再服务当前最小骨架，保留完整可执行链路会继续扩散模式分流、Memory 绑定、旧评分契约和 benchmark 维护成本。最小骨架已经具备独立 Graph、Service、API、进度、Artifact 和 UI 垂直切片，可以作为唯一重构基线。
+- 影响：Memory/checkpoint 的 Python/SQL 实现和已有 PostgreSQL 数据暂不删除，但 Backend lifespan、当前 Graph、Service、HTTP 和 Frontend 均不再消费；其迁移、只读归档和保留期需要新决策。过程账本、历史 run、失败证据、`output/benchmarks`、ADR、进度归档和 evidence registry 保留。旧 V1 benchmark 结论只能用于历史审计，不能作为当前 scene_mvp 发布门禁；后续必须建立版本中立的新 benchmark。清理同时移除 `build/`、`.mypy_cache/`、Python `__pycache__`、旧 V2 `.DS_Store` 和其他删除模块缓存。
+
+## D067 - 明确删除本地历史输出与陈旧开发产物
+
+- 日期：2026-07-23
+- 决策：按用户针对精确范围的明确授权，删除整个本地 `output/`，包括旧 Node Lab 的运行与 benchmark 证据、V1/V2/M5 benchmark、历史 PNG-to-Shader run、Playwright 截图、review package 和其他本地产物；同时删除 `.pytest_cache/`、`.ruff_cache/`、`shadergen.egg-info/` 与 `frontend/dist/`。本次不制作额外归档。此决策取代 D065、D066 以及更早决策中要求继续保留这些本地 Artifact 的部分。
+- 原因：旧 V1–V5 与旧 Node Lab 已退出当前最小骨架主线，用户确认不再需要依赖本地历史产物复盘，并接受未跟踪文件删除后无法从仓库恢复。
+- 影响：约 777 MB 本地输出被删除；Git 曾跟踪的少量截图和 review package 仍可从历史 commit 恢复，其余忽略文件只能依赖仓库外备份。`docs/evidence/registry.json` 和进度归档继续保留原结论、路径、字节数与 SHA-256，但对应 evidence 降为 `missing`，不得用于复验旧 gate 或证明当前质量。Memory/checkpoint Python/SQL 实现、PostgreSQL 数据、`.venv/` 和 `frontend/node_modules/` 不在本次范围。
+
+## D068 - Memory/checkpoint 休眠保留
+
+- 日期：2026-07-23
+- 决策：按用户最终确认，保留 `src/agent/app/memory/`、`src/agent/app/context/`、Backend Memory 数据库适配与相关 SQL，以及 PostgreSQL 中已有 checkpoint/Memory 数据。当前 `scene_mvp` Graph、Backend lifespan、HTTP API 和 Frontend 继续不接入这套能力。
+- 原因：保留实现与数据可以避免在尚未确定 scene_mvp 新 Memory 契约和 namespace 前做不可逆迁移，同时不让旧 V1 语义重新进入当前产品路径。
+- 影响：Memory 代码和数据库数据不是待清理残留；未来重新启用必须建立 scene_mvp 专用契约、namespace、保留期和迁移验收，不能直接恢复旧 V1 Service/API。现有 `make setup-memory-postgres` 与 `make test-memory-postgres` 仅用于维护休眠基础设施，不代表在线产品已启用 Memory。

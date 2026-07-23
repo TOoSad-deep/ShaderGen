@@ -410,7 +410,7 @@ async def test_agent_process_store_persists_failure_diagnostics() -> None:
 
 
 @pytest.mark.anyio
-async def test_process_store_records_v1_request_stages_and_current_best() -> None:
+async def test_process_store_records_scene_mvp_request_and_trace() -> None:
     pool = FakePool()
     run_id = uuid4()
     project_id = uuid4()
@@ -422,32 +422,31 @@ async def test_process_store_records_v1_request_stages_and_current_best() -> Non
         filename="target.png",
         content_type="image/png",
         size_bytes=128,
-        glsl_model_name="author-model",
-        vision_model_name="vision-model",
-        generation_mode="procedural_v1",
+        glsl_model_name="scene_mvp",
+        vision_model_name="scene_mvp",
+        generation_mode="scene_mvp",
         quality_preset="high",
         instruction="保留左上高光",
     )
     await record_shader_generation_success(
         pool,
         run_id=run_id,
-        model_name="author-model",
+        model_name="scene_mvp",
         glsl_chars=1024,
-        model_calls=({"model_ref": "author-model"},),
         events=(
-            {"stage": "measure_target", "event_type": "target_measured"},
+            {"stage": "perceive_target", "event_type": "scene_mvp_completed"},
             {
-                "stage": "selection",
-                "event_type": "current_best_updated",
-                "payload": {"candidate_id": "candidate-0002", "total_loss": 0.1},
+                "stage": "render_and_evaluate",
+                "event_type": "scene_mvp_completed",
+                "payload": {"current_best_loss": 0.1},
             },
-            {"stage": "finalize", "event_type": "run_finalized"},
+            {"stage": "finalize", "event_type": "scene_mvp_completed"},
         ),
         result_summary={
-            "generation_mode": "procedural_v1",
-            "stop_reason": "stagnation",
-            "best_candidate_id": "candidate-0002",
+            "generation_mode": "scene_mvp",
+            "stop_reason": "target_loss_reached",
         },
+        record_default_model_call=False,
     )
 
     serialized = "\n".join(
@@ -455,9 +454,8 @@ async def test_process_store_records_v1_request_stages_and_current_best() -> Non
         for _query, arguments in pool.connection.executed
         for argument in arguments
     )
-    assert "procedural_v1" in serialized
+    assert "scene_mvp" in serialized
     assert "保留左上高光" in serialized
-    assert "target_measured" in serialized
-    assert "current_best_updated" in serialized
-    assert "candidate-0002" in serialized
-    assert "run_finalized" in serialized
+    assert "perceive_target" in serialized
+    assert "current_best_loss" in serialized
+    assert "target_loss_reached" in serialized

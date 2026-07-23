@@ -20,7 +20,7 @@ from agent.app.contracts.png_to_shader_min import (
     apply_min_author_patch,
     summarize_min_author_patch,
 )
-from agent.app.messages.png_to_shader_v1 import (
+from agent.app.messages.structured_multimodal import (
     labeled_image_parts,
     multimodal_human_message,
     text_part,

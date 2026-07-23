@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-07-16",
+  "updated_at": "2026-07-23",
   "entries": [
     {
       "evidence_id": "png-to-shader-v1-m5-20260715T023445Z",
       "kind": "png_to_shader_release_gate",
       "suite_run_id": "m5-20260715T023445Z",
-      "durability_status": "partial",
+      "durability_status": "missing",
       "gate_status": "failed",
       "summary": {
         "automatic_checks_passed": 12,
@@ -24,42 +24,42 @@
         {
           "role": "config",
           "path": "output/benchmarks/png-to-shader-v1/m5-20260715T023445Z/config.json",
-          "availability": "local_ignored",
+          "availability": "removed",
           "size_bytes": 1975,
           "sha256": "5f1765218265c6b71f49c716747d31ee5288708d6c4568efd3677852dc2b7c8f"
         },
         {
           "role": "gate_report",
           "path": "output/benchmarks/png-to-shader-v1/m5-20260715T023445Z/report.json",
-          "availability": "local_ignored",
+          "availability": "removed",
           "size_bytes": 41645,
           "sha256": "c056078da474bcf36dd8e78fbe66437ca6630a9ed1a940c307434d6a48470e94"
         },
         {
           "role": "human_review",
           "path": "output/benchmarks/png-to-shader-v1/m5-20260715T023445Z/blind-review/human-review.json",
-          "availability": "local_ignored",
+          "availability": "removed",
           "size_bytes": 785,
           "sha256": "74e02ac9e423637938b182fa3767c53c148058ec1dfcd4adf147c0e1191cc782"
         },
         {
           "role": "public_blind_review_package",
           "path": "output/review-packages/m5-20260715T023445Z-blind-review.zip",
-          "availability": "git",
+          "availability": "removed",
           "size_bytes": 347184,
           "sha256": "1ffe6448303d19a5908f4e2250f3b5cc2aa9e3eb8ccf6e5004cc248699e6656f"
         }
       ],
       "limitations": [
-        "完整 gate report 与人工原始 JSON 尚未进入持久存储",
-        "公开盲评包不包含私有 A/B 身份映射"
+        "完整 gate report、人工原始 JSON 与公开盲评包已按用户授权从本地 output 删除",
+        "仅保留原摘要、路径、字节数和 SHA-256，无法据此复验 gate"
       ]
     },
     {
       "evidence_id": "node-lab-model-real-review-20260715-v1",
       "kind": "node_lab_real_model_roles",
       "suite_run_id": "node-lab-model-real-review-20260715-v1",
-      "durability_status": "partial",
+      "durability_status": "missing",
       "gate_status": "passed",
       "summary": {
         "completed_roles": 5,
@@ -75,13 +75,13 @@
         {
           "role": "model_role_report",
           "path": "output/benchmarks/node-lab-model/node-lab-model-real-review-20260715-v1/report.json",
-          "availability": "local_ignored",
+          "availability": "removed",
           "size_bytes": 11903,
           "sha256": "0af349b6325c703081cd859874c55f3872024c95310a128fc20699df19888420"
         }
       ],
       "limitations": [
-        "完整 real-model report 尚未进入持久存储",
+        "完整 real-model report 已按用户授权从本地 output 删除",
         "Initial Author 依赖一次受限 fixed-binding 修复，不能表述为模型原始输出直接合法"
       ]
     }

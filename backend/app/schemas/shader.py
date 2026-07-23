@@ -5,32 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-MemoryStatus = Literal["durable", "ephemeral", "degraded"]
-GenerationMode = Literal["procedural_v1", "scene_mvp"]
+GenerationMode = Literal["scene_mvp"]
 QualityPresetName = Literal["fast", "balanced", "high", "manual"]
-
-
-class ShaderReview(BaseModel):
-    """Shader 渲染评审."""
-
-    evaluation: str
-    suggestions: list[str]
-
-
-class ShaderScore(BaseModel):
-    """V1 最佳候选的确定性评分摘要."""
-
-    metric_version: str
-    total_loss: float
-    global_rmse: float
-    global_mae: float
-    edge_loss: float
-    geometry_loss: float | None
-    representative_pixel_loss: float
-    roi_losses: dict[str, float]
-    protected_region_losses: dict[str, float]
-    effective_weights: dict[str, float]
-    diagnostics: list[str]
 
 
 class ShaderMinPipelineSummary(BaseModel):
@@ -63,26 +39,20 @@ class ShaderMinPipelineSummary(BaseModel):
 
 
 class ShaderResponse(BaseModel):
-    """PNG-to-Shader 产品生成响应."""
+    """scene_mvp 产品生成响应."""
 
     project_id: UUID
     run_id: UUID
     glsl: str
-    memory_status: MemoryStatus
     generation_mode: GenerationMode
-    quality_preset: QualityPresetName | None = None
-    iterations: int = 0
+    quality_preset: QualityPresetName
     stop_reason: str | None = None
-    best_candidate_id: str | None = None
-    unscored_fallback: bool = False
     render_width: int | None = None
     render_height: int | None = None
     final_render_url: str | None = None
     metrics_url: str | None = None
     manifest_url: str | None = None
-    score: ShaderScore | None = None
-    min_pipeline: ShaderMinPipelineSummary | None = None
-    review: ShaderReview | None = None
+    min_pipeline: ShaderMinPipelineSummary
 
 
 class ShaderGenerationErrorDetail(BaseModel):

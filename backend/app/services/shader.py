@@ -1,4 +1,4 @@
-"""PNG-to-Shader 产品生成和项目 Memory 后端编排服务."""
+"""scene_mvp 产品生成的后端适配服务."""
 
 from __future__ import annotations
 
@@ -8,12 +8,9 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any, cast
 
-from agent.app.services import png_to_shader_min, png_to_shader_v1
+from agent.app.services import png_to_shader_min
 
-MemoryUnavailableError = png_to_shader_v1.MemoryUnavailableError
-NoValidatedShaderError = png_to_shader_v1.NoValidatedShaderError
-PublicArtifactNotFoundError = png_to_shader_v1.PublicArtifactNotFoundError
-default_png_to_shader_v1_service = png_to_shader_v1.default_png_to_shader_v1_service
+PublicArtifactNotFoundError = png_to_shader_min.MinPublicArtifactNotFoundError
 
 
 def get_default_png_to_shader_min_service() -> Any | None:
@@ -59,33 +56,6 @@ class ProjectLockRegistry:
                 self._active.discard(project_id)
 
 
-def get_png_to_shader_v1_models() -> tuple[str, str]:
-    """返回 PNG-to-Shader V1 的 Author 与视觉模型名."""
-    return png_to_shader_v1.png_to_shader_v1_models()
-
-
-async def generate_procedural_shader_from_image(
-    image: bytes,
-    content_type: str,
-    *,
-    project_id: str,
-    run_id: str,
-    quality_preset: str,
-    instruction: str,
-    service: png_to_shader_v1.PngToShaderV1Service,
-) -> png_to_shader_v1.PngToShaderV1Result:
-    """通过 Agent 公共接口执行 V1 自动闭环."""
-    return await png_to_shader_v1.generate_png_to_shader_v1(
-        image,
-        content_type,
-        project_id=project_id,
-        run_id=run_id,
-        quality_preset=quality_preset,
-        instruction=instruction,
-        service=service,
-    )
-
-
 async def generate_scene_shader_from_image(
     image: bytes,
     content_type: str,
@@ -114,34 +84,13 @@ def read_shader_run_artifact(
     run_id: str,
     artifact_name: str,
     *,
-    service: png_to_shader_v1.PngToShaderV1Service,
-    min_service: Any | None = None,
-) -> png_to_shader_v1.PublicArtifact | png_to_shader_min.MinPublicArtifact:
-    """从 procedural_v1 或 scene_mvp Service 读取固定白名单 Artifact."""
+    service: Any,
+) -> png_to_shader_min.MinPublicArtifact:
+    """从 scene_mvp Service 读取固定白名单 Artifact."""
     try:
-        return service.read_public_artifact(run_id, artifact_name)
-    except PublicArtifactNotFoundError as procedural_error:
-        if min_service is None:
-            raise
-        try:
-            return cast(
-                png_to_shader_min.MinPublicArtifact,
-                min_service.read_public_artifact(run_id, artifact_name),
-            )
-        except Exception as exc:
-            if isinstance(exc, (FileNotFoundError, ValueError)) or (
-                type(exc).__name__ == "PublicArtifactNotFoundError"
-            ):
-                raise PublicArtifactNotFoundError(
-                    "未找到运行 Artifact。"
-                ) from procedural_error
-            raise
-
-
-async def clear_png_to_shader_project_memory(
-    project_id: str,
-    *,
-    service: png_to_shader_v1.PngToShaderV1Service,
-) -> png_to_shader_v1.ClearPngToShaderMemoryResult:
-    """清除 V1 checkpoint 和其长期策略 Memory."""
-    return await service.clear_memory(project_id)
+        return cast(
+            png_to_shader_min.MinPublicArtifact,
+            service.read_public_artifact(run_id, artifact_name),
+        )
+    except (FileNotFoundError, ValueError) as exc:
+        raise PublicArtifactNotFoundError("未找到运行 Artifact。") from exc

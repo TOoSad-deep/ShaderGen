@@ -2,7 +2,7 @@
 
 > 状态：F09 后续算法与演进的权威目标方案，2026-07-21 起生效。
 >
-> 本文档描述**最终目标架构与理想效果**，是长期演进的方向；它取代 `human_doc/png-to-shader-v2-v5-plan/` 作为向前实施依据。旧 V2–V5 方案继续保留用于历史审计和概念参考，但不再约束实现顺序、Schema、Graph 或阶段门禁。
+> 本文档描述**最终目标架构与理想效果**，是长期演进的方向；当前实际实施以 `human_doc/PNG转无贴图Shader-Agent-最小骨架快速版.md` 为准。旧 V2–V5 方案源文件已删除，历史取舍由 `docs/DECISIONS.md` 保留。
 > 快速落地的最小骨架见《PNG转无贴图Shader-Agent-最小骨架快速版.md》。
 > 与仓库现有方案/代码的关系：本文档为**独立设计**，不以旧 V2–V5 方案或现有代码结构为前提，在 `mvp` 分支开发；第 9 节仅列出可复用资产与历史概念对照，能复用才复用。现有 V1 产品链路在独立切换门禁通过前继续保留。
 
@@ -294,7 +294,7 @@ Final: 足迹图中度最高的 top-k 耦合参数子集做小步长联合抛光
 | 感知测量基础 | `src/shaderforge/analysis/measurements.py`、`generation/measurement_affine.py` |
 | 贪心验收/回滚/保护区 | `src/shaderforge/evaluation/selection.py`、`oracle.py` |
 | benchmark 基建（manifest/预算/断点续跑/盲评包） | `benchmarks/png_to_shader_v1/`、`scripts/run_png_to_shader_v1_benchmark.py` |
-| 诊断能力 | Node Lab 节点隔离诊断 |
+| 诊断能力 | 节点级隔离诊断（由后续独立工具承载） |
 
 ### 9.2 与历史 V2–V5 契约的概念对照（仅参考）
 

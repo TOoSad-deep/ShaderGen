@@ -4,7 +4,7 @@
 >
 > 目标：用 1–2 周验证一条可端到端运行的最小技术路径——一个注册进 `langgraph.json` 的 LangGraph Agent，输入单主体粉球类 PNG，自动产出无贴图 GLSL、真实 WebGL1 渲染图和 MAE 报告。
 >
-> 定位：`png_to_shader_min` 是 F09 下与现有 `png_to_shader_v1` 并行的技术验证图，不是已经完成的产品替换。现有 V1 Backend、Frontend、Memory、Node Lab、benchmark 与失败证据在独立产品切换里程碑通过前全部保留；最小图的 CLI 验收不能作为删除 V1 的依据。
+> 定位：`png_to_shader_min` 是 F09 下与现有 `png_to_shader_v1` 并行的技术验证图，不是已经完成的产品替换。现有 V1 Backend、Frontend、Memory、benchmark 与失败证据在独立产品切换里程碑通过前保留；旧 Node Lab 已于 2026-07-23 独立退役，最小图的 CLI 验收不能作为删除其余 V1 能力的依据。
 >
 > 长期方向：以《PNG转无贴图Shader-Agent-目标架构详细版.md》为 F09 后续算法与演进的权威目标；旧 `png-to-shader-v2-v5-plan` 只作历史参考，不构成本方案的前置阶段或冻结约束。
 
@@ -39,7 +39,7 @@
 - LPIPS、SSIM、Delta E、区域硬约束和 spec-test gate；
 - Visual Critic 角色、盲评 gate、ES 门禁与跨栈验证；
 - 分辨率爬坡、沙箱、并行候选评估；
-- Backend/Frontend 产品接入、Memory 和 Node Lab Provider 迁移。
+- Backend/Frontend 产品接入和 Memory 迁移。
 
 最后一项是本版的明确非目标：最小图完成后，现有 `png_to_shader_v1` 仍是产品路径。若决定替换，必须另行完成第 12 节的产品切换里程碑。
 
@@ -400,7 +400,7 @@ Node 不决定自己的下一跳；所有条件分支由 Graph routing 控制。
 1. 新建稳定的 Agent Service 和公开结果契约；
 2. Backend 接入新 Graph，迁移错误映射、运行账本和 Artifact 白名单；
 3. Frontend 接入 scene/MAE/产物响应；
-4. 决定 Memory、Node Lab 和 benchmark 的迁移或下线策略；
+4. 决定 Memory 和 benchmark 的迁移或下线策略；
 5. 通过 Backend integration、浏览器 E2E、生命周期和主干门禁；
 6. 更新 `docs/FEATURES.md`、架构文档和决策记录；
 7. 最后才移除旧 V1 Graph、Node、Prompt、Service、测试和注册。

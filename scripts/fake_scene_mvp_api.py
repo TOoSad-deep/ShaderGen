@@ -343,14 +343,11 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self) -> None:
-        """校验前端显式 scene_mvp 参数并按关键词返回达标/未达标响应."""
+        """按关键词返回 scene_mvp 达标/未达标响应."""
         if self.path != "/api/shader/generate":
             self.send_error(404)
             return
         body = self._read_body()
-        if b'name="generation_mode"\r\n\r\nscene_mvp' not in body:
-            self._json({"detail": "前端未发送 scene_mvp 生成模式。"}, status=400)
-            return
         # 前端可显式携带 run_id；缺省回退到固定 id。
         match = re.search(rb'name="run_id"\r\n\r\n([0-9a-zA-Z-]{36})', body)
         run_id = match.group(1).decode("ascii") if match else RUN_ID
@@ -365,19 +362,13 @@ class Handler(BaseHTTPRequestHandler):
                 "project_id": PROJECT_ID,
                 "run_id": run_id,
                 "glsl": GLSL,
-                "memory_status": "ephemeral",
                 "generation_mode": "scene_mvp",
                 "quality_preset": "balanced",
-                "iterations": 1,
                 "stop_reason": "completed",
-                "best_candidate_id": "candidate-0001",
                 "render_width": WIDTH,
                 "render_height": HEIGHT,
                 "final_render_url": f"{artifact_base}/final-render",
                 "manifest_url": f"{artifact_base}/manifest",
-                "score": None,
-                "unscored_fallback": False,
-                "review": None,
                 "min_pipeline": {
                     "mae": 0.08 if target_reached else 0.2,
                     "objective_loss": 0.08 if target_reached else 0.2,

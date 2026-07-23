@@ -24,7 +24,6 @@ concurrency:
 env:
   UV_LOCKED: "1"
   LANGSMITH_TRACING: "false"
-  SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED: "false"
 
 jobs:
   integration-tests:

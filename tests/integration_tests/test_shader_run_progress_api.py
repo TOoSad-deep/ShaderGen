@@ -262,7 +262,6 @@ def test_scene_mvp_post_with_client_run_id_publishes_progress(tmp_path: Path) ->
             "/api/shader/generate",
             files={"file": ("target.png", b"target", "image/png")},
             data={
-                "generation_mode": "scene_mvp",
                 "quality_preset": "fast",
                 "run_id": CLIENT_RUN_ID,
             },
