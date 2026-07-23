@@ -13,12 +13,26 @@ import numpy as np
 from langchain_core.messages import SystemMessage
 from PIL import Image
 
+from agent.app.config.model_config import SHADER_GEN_MODEL_NAME
 from agent.app.config.png_to_shader_min import MIN_PIPELINE_CONFIG
 from agent.app.contracts.llm import LLMGateway
 from agent.app.contracts.png_to_shader_min import (
     MinAuthorPatch,
     apply_min_author_patch,
     summarize_min_author_patch,
+)
+from agent.app.contracts.png_to_shader_min_replay import (
+    REPLAY_BUNDLE_PATH,
+    REPLAY_BUNDLE_SCHEMA_VERSION,
+    REPLAY_PATCH_SCHEMA_VERSION,
+    REPLAY_RENDERS_DIR,
+    REPLAY_STEP_SCHEMA_VERSION,
+    REPLAY_STEPS_DIR,
+    build_bundle_summary,
+    bytes_sha256,
+    canonical_json_sha256,
+    decode_verified_replay_json,
+    replay_step_dir_name,
 )
 from agent.app.messages.png_to_shader_v1 import (
     labeled_image_parts,
@@ -28,6 +42,7 @@ from agent.app.messages.png_to_shader_v1 import (
 from agent.app.nodes.png_to_shader_min.model_author import (
     MIN_AUTHOR_INITIAL_PROMPT,
     MIN_AUTHOR_REFINE_PROMPT,
+    MIN_AUTHOR_REPAIR_PROMPT,
     effective_llm_budget,
     invoke_min_author,
     remaining_llm_calls,
@@ -53,7 +68,7 @@ from shaderforge.optimization import (
     propose_min_scene_candidates,
     rebase_candidate_proposal,
 )
-from shaderforge.public import MinScene, perceive_min_target
+from shaderforge.public import MIN_SCENE_VERSION, MinScene, perceive_min_target
 from shaderforge.rendering import (
     PREPARED_RENDERER_PATH,
     PlaywrightWebGL1Renderer,
@@ -269,6 +284,108 @@ def _bounded_append(
     return appended[-limit:] if limit is not None else appended
 
 
+def _write_replay_json_once(
+    run: Any,
+    relative_path: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    """原子写私有 replay JSON；重复 step 或路径越界 fail-closed."""
+    if run.path_for(relative_path).exists():
+        raise RuntimeError(f"replay step 产物已存在，拒绝覆盖：{relative_path}")
+    ref = run.write_json(relative_path, payload)
+    return {
+        "path": ref.relative_path,
+        "sha256": ref.sha256,
+        "size_bytes": ref.size_bytes,
+    }
+
+
+def _verify_replay_render_ref(run: Any, ref: Any) -> None:
+    """fail-closed 复验内容寻址渲染 PNG 引用：路径推导、hash、size、类型."""
+    if not isinstance(ref, dict):
+        raise RuntimeError("replay 渲染引用必须是 object。")
+    digest = ref.get("sha256")
+    expected_path = (
+        f"{REPLAY_RENDERS_DIR}/{digest}.png" if isinstance(digest, str) else None
+    )
+    if expected_path is None or ref.get("path") != expected_path:
+        raise RuntimeError("replay 渲染引用路径与内容寻址约定不符。")
+    if ref.get("content_type") != "image/png":
+        raise RuntimeError("replay 渲染引用 content_type 必须是 image/png。")
+    data = run.read_bytes(expected_path)
+    if ref.get("size_bytes") != len(data) or bytes_sha256(data) != digest:
+        raise RuntimeError("replay 渲染 PNG 与引用 hash/size 不符。")
+
+
+def _write_replay_render(run: Any, png: bytes) -> dict[str, Any]:
+    """内容寻址写私有渲染 PNG；已存在文件必须复验 hash 才复用."""
+    digest = bytes_sha256(png)
+    ref = {
+        "path": f"{REPLAY_RENDERS_DIR}/{digest}.png",
+        "sha256": digest,
+        "size_bytes": len(png),
+        "content_type": "image/png",
+    }
+    if run.path_for(str(ref["path"])).exists():
+        _verify_replay_render_ref(run, ref)
+    else:
+        run.write_bytes(str(ref["path"]), png, content_type="image/png")
+    return ref
+
+
+def _replay_candidate_record(
+    run: Any,
+    candidate: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """把候选快照收敛为私有 step 记录，渲染 PNG 内容寻址落盘."""
+    if not isinstance(candidate, dict):
+        return None
+    render = candidate.get("render")
+    return {
+        "scene": candidate["scene"],
+        "scene_sha256": canonical_json_sha256(candidate["scene"]),
+        "loss": _best_loss(candidate),
+        "metrics": candidate.get("metrics", {}),
+        "render": (
+            _write_replay_render(run, render) if isinstance(render, bytes) else None
+        ),
+    }
+
+
+def _replay_step_ref(
+    run: Any,
+    refine_count: int,
+    typed_patch: MinAuthorPatch | None,
+    patch_summary: dict[str, Any] | None,
+    author: dict[str, Any],
+) -> dict[str, Any]:
+    """立即原子写私有 patch draft，并返回经 Untracked State 传递的内部引用.
+
+    完整 typed patch 只落盘到 ``private/replay/steps/``，State 与 trace
+    只携带路径/hash 级引用；解析失败的 step 没有 patch draft。
+    """
+    step_dir = f"{REPLAY_STEPS_DIR}/{replay_step_dir_name(refine_count)}"
+    patch_ref = None
+    if typed_patch is not None and patch_summary is not None:
+        patch_ref = _write_replay_json_once(
+            run,
+            f"{step_dir}/patch.json",
+            {
+                "schema_version": REPLAY_PATCH_SCHEMA_VERSION,
+                "refine_count": refine_count,
+                **patch_summary,
+                "typed_patch": typed_patch.model_dump(mode="json"),
+                "author": author,
+            },
+        )
+    return {
+        "refine_count": refine_count,
+        "step_dir": step_dir,
+        "patch": patch_ref,
+        "author": author,
+    }
+
+
 def _candidate_from_outcome(
     scene: MinScene,
     outcome: dict[str, Any],
@@ -396,6 +513,8 @@ def make_min_nodes(
             "pending_patch_summary": None,
             "recent_rejected_patch_summaries": (),
             "patch_evidence": (),
+            "pending_replay_step": None,
+            "replay_step_refs": (),
             "trace": _trace(
                 state, "initialize_run", f"输入已登记：{reference.sha256[:12]}"
             ),
@@ -522,6 +641,31 @@ def make_min_nodes(
         matured: dict[str, Any] | None = None
         maturity_draw_count = 0
         rejected_reason: str | None = None
+        run_store = artifacts.start_run(str(state["project_id"]), str(state["run_id"]))
+        replay_step = state.get("pending_replay_step")
+        typed_patch_content: dict[str, Any] | None = None
+        step_dir: str | None = None
+        if isinstance(replay_step, dict):
+            # step 目录只从 refine_count 派生，不信任 State 携带的路径。
+            step_dir = (
+                f"{REPLAY_STEPS_DIR}/"
+                f"{replay_step_dir_name(replay_step['refine_count'])}"
+            )
+            if replay_step.get("step_dir") != step_dir:
+                raise RuntimeError("私有 replay step 目录引用与 refine_count 不符。")
+            if isinstance(replay_step.get("patch"), dict):
+                draft = decode_verified_replay_json(
+                    run_store.read_bytes(f"{step_dir}/patch.json"),
+                    replay_step["patch"],
+                    expected_path=f"{step_dir}/patch.json",
+                    expected_schema_version=REPLAY_PATCH_SCHEMA_VERSION,
+                    expected_refine_count=replay_step["refine_count"],
+                )
+                draft_patch = draft.get("typed_patch")
+                typed_patch_content = (
+                    draft_patch if isinstance(draft_patch, dict) else None
+                )
+        proposal_records: list[dict[str, Any]] = []
 
         if status != "pending":
             rejected_reason = str(
@@ -592,10 +736,35 @@ def make_min_nodes(
                     render_count = int(outcome["render_count"])
                     maturity_draw_count += 1
                     if not outcome["success"]:
+                        proposal_records.append(
+                            {
+                                "parameter_path": rebased.parameter.path,
+                                "direction": rebased.direction,
+                                "renderer_failed": True,
+                                "draw_error": str(outcome["error"]),
+                            }
+                        )
                         rejected_reason = "renderer_failed"
                         matured = None
                         break
                     candidate = _candidate_from_outcome(rebased.scene, outcome)
+                    proposal_records.append(
+                        {
+                            "parameter_path": rebased.parameter.path,
+                            "direction": rebased.direction,
+                            "before": rebased.before,
+                            "after": rebased.after,
+                            "loss": float(outcome["loss"]),
+                            "scene_sha256": canonical_json_sha256(
+                                rebased.scene.model_dump(mode="json")
+                            ),
+                            # 原始 RGB 字节域，与 PNG 文件 hash 严格区分。
+                            "render_rgb_sha256": bytes_sha256(outcome["rgb"]),
+                            "render_rgb_encoding": "rgb8_bytes",
+                            "render_width": rebased.scene.canvas.width,
+                            "render_height": rebased.scene.canvas.height,
+                        }
+                    )
                     if accepts_strict_total_loss(
                         _best_loss(candidate), _best_loss(matured)
                     ):
@@ -646,6 +815,70 @@ def make_min_nodes(
             tuple(state.get("patch_evidence", ())),
             evidence,
         )
+        replay_step_refs = tuple(state.get("replay_step_refs", ()))
+        if isinstance(replay_step, dict):
+            anchor_render = anchor.get("render")
+            record = {
+                "schema_version": REPLAY_STEP_SCHEMA_VERSION,
+                "refine_count": replay_step["refine_count"],
+                "status": status,
+                "patch_operation": pending.get("patch_operation"),
+                "feature_id": pending.get("feature_id"),
+                "feature_type": pending.get("feature_type"),
+                "patch_fingerprint": pending.get("patch_fingerprint"),
+                "patch_ref": replay_step.get("patch"),
+                "typed_patch": typed_patch_content,
+                "author": replay_step.get("author"),
+                "anchor": {
+                    "scene": anchor["scene"],
+                    "scene_sha256": canonical_json_sha256(anchor["scene"]),
+                    "loss": _best_loss(anchor),
+                    "metrics": anchor.get("metrics", {}),
+                    "render_sha256": (
+                        bytes_sha256(anchor_render)
+                        if isinstance(anchor_render, bytes)
+                        else None
+                    ),
+                },
+                "candidate_scene": (state["scene"] if status == "pending" else None),
+                "candidate_scene_sha256": (
+                    canonical_json_sha256(state["scene"])
+                    if status == "pending"
+                    else None
+                ),
+                "raw": _replay_candidate_record(run_store, raw),
+                "matured": _replay_candidate_record(run_store, matured),
+                "maturity_proposals": proposal_records,
+                "draws": {
+                    "render_count_before": int(state.get("render_count", 0)),
+                    "render_count_after": render_count,
+                    "maturity_draw_count": maturity_draw_count,
+                    "total_candidate_draw_count": render_count
+                    - int(state.get("render_count", 0)),
+                },
+                "acceptance": {
+                    "accepted": accepted,
+                    "rejected_reason": evidence["rejected_reason"],
+                    "duplicate_of_recent": status == "duplicate",
+                    "best_loss_before": _best_loss(anchor),
+                    "best_loss_after": _best_loss(best),
+                },
+                "duration_ms": evidence["duration_ms"],
+            }
+            record_ref = _write_replay_json_once(
+                run_store,
+                f"{step_dir}/record.json",
+                record,
+            )
+            replay_step_refs = (
+                *replay_step_refs,
+                {
+                    "refine_count": replay_step["refine_count"],
+                    "step_dir": step_dir,
+                    "patch": replay_step.get("patch"),
+                    "record": record_ref,
+                },
+            )
         return {
             "phase": "render",
             "render_count": render_count,
@@ -662,6 +895,8 @@ def make_min_nodes(
             "feature_queue": (),
             "refine_branch_resolved": True,
             "pending_patch_summary": None,
+            "pending_replay_step": None,
+            "replay_step_refs": replay_step_refs,
             "recent_rejected_patch_summaries": rejected,
             "patch_evidence": patch_evidence,
             "error": None,
@@ -1027,6 +1262,28 @@ def make_min_nodes(
             max_output_tokens=500,
         )
         call_count = int(state.get("llm_call_count", 0)) + result.call_count
+        run_store = artifacts.start_run(str(state["project_id"]), str(state["run_id"]))
+        output_prompt = (
+            MIN_AUTHOR_REPAIR_PROMPT if result.repaired else MIN_AUTHOR_REFINE_PROMPT
+        )
+        author_record = {
+            "model_ref": result.model_ref,
+            "requested_model_ref": SHADER_GEN_MODEL_NAME,
+            "source_prompt": {
+                "name": MIN_AUTHOR_REFINE_PROMPT.name,
+                "version": MIN_AUTHOR_REFINE_PROMPT.version,
+            },
+            "output_prompt": {
+                "name": output_prompt.name,
+                "version": output_prompt.version,
+            },
+            "call_count": result.call_count,
+            "repaired": result.repaired,
+            "latency_ms": result.latency_ms,
+            "total_tokens": result.total_tokens,
+            "error_code": result.error_code,
+        }
+        replay_step: dict[str, Any] | None = None
         candidate: MinScene | None = None
         error_code = result.error_code
         patch_summary: dict[str, Any] | None = None
@@ -1039,6 +1296,9 @@ def make_min_nodes(
                 if isinstance(item, dict) and item.get("patch_fingerprint")
             }
             if patch_summary["patch_fingerprint"] in rejected_fingerprints:
+                replay_step = _replay_step_ref(
+                    run_store, refine_count, typed_patch, patch_summary, author_record
+                )
                 return {
                     "phase": "refine",
                     "scene": best_scene.model_dump(mode="json"),
@@ -1051,6 +1311,7 @@ def make_min_nodes(
                         "status": "duplicate",
                         "rejected_reason": "duplicate_recent_patch",
                     },
+                    "pending_replay_step": replay_step,
                     "trace": _trace(
                         state,
                         "author_refine",
@@ -1070,12 +1331,22 @@ def make_min_nodes(
                 )
             except (TypeError, ValueError) as exc:
                 error_code = f"patch_apply_failed:{type(exc).__name__}"
+                # draft 在 apply 之后写盘，author 携带最终阶段错误码，
+                # 保证 patch.json 与 record.json 的 author 一致。
+                author_record = {**author_record, "error_code": error_code}
+            replay_step = _replay_step_ref(
+                run_store, refine_count, typed_patch, patch_summary, author_record
+            )
         if candidate is None:
             rejected_reason = (
                 "patch_apply_failed"
                 if error_code and str(error_code).startswith("patch_apply_failed:")
                 else "invalid_patch"
             )
+            if replay_step is None:
+                replay_step = _replay_step_ref(
+                    run_store, refine_count, None, None, author_record
+                )
             return {
                 "phase": "refine",
                 "scene": best_scene.model_dump(mode="json"),
@@ -1088,6 +1359,7 @@ def make_min_nodes(
                     "status": "invalid",
                     "rejected_reason": rejected_reason,
                 },
+                "pending_replay_step": replay_step,
                 "trace": _trace(
                     state,
                     "author_refine",
@@ -1111,6 +1383,7 @@ def make_min_nodes(
                 **(patch_summary or {}),
                 "status": "pending",
             },
+            "pending_replay_step": replay_step,
             "trace": _trace(
                 state,
                 "author_refine",
@@ -1180,6 +1453,126 @@ def make_min_nodes(
             "target_reached": target_reached,
         }
         run.write_json("final/metrics.json", metrics)
+        step_records: list[dict[str, Any]] = []
+        for step_ref in state.get("replay_step_refs", ()):
+            if not isinstance(step_ref, dict):
+                raise RuntimeError("私有 replay step 引用损坏。")
+            # step 目录只从 refine_count 派生，不信任 State 携带的路径。
+            step_dir = (
+                f"{REPLAY_STEPS_DIR}/{replay_step_dir_name(step_ref['refine_count'])}"
+            )
+            if step_ref.get("step_dir") != step_dir:
+                raise RuntimeError("私有 replay step 目录引用与 refine_count 不符。")
+            record = decode_verified_replay_json(
+                run.read_bytes(f"{step_dir}/record.json"),
+                step_ref.get("record"),
+                expected_path=f"{step_dir}/record.json",
+                expected_schema_version=REPLAY_STEP_SCHEMA_VERSION,
+                expected_refine_count=step_ref["refine_count"],
+            )
+            for candidate_key in ("raw", "matured"):
+                candidate = record.get(candidate_key)
+                if isinstance(candidate, dict) and candidate.get("render") is not None:
+                    _verify_replay_render_ref(run, candidate["render"])
+            step_records.append(record)
+        try:
+            reference_sha256: str | None = bytes_sha256(
+                run.read_bytes("input/reference.png")
+            )
+        except FileNotFoundError:
+            reference_sha256 = None
+        requested_model_refs = sorted(
+            {
+                str(step["author"]["requested_model_ref"])
+                for step in step_records
+                if isinstance(step.get("author"), dict)
+                and step["author"].get("requested_model_ref")
+            }
+        )
+        actual_model_refs = sorted(
+            {
+                str(step["author"]["model_ref"])
+                for step in step_records
+                if isinstance(step.get("author"), dict)
+                and step["author"].get("model_ref")
+            }
+        )
+        metric_background = state.get("metric_background", scene.canvas.background)
+        bundle = {
+            "schema_version": REPLAY_BUNDLE_SCHEMA_VERSION,
+            "run": {
+                "project_id": project_id,
+                "run_id": run_id,
+                **run_identity,
+            },
+            "config": {
+                "quality_preset": str(state.get("quality_preset", "balanced")),
+                "target_mae": target_mae,
+                "target_loss": target_loss,
+                "render_budget": int(state.get("render_budget", 0)),
+                "llm_budget": int(state.get("llm_budget", 0)),
+                "refine_budget": int(state.get("refine_budget", 0)),
+                "patch_candidate_draw_budget": MAX_PATCH_CANDIDATE_DRAWS,
+            },
+            "reference": {
+                "artifact": "input/reference.png",
+                "sha256": reference_sha256,
+            },
+            "identity": {
+                "model_refs": {
+                    "requested": requested_model_refs,
+                    "actual": actual_model_refs,
+                    "scope": "refine_steps_only",
+                    "identity_source": (
+                        "aggregated_from_replay_step_author_records"
+                        if step_records
+                        else "unavailable_no_refine_step"
+                    ),
+                },
+                "prompts": {
+                    "initial": {
+                        "name": MIN_AUTHOR_INITIAL_PROMPT.name,
+                        "version": MIN_AUTHOR_INITIAL_PROMPT.version,
+                    },
+                    "refine": {
+                        "name": MIN_AUTHOR_REFINE_PROMPT.name,
+                        "version": MIN_AUTHOR_REFINE_PROMPT.version,
+                    },
+                    "repair": {
+                        "name": MIN_AUTHOR_REPAIR_PROMPT.name,
+                        "version": MIN_AUTHOR_REPAIR_PROMPT.version,
+                    },
+                },
+                "scene_version": MIN_SCENE_VERSION,
+                "template_version": materialized.template_version,
+                "metric_version": metrics["metric_version"],
+                "optimization": {
+                    "module": "shaderforge.optimization.min_optimize",
+                    "version": "unavailable",
+                    "identity_source": "module_defines_no_version_constant",
+                },
+                "selection": {
+                    "predicate": "accepts_strict_total_loss",
+                    "identity_source": (
+                        "shaderforge.optimization.min_optimize."
+                        "accepts_strict_total_loss"
+                    ),
+                },
+                "source_revision": {
+                    "status": "unavailable",
+                    "identity_source": "no_reliable_injection_point",
+                },
+            },
+            "metric_background": [float(value) for value in metric_background],
+            "steps": step_records,
+            "step_count": len(step_records),
+        }
+        bundle_ref = _write_replay_json_once(run, REPLAY_BUNDLE_PATH, bundle)
+        replay_summary = build_bundle_summary(
+            bundle_sha256=bundle_ref["sha256"],
+            size_bytes=bundle_ref["size_bytes"],
+            step_count=len(step_records),
+        )
         trace = _trace(
             state,
             "finalize",
@@ -1203,6 +1596,7 @@ def make_min_nodes(
             "scene": best["scene"],
             "metrics": metrics,
             "patch_evidence": patch_evidence,
+            "private_replay_bundle": replay_summary,
             "trace": trace,
         }
         manifest_ref = run.write_json("final/manifest.json", manifest)
