@@ -111,6 +111,36 @@
         "实验搜索契约（每 stage 32 draw 反复 re-propose 加方向交错）不同于生产 base 32/每真实 feature 12 的单批 rebase 搜索，结论只支持生产既有 strict total-loss 方向（D065）",
         "完整 report 仍位于本地忽略目录，未进入持久存储"
       ]
+    },
+    {
+      "evidence_id": "scene-mvp-maturity-budget-replay-20260723-v2",
+      "kind": "scene_mvp_offline_diagnostic",
+      "suite_run_id": "scene-mvp-maturity-budget-replay-20260723-v2",
+      "durability_status": "partial",
+      "gate_status": "diagnostic_supported",
+      "summary": {
+        "fixture_count": 2,
+        "physical_renderer_draw_count": 87,
+        "model_call_count": 0,
+        "gate_outcome": "budget32_supported",
+        "rescue_count": 1,
+        "clean_rescue_count": 1,
+        "extra_draws_per_rescue": 20
+      },
+      "artifacts": [
+        {
+          "role": "diagnostic_report",
+          "path": "output/diagnostics/scene-mvp/maturity-budget-replay/20260723-v2/report.json",
+          "availability": "local_ignored",
+          "size_bytes": 80274,
+          "sha256": "ed8caf780554ef527935c82e78bbf4926e1b09d0beb0e9df47f3db396021f15d"
+        }
+      ],
+      "limitations": [
+        "仅覆盖 run 79f 的两个冻结合成 add-feature fixture，不是历史真实模型 Patch 重放、固定 benchmark 或发布 gate",
+        "run 79f reference 不属于固定 benchmark，external ROI 来自 reference 自动测量，不是固定 key_rois",
+        "完整 report 位于本地忽略目录；20260723-v1 的 extra-draw 聚合口径错误且已被 v2 supersede"
+      ]
     }
   ]
 }
