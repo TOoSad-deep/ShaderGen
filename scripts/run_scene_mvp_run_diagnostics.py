@@ -8,7 +8,7 @@ import json
 import math
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal
@@ -726,7 +726,7 @@ async def run_diagnostics(run_dir: Path, output_dir: Path) -> dict[str, Any]:
 
     report = {
         "schema_version": SCHEMA_VERSION,
-        "generated_at": datetime.now(UTC).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
         "experiment_type": "offline_no_model",
         "run_id": manifest["run_id"],
         "project_id": manifest["project_id"],

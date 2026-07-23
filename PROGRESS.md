@@ -37,16 +37,16 @@
 ## 当前验证基线
 
 - 同步 `origin/mvp@a39e676` 并收口冲突后，`make check` 通过：185 个单元测试、docs-check、LangGraph validate（1 个 Graph）和前端生产构建均成功。
-- 集成测试基线为 10 passed、1 skipped；`mypy --strict src backend` 89 个源文件、全仓 Ruff 和 scene_mvp 浏览器 E2E 均通过。
+- Python 3.10 兼容单测 185 passed；`mypy --strict src backend` 89 个源文件和全仓 Ruff 通过。集成测试基线为 10 passed、1 skipped，scene_mvp 浏览器 E2E 通过。
 - 上游 tile guard 增量的原始基线为 11 个纯函数测试、455 次真实 Chromium draw、0 模型调用；代码、规格和本地报告因依赖旧 V1 benchmark 边界而在重构工作树删除，结论仅由 D063 与 Git 历史追溯。
 
 ## 最近重要变更
 
+- 2026-07-23：修复 PR #1 CI：用 `timezone.utc` 保持 Python 3.10 兼容，恢复当前 YAML 配置所需的 `types-pyyaml` 开发依赖，并统一 asyncio timeout 兼容断言。
 - 2026-07-23：保留 Memory/checkpoint Python/SQL 实现与 PostgreSQL 数据，并将分支快进同步至 `origin/mvp@a39e676`；其仍绑定 V1 benchmark 的 tile guard runner/测试/规格继续删除，历史结论见 D063，Memory 策略见 D068。
 - 2026-07-23：按用户明确授权删除整个本地 `output/`，包括旧 Node Lab、V1/V2/M5 benchmark、历史 run、截图和 review package；同步清理工具缓存与陈旧打包元数据，见 D067。
 - 2026-07-23：全量删除 V1 可执行链路、前后端分流、旧 benchmark/CI/测试及 V2/build/Python/Mypy 缓存，见 D066。
 - 2026-07-23：删除旧 V2–V5 方案源文件并抽离中立消息/WebGL1 契约，见 D064。
-- 2026-07-23：全量退役本分支旧 Node Lab，见 D065。
 
 ## 历史索引
 

@@ -237,7 +237,7 @@ async def test_renderer_close_keeps_resources_for_retry_after_timeout() -> None:
     renderer._browser = browser  # type: ignore[assignment]
     renderer._playwright = playwright  # type: ignore[assignment]
 
-    with pytest.raises(TimeoutError):
+    with pytest.raises(asyncio.TimeoutError):
         await asyncio.wait_for(renderer.close(), timeout=0.01)
 
     assert renderer._page is page

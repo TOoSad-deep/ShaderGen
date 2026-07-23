@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from hashlib import sha256
 
 import pytest
@@ -25,7 +25,7 @@ def memory_item(
     iteration: int | None = None,
     updated_offset: int = 0,
 ) -> MemoryItem:
-    created = datetime(2026, 7, 13, tzinfo=UTC)
+    created = datetime(2026, 7, 13, tzinfo=timezone.utc)
     return MemoryItem(
         schema_version=MEMORY_SCHEMA_VERSION,
         memory_id=memory_id,

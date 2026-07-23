@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Any
 
 MAX_EVENTS_PER_RUN = 2000
@@ -57,7 +57,7 @@ class RunProgressRegistry:
             project_id=project_id,
             generation_mode=generation_mode,
             quality_preset=quality_preset,
-            started_at=datetime.now(UTC).isoformat(),
+            started_at=datetime.now(timezone.utc).isoformat(),
             last_touch=time.monotonic(),
         )
 
