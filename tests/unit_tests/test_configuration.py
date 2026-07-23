@@ -1,9 +1,20 @@
 import importlib
+import re
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from langgraph.pregel import Pregel
 
 from agent.app.config import model_config
+from agent.app.config.png_to_shader_min import (
+    MAX_MIN_GRAPH_RECURSION_LIMIT,
+    MIN_GRAPH_RECURSION_SAFETY_MARGIN,
+    MIN_PIPELINE_CONFIG,
+    derive_min_graph_recursion_limit,
+    load_min_pipeline_config,
+    required_min_graph_steps,
+)
 from agent.app.contracts.llm import LLMCallOptions
 from agent.app.graphs.png_to_shader_v1_graph import png_to_shader_v1_graph
 from agent.app.llms import client_factory
@@ -45,6 +56,272 @@ def test_model_name_env_uses_stable_default_and_allows_override(monkeypatch) -> 
 
     monkeypatch.setenv("SHADER_GEN_MODEL_NAME", "dashscope:qwen3.7-plus")
     assert model_config.model_name_env() == "dashscope:qwen3.7-plus"
+
+
+def test_scene_mvp_runtime_policy_loads_packaged_yaml() -> None:
+    assert MIN_PIPELINE_CONFIG.version == "scene_mvp_runtime_policy_v1"
+    assert MIN_PIPELINE_CONFIG.run_classification == "independent_experiment"
+    assert MIN_PIPELINE_CONFIG.experiment_id == "scene-mvp-agent-optimization-20260723"
+    assert MIN_PIPELINE_CONFIG.report_schema_version == "scene_mvp_run_report_v1"
+    assert re.fullmatch(r"[0-9a-f]{64}", MIN_PIPELINE_CONFIG.config_fingerprint)
+    assert MIN_PIPELINE_CONFIG.quality_presets["fast"].render_budget == 48
+    assert MIN_PIPELINE_CONFIG.quality_presets["balanced"].llm_budget == 4
+    high = MIN_PIPELINE_CONFIG.quality_presets["high"]
+    assert high.render_budget == 640
+    assert high.llm_budget == 9
+    assert high.refine_budget == 9
+    assert high.target_mae == 0.04
+    assert high.target_loss == 0.02
+    assert required_min_graph_steps(9, 9) == 65
+    assert high.recursion_limit == 65 + MIN_GRAPH_RECURSION_SAFETY_MARGIN == 69
+    assert MIN_PIPELINE_CONFIG.max_recursion_limit == 69
+
+
+def test_scene_mvp_runtime_policy_accepts_custom_yaml(tmp_path: Path) -> None:
+    config_path = tmp_path / "scene-mvp.yaml"
+    config_path.write_text(
+        """
+version: test_policy_v1
+run_classification: independent_experiment
+experiment_id: custom-test-experiment
+report_schema_version: test_report_v1
+targets:
+  mae: 0.12
+  loss: 0.06
+quality_presets:
+  fast: {render_budget: 10, llm_budget: 1, refine_budget: 0}
+  balanced: {render_budget: 20, llm_budget: 3, refine_budget: 2}
+  high: {render_budget: 30, llm_budget: 9, refine_budget: 4}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    configured = load_min_pipeline_config(config_path)
+
+    assert configured.version == "test_policy_v1"
+    assert configured.run_classification == "independent_experiment"
+    assert configured.experiment_id == "custom-test-experiment"
+    assert configured.report_schema_version == "test_report_v1"
+    assert configured.quality_presets["fast"].render_budget == 10
+    assert configured.quality_presets["high"].llm_budget == 9
+    assert configured.max_llm_budget == 9
+    assert configured.max_refine_budget == 4
+    assert configured.quality_presets["high"].recursion_limit == 45
+    assert configured.quality_presets["balanced"].target_mae == 0.12
+    assert configured.quality_presets["balanced"].target_loss == 0.06
+
+
+def test_scene_mvp_runtime_policy_fingerprint_is_canonical(tmp_path: Path) -> None:
+    first = tmp_path / "first.yaml"
+    second = tmp_path / "second.yaml"
+    first.write_text(
+        """
+version: fingerprint_policy_v1
+run_classification: independent_experiment
+experiment_id: fingerprint-test
+report_schema_version: test_report_v1
+targets: {mae: 0.12, loss: 0.06}
+quality_presets:
+  fast: {render_budget: 10, llm_budget: 1, refine_budget: 0}
+  balanced: {render_budget: 20, llm_budget: 3, refine_budget: 2}
+  high: {render_budget: 30, llm_budget: 9, refine_budget: 4}
+""".strip(),
+        encoding="utf-8",
+    )
+    second.write_text(
+        """
+quality_presets:
+  high:
+    refine_budget: 4
+    llm_budget: 9
+    render_budget: 30
+  fast: {refine_budget: 0, render_budget: 10, llm_budget: 1}
+  balanced: {llm_budget: 3, refine_budget: 2, render_budget: 20}
+targets:
+  loss: 0.06
+  mae: 0.12
+report_schema_version: test_report_v1
+experiment_id: fingerprint-test
+run_classification: independent_experiment
+version: fingerprint_policy_v1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    assert (
+        load_min_pipeline_config(first).config_fingerprint
+        == load_min_pipeline_config(second).config_fingerprint
+    )
+
+
+def test_scene_mvp_runtime_policy_accepts_exact_frozen_benchmark(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "frozen.yaml"
+    config_path.write_text(
+        """
+version: frozen_policy_v1
+run_classification: frozen_benchmark
+report_schema_version: frozen_report_v1
+targets: {mae: 0.08, loss: 0.04}
+quality_presets:
+  fast: {render_budget: 48, llm_budget: 2, refine_budget: 1}
+  balanced: {render_budget: 96, llm_budget: 4, refine_budget: 2}
+  high: {render_budget: 160, llm_budget: 6, refine_budget: 3}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    configured = load_min_pipeline_config(config_path)
+
+    assert configured.run_classification == "frozen_benchmark"
+    assert configured.experiment_id is None
+    assert configured.quality_presets["high"].render_budget == 160
+
+
+@pytest.mark.parametrize(
+    ("targets", "high_budget"),
+    (
+        (
+            "{mae: 0.08, loss: 0.02}",
+            "{render_budget: 160, llm_budget: 6, refine_budget: 3}",
+        ),
+        (
+            "{mae: 0.08, loss: 0.04}",
+            "{render_budget: 640, llm_budget: 9, refine_budget: 9}",
+        ),
+    ),
+)
+def test_scene_mvp_frozen_benchmark_rejects_configuration_drift(
+    tmp_path: Path,
+    targets: str,
+    high_budget: str,
+) -> None:
+    config_path = tmp_path / "drifted-frozen.yaml"
+    config_path.write_text(
+        f"""
+version: drifted_frozen_policy_v1
+run_classification: frozen_benchmark
+report_schema_version: frozen_report_v1
+targets: {targets}
+quality_presets:
+  fast: {{render_budget: 48, llm_budget: 2, refine_budget: 1}}
+  balanced: {{render_budget: 96, llm_budget: 4, refine_budget: 2}}
+  high: {high_budget}
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="frozen_benchmark"):
+        load_min_pipeline_config(config_path)
+
+
+def test_scene_mvp_runtime_policy_derives_feature_aware_graph_bound() -> None:
+    assert required_min_graph_steps(0, 9, max_features=0) == 9
+    assert required_min_graph_steps(6, 3, max_features=4) == 35
+    assert derive_min_graph_recursion_limit(6, 3, max_features=4) == 39
+    assert derive_min_graph_recursion_limit(9, 9, max_features=4) == 69
+
+    with pytest.raises(ValueError, match="固定槽位"):
+        required_min_graph_steps(2, 1, max_features=5)
+    with pytest.raises(ValueError, match="安全上限"):
+        derive_min_graph_recursion_limit(100, 99)
+
+
+@pytest.mark.parametrize(
+    "yaml_text",
+    (
+        """
+version: invalid_missing_preset
+run_classification: independent_experiment
+experiment_id: invalid-test
+report_schema_version: test_report_v1
+targets: {mae: 0.08, loss: 0.04}
+quality_presets:
+  fast: {render_budget: 10, llm_budget: 1, refine_budget: 0}
+  balanced: {render_budget: 20, llm_budget: 2, refine_budget: 1}
+""",
+        """
+version: invalid_negative_budget
+run_classification: independent_experiment
+experiment_id: invalid-test
+report_schema_version: test_report_v1
+targets: {mae: 0.08, loss: 0.04}
+quality_presets:
+  fast: {render_budget: -1, llm_budget: 1, refine_budget: 0}
+  balanced: {render_budget: 20, llm_budget: 2, refine_budget: 1}
+  high: {render_budget: 30, llm_budget: 3, refine_budget: 2}
+""",
+        """
+version: invalid_unknown_field
+run_classification: independent_experiment
+experiment_id: invalid-test
+report_schema_version: test_report_v1
+targets: {mae: 0.08, loss: 0.04, hidden: 1.0}
+quality_presets:
+  fast: {render_budget: 10, llm_budget: 1, refine_budget: 0}
+  balanced: {render_budget: 20, llm_budget: 2, refine_budget: 1}
+  high: {render_budget: 30, llm_budget: 3, refine_budget: 2}
+""",
+        f"""
+version: invalid_graph_bound
+run_classification: independent_experiment
+experiment_id: invalid-test
+report_schema_version: test_report_v1
+targets: {{mae: 0.08, loss: 0.04}}
+quality_presets:
+  fast: {{render_budget: 10, llm_budget: 1, refine_budget: 0}}
+  balanced: {{render_budget: 20, llm_budget: 2, refine_budget: 1}}
+  high: {{render_budget: 999, llm_budget: {MAX_MIN_GRAPH_RECURSION_LIMIT}, refine_budget: {MAX_MIN_GRAPH_RECURSION_LIMIT}}}
+""",
+    ),
+)
+def test_scene_mvp_runtime_policy_rejects_invalid_yaml(
+    tmp_path: Path,
+    yaml_text: str,
+) -> None:
+    config_path = tmp_path / "invalid-scene-mvp.yaml"
+    config_path.write_text(yaml_text.strip(), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="scene_mvp 配置无效"):
+        load_min_pipeline_config(config_path)
+
+
+@pytest.mark.parametrize(
+    "yaml_text",
+    (
+        """
+version: missing_experiment_id
+run_classification: independent_experiment
+report_schema_version: test_report_v1
+targets: {mae: 0.08, loss: 0.04}
+quality_presets:
+  fast: {render_budget: 48, llm_budget: 2, refine_budget: 1}
+  balanced: {render_budget: 96, llm_budget: 4, refine_budget: 2}
+  high: {render_budget: 160, llm_budget: 6, refine_budget: 3}
+""",
+        """
+version: frozen_with_experiment_id
+run_classification: frozen_benchmark
+experiment_id: forbidden-experiment
+report_schema_version: test_report_v1
+targets: {mae: 0.08, loss: 0.04}
+quality_presets:
+  fast: {render_budget: 48, llm_budget: 2, refine_budget: 1}
+  balanced: {render_budget: 96, llm_budget: 4, refine_budget: 2}
+  high: {render_budget: 160, llm_budget: 6, refine_budget: 3}
+""",
+    ),
+)
+def test_scene_mvp_runtime_policy_rejects_invalid_run_identity(
+    tmp_path: Path,
+    yaml_text: str,
+) -> None:
+    config_path = tmp_path / "invalid-run-identity.yaml"
+    config_path.write_text(yaml_text.strip(), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="scene_mvp 配置无效"):
+        load_min_pipeline_config(config_path)
 
 
 def test_qwen_thinking_env_config_parses_flags(monkeypatch) -> None:
@@ -353,7 +630,6 @@ def test_llm_factory_passes_provider_side_max_output_tokens(monkeypatch) -> None
             max_output_tokens=321,
         )
     ) == ("openai", "gpt-4.1", 321)
-
 
 
 def test_backend_logs_requests(caplog) -> None:

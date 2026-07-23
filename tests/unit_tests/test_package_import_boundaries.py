@@ -4,6 +4,7 @@ import sys
 from importlib.resources import files
 from pathlib import Path
 
+import agent.app.config
 import backend.sql
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -128,3 +129,12 @@ def test_backend_sql_is_an_explicit_packaged_resource_boundary() -> None:
     assert "CREATE TABLE IF NOT EXISTS agent_runs" in schema.read_text(
         encoding="utf-8"
     )
+
+
+def test_scene_mvp_yaml_is_an_explicit_packaged_resource() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert '"agent.app.config" = ["*.yaml"]' in pyproject
+    policy = files(agent.app.config).joinpath("png_to_shader_min.yaml")
+    assert policy.is_file()
+    assert "scene_mvp_runtime_policy_v1" in policy.read_text(encoding="utf-8")

@@ -45,6 +45,12 @@ class ShaderMinPipelineSummary(BaseModel):
     llm_call_count: int = 0
     llm_budget: int
     refine_budget: int
+    run_classification: Literal["frozen_benchmark", "independent_experiment"]
+    experiment_id: str | None = None
+    config_fingerprint: str
+    report_schema_version: str
+    patch_candidate_draw_budget: int
+    patch_evidence: list[dict[str, Any]] = Field(default_factory=list)
     renderer_path: Literal["prepared_uniforms_v1"]
     target_mae: float
     target_loss: float

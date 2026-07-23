@@ -452,3 +452,24 @@
 - 决策：F09 的下一质量增量采用 `docs/superpowers/specs/2026-07-22-scene-mvp-fixed-template-expansion-design.md`。继续限定单主体 `circle|ellipse`，颜色场支持具有真实像素语义的 `solid|radial|linear`，feature 保留既有四类并新增主体内 `gaussian_lobe` 与主体外 `glow`；每个 feature 压成 2 个 `vec4`，四个槽连同基础 Scene、类型元数据和 `u_resolution` 最坏使用 15 个 fragment uniform vectors。Refine 新增按稳定 id 的原子 `replace_feature` 和完整 `replace_color_field`。Graph 拓扑、同 run 单 prepared program、默认 `procedural_v1` 和显式 `scene_mvp` 产品边界不变。该方案名不是项目阶段号，与已废弃为历史参考的旧 V3 Oracle/Search 方案无关；Scene/template/metric 的正式版本号在实现增量冻结。
 - 原因：粉色凝胶球实测证明当前单一 radial 场、三槽和亮度分位数 objective 存在明显表达与评价缺口，但一次引入动态结构编译、最多 8 个逻辑 feature、多几何、自动残差分类和自动 procedural fallback 会同时改写 Renderer 生命周期、资源规划、感知、Graph/Backend 编排和预算语义。固定模板扩展可以在 WebGL1 最低容量内增加通用颜色场与局部效果，同时保持 Initial/fallback/Refine 共用唯一 program 签名和现有 current_best 安全边界。
 - 影响：实现已分别冻结 `png_to_shader_min_scene_v3`、`png_to_shader_min_template_v3`、`min_scene_composite_v3`；固定 7 例 deterministic fallback 的内部 loss 中位数约 `0.0402`，据此冻结 `target_loss=0.04`。三类颜色场、circle/ellipse、六类 feature、四槽 15/16 资源边界和 replace patch 均有聚焦测试。相同 7 例用外部 `png_to_shader_score_v1` 对照 v2 fallback，v3 为 6/7 改善且其余 global/ROI/bbox 回归未越过预设容差。本轮仍不支持 `rounded_rect`、`ring`、`dual_disks`，不自动切换 `procedural_v1`，不引入 CMA-ES、动态 ROI、逐 feature 消融或多 program cache。该工程证据不等于真实模型或人工偏好门禁；F09 继续 `active/no-go`。
+
+## D059 - scene_mvp 目标与分档预算统一由 YAML 启动配置
+
+- 日期：2026-07-22
+- 决策：把 `scene_mvp` 的 `target_mae`、`target_loss` 以及 fast/balanced/high 三档 render/LLM/Refine 硬预算迁移到包资源 `src/agent/app/config/png_to_shader_min.yaml`。Agent 在进程导入时一次性加载，要求三个公开档位完整存在，并严格拒绝未知字段、错误类型、负预算以及超出 `[0,1]` 的目标；Model Author 的 run 级调用上限从三档最大 `llm_budget` 推导，不再保留独立数值常量。修改配置后必须重启进程。
+- 原因：目标和预算原本同时散落在 Service、Model Author 与节点缺省值中；仅修改一处可能被另一处的 6 次上限或 `0.08/0.04` fallback 截断，造成 UI 显示、实际停止和模型用量不一致。单一严格 YAML 能让 Backend 进度、Artifact、账本和前端继续记录实际注入值，同时保持配置入口可读。
+- 影响：默认行为仍为 MAE/loss `0.08/0.04`，三档 render/LLM/Refine 仍为 `48/2/1`、`96/4/2`、`160/6/3`；公开 API 和 Graph 拓扑不变。当前 `target_loss` 继续是停止与 `target_reached` 的唯一质量条件，`target_mae` 只用于诊断展示。D058 的 `0.04` 是现有 benchmark 证据对应的冻结默认值；运维可以改 YAML 做实验，但变更目标或预算后的 run 不得冒充原冻结配置的可比证据，正式 gate 必须记录实际值并重新验收。
+
+## D060 - scene_mvp Graph 安全上限由合法预算路径推导
+
+- 日期：2026-07-23
+- 决策：废止 `scene_mvp` 固定 `recursion_limit=64`。配置加载时按 `R=min(refine_budget,max(llm_budget-1,0))`、固定模板最多四个 feature 和当前 12 节点路由推导最坏节点步数 `9 + 2F + R × (6 + 2F)`，每个 run 注入该值加 4 步框架余量；推导结果超过全局防御上限 256 时拒绝启动。`GraphRecursionError` 继续作为 `internal_pipeline_error` fail-closed，不允许异常时静默导出 `current_best`。失败账本额外保存内存进度中的 `latest_seq/current_node/counters/best/budgets` 安全快照，不保存事件、图片、输入、Scene 或 GLSL。
+- 原因：run `9d10b919-25f6-41a2-a2cf-e88c23ad78be` 在 high 档实验预算 `640/9/9` 下于合法的 `decide_after_feature -> optimize_feature` 路径第 64 步被框架中断，当时 render/LLM/Refine 为 `333/6/5`，不是路由死循环。原 high 档 `160/6/3` 的四 feature 最坏路径约 59 步，固定 64 只是偶然覆盖旧预算；预算迁移到 YAML 后没有同步其二级安全边界。
+- 影响：当前 high 档最多八轮 Refine 的合法路径需要 129 步，run 级上限为 133；四 feature 最大预算集成测试必须真实执行超过 64 步并由业务预算正常结束。当前 YAML 的 `0.04/0.02` 目标与 `48/2/1`、`96/4/2`、`640/9/9` 预算是区别于 D058/D059 冻结基线的实验配置，相关 run 不得与旧七例 baseline 混算。Graph 节点、边、路由、终止路径和 `current_best` 安全语义均未改变。
+
+## D061 - scene_mvp Refine 使用可审计的有界候选成熟
+
+- 日期：2026-07-23
+- 决策：保持 `png_to_shader_min` 的 12 节点、直接边、条件边和路由结果不变，但改变 Refine 候选选择语义。每个合法且未与最近拒绝记录重复的 typed Patch 从只读 `current_best` 派生独立 branch，先执行 1 次 raw draw，再按 Patch 影响范围执行最多 11 次确定性局部 draw；add/replace feature 只调整该稳定 feature，replace color field 只调整颜色场 bindings，remove 只做 raw 重评分。只有 matured candidate 的 `min_scene_composite_v3` loss 严格更低才原子提交；非法、重复、Renderer 失败或成熟后仍较差的 branch 整体丢弃。Refine 后 `optimize_base` 仅作 no-op 过桥，不再重新执行完整 base/feature sweep。单 Patch 12 draw 全部计入现有 run 硬预算，不增加隐藏预算。
+- 原因：真实 run `85506ab8-12c4-4a20-8940-824875ea0f97` 中 Initial 像素结果与 fallback 等价，五次 Refine raw 候选全部在进入 feature optimizer 前被拒绝，而 320 次 draw 主要消耗在重复全量 sweep。首帧 Patch 同时猜中位置、尺寸、颜色与强度才可挑战已成熟 best 的规则，会系统性淘汰结构方向正确但初始参数不成熟的候选。终态又缺少 Patch operation/type、指纹、分量 delta 和拒绝历史，无法区分结构错误、参数未成熟或重复提案。
+- 影响：空间残差新增固定 4×4 top-2 tile 的 MAE 与 `rendered-reference` signed luminance/RGB bias，但不改变 scorer、权重或 metric version。Refine Prompt 同时获得主导 metric、active feature 和最近三个拒绝摘要。Trace、metrics/manifest、API 与终态账本只保存 operation、feature id/type、规范 SHA-256、raw/matured metric delta、拒绝原因、重复标记和耗时，禁止保存完整 Patch、图片、GLSL、用户输入、模型原始响应或 reasoning。YAML 必须显式声明 `frozen_benchmark|independent_experiment`、独立实验 ID 和报告版本，并生成配置指纹；冻结身份若偏离 D058/D059 的 `0.08/0.04` 与 `48/2/1`、`96/4/2`、`160/6/3` 则启动失败。当前 `0.04/0.02 + 48/2/1、96/4/2、640/9/9` 继续只属于独立实验。Refine 不再反复遍历 feature 后，D060 的路径公式由 `9+2F+R×(6+2F)` 修正为 `9+2F+6R`，当前 high 为 65 步、注入上限 69；D060 的 fail-closed 与全局 256 防御边界保留。该工程实现只证明机制与安全性，未证明真实模型质量收益；geometry 语义修正、固定 7 例真实模型 benchmark 和匿名人工偏好仍需独立执行，F09 保持 `active/no-go`。

@@ -5,11 +5,14 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, cast
 
+from agent.app.config.png_to_shader_min import (
+    MIN_PIPELINE_CONFIG,
+    MinQualityBudget,
+)
 from agent.app.contracts.llm import LLMGateway
 from agent.app.graphs.png_to_shader_min_graph import (
-    PNG_TO_SHADER_MIN_RECURSION_LIMIT,
     build_png_to_shader_min_graph,
     png_to_shader_min_artifact_store,
     png_to_shader_min_graph,
@@ -58,6 +61,12 @@ class PngToShaderMinResult:
     llm_call_count: int
     llm_budget: int
     refine_budget: int
+    run_classification: Literal["frozen_benchmark", "independent_experiment"]
+    experiment_id: str | None
+    config_fingerprint: str
+    report_schema_version: str
+    patch_candidate_draw_budget: int
+    patch_evidence: tuple[dict[str, Any], ...]
     renderer_path: str
     target_mae: float
     target_loss: float
@@ -69,22 +78,7 @@ class PngToShaderMinResult:
     trace: tuple[dict[str, Any], ...]
 
 
-@dataclass(frozen=True)
-class MinQualityBudget:
-    """scene_mvp 各质量档位的硬预算。."""
-
-    render_budget: int
-    llm_budget: int
-    refine_budget: int
-    target_mae: float = 0.08
-    target_loss: float = 0.04
-
-
-MIN_QUALITY_BUDGETS = {
-    "fast": MinQualityBudget(render_budget=48, llm_budget=2, refine_budget=1),
-    "balanced": MinQualityBudget(render_budget=96, llm_budget=4, refine_budget=2),
-    "high": MinQualityBudget(render_budget=160, llm_budget=6, refine_budget=3),
-}
+MIN_QUALITY_BUDGETS = MIN_PIPELINE_CONFIG.quality_presets
 
 # 进度回调：第一参数为 JSON 安全的白名单事件，第二参数为当前渲染 PNG 字节或 None。
 MinProgressCallback = Callable[[dict[str, Any], "bytes | None"], None]
@@ -97,6 +91,10 @@ _PROGRESS_BUDGET_KEYS = (
     "refine_budget",
     "target_mae",
     "target_loss",
+    "run_classification",
+    "experiment_id",
+    "config_fingerprint",
+    "report_schema_version",
 )
 
 
@@ -232,6 +230,10 @@ class PngToShaderMinService:
             "refine_budget": refine_budget,
             "target_mae": policy.target_mae,
             "target_loss": policy.target_loss,
+            "run_classification": MIN_PIPELINE_CONFIG.run_classification,
+            "experiment_id": MIN_PIPELINE_CONFIG.experiment_id,
+            "config_fingerprint": MIN_PIPELINE_CONFIG.config_fingerprint,
+            "report_schema_version": MIN_PIPELINE_CONFIG.report_schema_version,
         }
         budgets = {key: graph_input[key] for key in _PROGRESS_BUDGET_KEYS}
         state: dict[str, Any] = dict(graph_input)
@@ -241,7 +243,7 @@ class PngToShaderMinService:
         try:
             async for chunk in self.graph.astream(
                 graph_input,
-                {"recursion_limit": PNG_TO_SHADER_MIN_RECURSION_LIMIT},
+                {"recursion_limit": policy.recursion_limit},
                 stream_mode="updates",
             ):
                 if not isinstance(chunk, dict):
@@ -300,6 +302,23 @@ class PngToShaderMinService:
             llm_call_count=int(final["llm_call_count"]),
             llm_budget=int(final["llm_budget"]),
             refine_budget=int(final["refine_budget"]),
+            run_classification=cast(
+                Literal["frozen_benchmark", "independent_experiment"],
+                str(final["run_classification"]),
+            ),
+            experiment_id=(
+                str(final["experiment_id"])
+                if final.get("experiment_id") is not None
+                else None
+            ),
+            config_fingerprint=str(final["config_fingerprint"]),
+            report_schema_version=str(final["report_schema_version"]),
+            patch_candidate_draw_budget=int(final["patch_candidate_draw_budget"]),
+            patch_evidence=tuple(
+                dict(item)
+                for item in final.get("patch_evidence", ())
+                if isinstance(item, dict)
+            ),
             renderer_path=str(final["renderer_path"]),
             target_mae=float(final["target_mae"]),
             target_loss=float(final["target_loss"]),
@@ -352,8 +371,8 @@ default_png_to_shader_min_service = PngToShaderMinService(
     png_to_shader_min_graph,
     png_to_shader_min_artifact_store,
     png_to_shader_min_renderer_registry,
-    llm_budget=6,
-    refine_budget=3,
+    llm_budget=MIN_PIPELINE_CONFIG.max_llm_budget,
+    refine_budget=MIN_PIPELINE_CONFIG.max_refine_budget,
 )
 
 

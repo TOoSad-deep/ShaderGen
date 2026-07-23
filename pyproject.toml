@@ -89,6 +89,7 @@ packages = [
 
 [tool.setuptools.package-data]
 "*" = ["py.typed"]
+"agent.app.config" = ["*.yaml"]
 "agent.app.prompts" = ["*.yaml"]
 "backend.sql" = ["*.sql"]
 

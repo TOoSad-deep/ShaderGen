@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from io import BytesIO
@@ -12,10 +13,12 @@ import numpy as np
 from langchain_core.messages import SystemMessage
 from PIL import Image
 
+from agent.app.config.png_to_shader_min import MIN_PIPELINE_CONFIG
 from agent.app.contracts.llm import LLMGateway
 from agent.app.contracts.png_to_shader_min import (
     MinAuthorPatch,
     apply_min_author_patch,
+    summarize_min_author_patch,
 )
 from agent.app.messages.png_to_shader_v1 import (
     labeled_image_parts,
@@ -34,12 +37,18 @@ from agent.app.parsers.png_to_shader_min import (
     parse_min_author_patch,
     parse_min_scene,
 )
-from shaderforge.evaluation import MIN_SCENE_METRIC_VERSION, evaluate_min_scene
+from shaderforge.evaluation import (
+    MIN_SCENE_METRIC_VERSION,
+    dominant_metric_component,
+    evaluate_min_scene,
+    summarize_spatial_residual,
+)
 from shaderforge.generation import (
     bake_min_uniforms,
     materialize_min_shader,
 )
 from shaderforge.optimization import (
+    MAX_PATCH_CANDIDATE_DRAWS,
     propose_min_scene_candidates,
     rebase_candidate_proposal,
 )
@@ -52,6 +61,17 @@ from shaderforge.rendering import (
 from shaderforge.store import LocalArtifactStore
 
 RendererFactory = Callable[[], PlaywrightWebGL1Renderer]
+_DEFAULT_MIN_POLICY = MIN_PIPELINE_CONFIG.quality_presets["balanced"]
+_RECENT_REJECTED_PATCH_LIMIT = 3
+_METRIC_DELTA_KEYS = (
+    "total_loss",
+    "global_mae",
+    "foreground_mae",
+    "background_mae",
+    "geometry_mask_loss",
+    "edge_loss",
+    "worst_tile_mae",
+)
 
 
 def _trace(
@@ -195,6 +215,79 @@ def _best_loss(candidate: dict[str, Any]) -> float:
     return float(candidate.get("loss", candidate["mae"]))
 
 
+def _node_duration_ms(started_at: float) -> float:
+    """返回节点内 wall-clock 耗时，不把模型 latency 冒充节点耗时."""
+    return round((time.perf_counter() - started_at) * 1000.0, 3)
+
+
+def _active_feature_summary(scene: MinScene) -> list[dict[str, str]]:
+    """返回不含参数值的 active feature 身份摘要."""
+    return [
+        {"feature_id": feature.id, "feature_type": feature.type}
+        for feature in scene.object.features
+    ]
+
+
+def _metric_deltas(
+    candidate: dict[str, Any] | None,
+    baseline: dict[str, Any],
+) -> dict[str, float]:
+    """返回 candidate-baseline 的稳定 metric delta；正值表示变差."""
+    if not isinstance(candidate, dict):
+        return {}
+    candidate_metrics = candidate.get("metrics")
+    baseline_metrics = baseline.get("metrics")
+    if not isinstance(candidate_metrics, dict) or not isinstance(
+        baseline_metrics, dict
+    ):
+        return {}
+    deltas: dict[str, float] = {}
+    for key in _METRIC_DELTA_KEYS:
+        candidate_value = candidate_metrics.get(key)
+        baseline_value = baseline_metrics.get(key)
+        if (
+            isinstance(candidate_value, bool)
+            or isinstance(baseline_value, bool)
+            or not isinstance(candidate_value, (int, float))
+            or not isinstance(baseline_value, (int, float))
+        ):
+            continue
+        deltas[key] = round(float(candidate_value) - float(baseline_value), 9)
+    return deltas
+
+
+def _bounded_append(
+    items: tuple[dict[str, Any], ...] | None,
+    value: dict[str, Any],
+    *,
+    limit: int | None = None,
+) -> tuple[dict[str, Any], ...]:
+    """向安全摘要历史追加一项，并按需保留最近固定窗口."""
+    history = tuple(item for item in (items or ()) if isinstance(item, dict))
+    appended = (*history, value)
+    return appended[-limit:] if limit is not None else appended
+
+
+def _candidate_from_outcome(
+    scene: MinScene,
+    outcome: dict[str, Any],
+) -> dict[str, Any]:
+    """把成功 draw 收敛为可与 current_best 比较的候选快照."""
+    return {
+        "scene": scene.model_dump(mode="json"),
+        "mae": outcome["mae"],
+        "loss": outcome["loss"],
+        "metrics": outcome["metrics"],
+        "residual_summary": outcome["residual_summary"],
+        "glsl": outcome["glsl"],
+        "render": _encode_rgb_png(
+            outcome["rgb"],
+            scene.canvas.width,
+            scene.canvas.height,
+        ),
+    }
+
+
 async def _evaluate_scene(
     state: dict[str, Any],
     scene: MinScene,
@@ -233,6 +326,9 @@ async def _evaluate_scene(
         rendered,
         state.get("metric_background", scene.canvas.background),
     )
+    residual_summary = summarize_spatial_residual(state["target_rgb"], rendered)
+    residual_summary["dominant_metric_component"] = dominant_metric_component(metric)
+    residual_summary["active_feature_summary"] = _active_feature_summary(scene)
     return {
         "success": True,
         "render_count": count,
@@ -243,6 +339,7 @@ async def _evaluate_scene(
         "mae": metric.global_mae,
         "loss": metric.total_loss,
         "metrics": metric.to_dict(),
+        "residual_summary": residual_summary,
     }
 
 
@@ -263,18 +360,45 @@ def make_min_nodes(
             "phase": "initialize",
             "status": "running",
             "quality_preset": str(state.get("quality_preset", "balanced")),
+            "run_classification": str(
+                state.get(
+                    "run_classification", MIN_PIPELINE_CONFIG.run_classification
+                )
+            ),
+            "experiment_id": state.get(
+                "experiment_id", MIN_PIPELINE_CONFIG.experiment_id
+            ),
+            "config_fingerprint": str(
+                state.get(
+                    "config_fingerprint", MIN_PIPELINE_CONFIG.config_fingerprint
+                )
+            ),
+            "report_schema_version": str(
+                state.get(
+                    "report_schema_version",
+                    MIN_PIPELINE_CONFIG.report_schema_version,
+                )
+            ),
             "render_count": int(state.get("render_count", 0)),
-            "render_budget": int(state.get("render_budget", 8)),
+            "render_budget": int(state["render_budget"]),
             "llm_call_count": min(
-                effective_llm_budget(state.get("llm_budget", 0)),
+                effective_llm_budget(state["llm_budget"]),
                 max(0, int(state.get("llm_call_count", 0))),
             ),
-            "llm_budget": effective_llm_budget(state.get("llm_budget", 0)),
+            "llm_budget": effective_llm_budget(state["llm_budget"]),
             "refine_count": 0,
-            "refine_budget": int(state.get("refine_budget", 0)),
-            "target_mae": float(state.get("target_mae", 0.08)),
-            "target_loss": float(state.get("target_loss", 0.04)),
+            "refine_budget": int(state["refine_budget"]),
+            "target_mae": float(
+                state.get("target_mae", _DEFAULT_MIN_POLICY.target_mae)
+            ),
+            "target_loss": float(
+                state.get("target_loss", _DEFAULT_MIN_POLICY.target_loss)
+            ),
             "feature_queue": (),
+            "refine_branch_resolved": False,
+            "pending_patch_summary": None,
+            "recent_rejected_patch_summaries": (),
+            "patch_evidence": (),
             "trace": _trace(
                 state, "initialize_run", f"输入已登记：{reference.sha256[:12]}"
             ),
@@ -388,7 +512,178 @@ def make_min_nodes(
             ),
         }
 
+    async def _evaluate_refine_branch(
+        state: dict[str, Any],
+        pending: dict[str, Any],
+    ) -> dict[str, Any]:
+        """在独立分支内成熟 typed Patch，最后才与只读 best 锚点比较."""
+        started_at = time.perf_counter()
+        anchor = dict(state["current_best"])
+        render_count = int(state.get("render_count", 0))
+        status = str(pending.get("status", "pending"))
+        raw: dict[str, Any] | None = None
+        matured: dict[str, Any] | None = None
+        maturity_draw_count = 0
+        rejected_reason: str | None = None
+
+        if status != "pending":
+            rejected_reason = str(
+                pending.get(
+                    "rejected_reason",
+                    "duplicate_recent_patch"
+                    if status == "duplicate"
+                    else "invalid_patch",
+                )
+            )
+        else:
+            candidate_scene = MinScene.model_validate(state["scene"])
+            raw_outcome = await _evaluate_scene(
+                {**state, "render_count": render_count},
+                candidate_scene,
+                registry,
+                capture_png=False,
+            )
+            render_count = int(raw_outcome["render_count"])
+            if not raw_outcome["success"]:
+                rejected_reason = "renderer_failed"
+            else:
+                raw = _candidate_from_outcome(candidate_scene, raw_outcome)
+                matured = raw
+                patch_operation = str(pending.get("patch_operation", ""))
+                stage: str | None = None
+                feature_id: str | None = None
+                if patch_operation in {"add_feature", "replace_feature"}:
+                    stage = "feature"
+                    feature_id = (
+                        str(pending["feature_id"])
+                        if pending.get("feature_id") is not None
+                        else None
+                    )
+                elif patch_operation == "replace_color_field":
+                    stage = "color_field"
+                elif patch_operation != "remove_feature":
+                    rejected_reason = "invalid_patch"
+
+                remaining_local = min(
+                    MAX_PATCH_CANDIDATE_DRAWS - 1,
+                    max(0, int(state["render_budget"]) - render_count),
+                )
+                proposals = (
+                    propose_min_scene_candidates(
+                        MinScene.model_validate(matured["scene"]),
+                        stage=cast(Any, stage),
+                        feature_id=feature_id,
+                        remaining_draw_budget=remaining_local,
+                        batch_size=MAX_PATCH_CANDIDATE_DRAWS - 1,
+                    )
+                    if stage is not None and rejected_reason is None
+                    else ()
+                )
+                for proposal in proposals:
+                    assert matured is not None
+                    rebased = rebase_candidate_proposal(
+                        MinScene.model_validate(matured["scene"]), proposal
+                    )
+                    if rebased is None:
+                        continue
+                    outcome = await _evaluate_scene(
+                        {**state, "render_count": render_count},
+                        rebased.scene,
+                        registry,
+                        capture_png=False,
+                    )
+                    render_count = int(outcome["render_count"])
+                    maturity_draw_count += 1
+                    if not outcome["success"]:
+                        rejected_reason = "renderer_failed"
+                        matured = None
+                        break
+                    candidate = _candidate_from_outcome(rebased.scene, outcome)
+                    if _best_loss(candidate) < _best_loss(matured):
+                        matured = candidate
+
+        accepted = (
+            rejected_reason is None
+            and isinstance(matured, dict)
+            and _best_loss(matured) < _best_loss(anchor)
+        )
+        if not accepted and rejected_reason is None:
+            rejected_reason = "no_strict_loss_improvement"
+        best = matured if accepted and isinstance(matured, dict) else anchor
+        evidence = {
+            **{
+                key: pending.get(key)
+                for key in (
+                    "patch_operation",
+                    "feature_id",
+                    "feature_type",
+                    "patch_fingerprint",
+                )
+            },
+            "raw_candidate_loss": _best_loss(raw) if isinstance(raw, dict) else None,
+            "matured_candidate_loss": (
+                _best_loss(matured) if isinstance(matured, dict) else None
+            ),
+            "best_loss_before": _best_loss(anchor),
+            "best_loss_after": _best_loss(best),
+            "raw_metric_deltas": _metric_deltas(raw, anchor),
+            "matured_metric_deltas": _metric_deltas(matured, anchor),
+            "maturity_draw_count": maturity_draw_count,
+            "total_candidate_draw_count": render_count
+            - int(state.get("render_count", 0)),
+            "accepted": accepted,
+            "rejected_reason": None if accepted else rejected_reason,
+            "duplicate_of_recent": status == "duplicate",
+            "duration_ms": _node_duration_ms(started_at),
+        }
+        rejected = tuple(state.get("recent_rejected_patch_summaries", ()))
+        if not accepted:
+            rejected = _bounded_append(
+                rejected,
+                evidence,
+                limit=_RECENT_REJECTED_PATCH_LIMIT,
+            )
+        patch_evidence = _bounded_append(
+            tuple(state.get("patch_evidence", ())),
+            evidence,
+        )
+        return {
+            "phase": "render",
+            "render_count": render_count,
+            "scene": best["scene"],
+            "current_glsl": best["glsl"],
+            "current_render": best["render"],
+            "current_mae": (
+                raw["mae"] if isinstance(raw, dict) else float(best["mae"])
+            ),
+            "current_best_mae": best["mae"],
+            "current_best_loss": _best_loss(best),
+            "current_best": best,
+            "residual_summary": dict(best.get("residual_summary", {})),
+            "feature_queue": (),
+            "refine_branch_resolved": True,
+            "pending_patch_summary": None,
+            "recent_rejected_patch_summaries": rejected,
+            "patch_evidence": patch_evidence,
+            "error": None,
+            "trace": _trace(
+                state,
+                "render_and_evaluate",
+                (
+                    "matured_candidate accepted"
+                    if accepted
+                    else f"candidate_branch rejected：{rejected_reason}"
+                ),
+                selected_source="model_patch",
+                patch_evidence=evidence,
+                duration_ms=evidence["duration_ms"],
+            ),
+        }
+
     async def render_and_evaluate(state: dict[str, Any]) -> dict[str, Any]:
+        pending = state.get("pending_patch_summary")
+        if isinstance(pending, dict):
+            return await _evaluate_refine_branch(state, pending)
         scene = MinScene.model_validate(state["scene"])
         outcome = await _evaluate_scene(state, scene, registry, capture_png=True)
         evaluated: list[tuple[str, MinScene, dict[str, Any]]] = [
@@ -433,6 +728,7 @@ def make_min_nodes(
             "mae": selected_outcome["mae"],
             "loss": selected_outcome["loss"],
             "metrics": selected_outcome["metrics"],
+            "residual_summary": selected_outcome["residual_summary"],
             "glsl": selected_outcome["glsl"],
             "render": selected_outcome["image"],
         }
@@ -467,6 +763,8 @@ def make_min_nodes(
             "current_best_mae": best["mae"],
             "current_best_loss": _best_loss(best),
             "current_best": best,
+            "residual_summary": dict(best.get("residual_summary", {})),
+            "refine_branch_resolved": False,
             "feature_queue": tuple(
                 feature.id
                 for feature in MinScene.model_validate(best["scene"]).object.features
@@ -499,6 +797,26 @@ def make_min_nodes(
         }
 
     async def optimize_base(state: dict[str, Any]) -> dict[str, Any]:
+        if bool(state.get("refine_branch_resolved")):
+            best = dict(state["current_best"])
+            return {
+                "phase": "base",
+                "scene": best["scene"],
+                "current_best": best,
+                "current_best_mae": best["mae"],
+                "current_best_loss": _best_loss(best),
+                "current_glsl": best["glsl"],
+                "current_render": best["render"],
+                "residual_summary": dict(best.get("residual_summary", {})),
+                "feature_queue": (),
+                "refine_branch_resolved": False,
+                "trace": _trace(
+                    state,
+                    "optimize_base",
+                    "Refine 分支已完成有界局部成熟与选择，跳过全量 base sweep。",
+                    candidates_evaluated=0,
+                ),
+            }
         baseline = dict(state["current_best"])
         best = baseline
         render_count = int(state["render_count"])
@@ -529,6 +847,7 @@ def make_min_nodes(
                     "mae": outcome["mae"],
                     "loss": outcome["loss"],
                     "metrics": outcome["metrics"],
+                    "residual_summary": outcome["residual_summary"],
                     "glsl": outcome["glsl"],
                     "render": _encode_rgb_png(
                         outcome["rgb"],
@@ -546,6 +865,7 @@ def make_min_nodes(
             "current_best_loss": _best_loss(best),
             "current_glsl": best["glsl"],
             "current_render": best["render"],
+            "residual_summary": dict(best.get("residual_summary", {})),
             "render_count": render_count,
             "trace": _trace(
                 state,
@@ -600,6 +920,7 @@ def make_min_nodes(
                     "mae": outcome["mae"],
                     "loss": outcome["loss"],
                     "metrics": outcome["metrics"],
+                    "residual_summary": outcome["residual_summary"],
                     "glsl": outcome["glsl"],
                     "render": _encode_rgb_png(
                         outcome["rgb"],
@@ -617,6 +938,7 @@ def make_min_nodes(
             "current_best_loss": _best_loss(best),
             "current_glsl": best["glsl"],
             "current_render": best["render"],
+            "residual_summary": dict(best.get("residual_summary", {})),
             "render_count": render_count,
             "feature_queue": tuple(queue),
             "trace": _trace(
@@ -631,6 +953,7 @@ def make_min_nodes(
         }
 
     async def author_refine(state: dict[str, Any]) -> dict[str, Any]:
+        started_at = time.perf_counter()
         best = state.get("current_best")
         refine_count = int(state.get("refine_count", 0)) + 1
         if not isinstance(best, dict):
@@ -642,6 +965,7 @@ def make_min_nodes(
                     "author_refine",
                     "缺少 current_best，拒绝生成候选。",
                     status="failed",
+                    duration_ms=_node_duration_ms(started_at),
                 ),
             }
         best_scene = MinScene.model_validate(best["scene"])
@@ -656,6 +980,7 @@ def make_min_nodes(
                     "author_refine",
                     "模型预算已耗尽，保留 current_best。",
                     author_source="current_best",
+                    duration_ms=_node_duration_ms(started_at),
                 ),
             }
         schema = min_author_patch_json_schema()
@@ -664,6 +989,15 @@ def make_min_nodes(
             text_part("current_best_mae", best.get("mae")),
             text_part("current_best_loss", _best_loss(best)),
             text_part("current_best_metrics", best.get("metrics", {})),
+            text_part(
+                "spatial_residual_summary",
+                best.get("residual_summary", state.get("residual_summary", {})),
+            ),
+            text_part("active_feature_summary", _active_feature_summary(best_scene)),
+            text_part(
+                "recent_rejected_patch_summaries",
+                state.get("recent_rejected_patch_summaries", ()),
+            ),
             text_part("user_instruction", state.get("instruction", "")),
             text_part("expected_json_schema", schema),
             *labeled_image_parts(
@@ -692,15 +1026,53 @@ def make_min_nodes(
         call_count = int(state.get("llm_call_count", 0)) + result.call_count
         candidate: MinScene | None = None
         error_code = result.error_code
+        patch_summary: dict[str, Any] | None = None
         if result.value is not None:
+            typed_patch = cast(MinAuthorPatch, result.value)
+            patch_summary = summarize_min_author_patch(typed_patch)
+            rejected_fingerprints = {
+                str(item.get("patch_fingerprint"))
+                for item in state.get("recent_rejected_patch_summaries", ())
+                if isinstance(item, dict) and item.get("patch_fingerprint")
+            }
+            if patch_summary["patch_fingerprint"] in rejected_fingerprints:
+                return {
+                    "phase": "refine",
+                    "scene": best_scene.model_dump(mode="json"),
+                    "llm_call_count": call_count,
+                    "refine_count": refine_count,
+                    "author_model": result.model_ref,
+                    "author_error": "duplicate_recent_patch",
+                    "pending_patch_summary": {
+                        **patch_summary,
+                        "status": "duplicate",
+                        "rejected_reason": "duplicate_recent_patch",
+                    },
+                    "trace": _trace(
+                        state,
+                        "author_refine",
+                        "Patch 与近期已拒候选重复，保留 current_best 且不分配 draw。",
+                        author_source="current_best",
+                        patch_summary=patch_summary,
+                        model_calls=result.call_count,
+                        author_latency_ms=result.latency_ms,
+                        author_tokens=result.total_tokens,
+                        duration_ms=_node_duration_ms(started_at),
+                    ),
+                }
             try:
                 candidate = apply_min_author_patch(
                     best_scene,
-                    cast(MinAuthorPatch, result.value),
+                    typed_patch,
                 )
             except (TypeError, ValueError) as exc:
                 error_code = f"patch_apply_failed:{type(exc).__name__}"
         if candidate is None:
+            rejected_reason = (
+                "patch_apply_failed"
+                if error_code and str(error_code).startswith("patch_apply_failed:")
+                else "invalid_patch"
+            )
             return {
                 "phase": "refine",
                 "scene": best_scene.model_dump(mode="json"),
@@ -708,6 +1080,11 @@ def make_min_nodes(
                 "refine_count": refine_count,
                 "author_model": result.model_ref,
                 "author_error": error_code,
+                "pending_patch_summary": {
+                    **(patch_summary or {}),
+                    "status": "invalid",
+                    "rejected_reason": rejected_reason,
+                },
                 "trace": _trace(
                     state,
                     "author_refine",
@@ -717,6 +1094,7 @@ def make_min_nodes(
                     error_code=error_code,
                     author_latency_ms=result.latency_ms,
                     author_tokens=result.total_tokens,
+                    duration_ms=_node_duration_ms(started_at),
                 ),
             }
         return {
@@ -726,6 +1104,10 @@ def make_min_nodes(
             "refine_count": refine_count,
             "author_model": result.model_ref,
             "author_error": None,
+            "pending_patch_summary": {
+                **(patch_summary or {}),
+                "status": "pending",
+            },
             "trace": _trace(
                 state,
                 "author_refine",
@@ -735,6 +1117,8 @@ def make_min_nodes(
                 repaired=result.repaired,
                 author_latency_ms=result.latency_ms,
                 author_tokens=result.total_tokens,
+                patch_summary=patch_summary,
+                duration_ms=_node_duration_ms(started_at),
             ),
         }
 
@@ -758,11 +1142,18 @@ def make_min_nodes(
         run.write_text("final/shadertoy.glsl", materialized.shadertoy_source)
         run.write_bytes("final/render.png", best["render"], content_type="image/png")
         renderer_metrics = registry.metrics(project_id, run_id)
-        target_mae = float(state.get("target_mae", 0.08))
-        target_loss = float(state.get("target_loss", 0.04))
+        target_mae = float(state["target_mae"])
+        target_loss = float(state["target_loss"])
         best_loss = _best_loss(best)
         target_reached = best_loss <= target_loss
         score_metrics = dict(best.get("metrics", {}))
+        patch_evidence = tuple(state.get("patch_evidence", ()))
+        run_identity = {
+            "run_classification": str(state["run_classification"]),
+            "experiment_id": state.get("experiment_id"),
+            "config_fingerprint": str(state["config_fingerprint"]),
+            "report_schema_version": str(state["report_schema_version"]),
+        }
         metrics = {
             **score_metrics,
             "metric_version": str(
@@ -777,6 +1168,9 @@ def make_min_nodes(
             "llm_call_count": int(state.get("llm_call_count", 0)),
             "llm_budget": int(state.get("llm_budget", 0)),
             "refine_budget": int(state.get("refine_budget", 0)),
+            "patch_candidate_draw_budget": MAX_PATCH_CANDIDATE_DRAWS,
+            "patch_candidate_count": len(patch_evidence),
+            **run_identity,
             **renderer_metrics,
             "target_mae": target_mae,
             "target_loss": target_loss,
@@ -797,6 +1191,7 @@ def make_min_nodes(
         )
         manifest = {
             "schema_version": "png_to_shader_min_manifest_v1",
+            **run_identity,
             "project_id": project_id,
             "run_id": run_id,
             "status": "completed",
@@ -804,6 +1199,7 @@ def make_min_nodes(
             "template_version": materialized.template_version,
             "scene": best["scene"],
             "metrics": metrics,
+            "patch_evidence": patch_evidence,
             "trace": trace,
         }
         manifest_ref = run.write_json("final/manifest.json", manifest)
@@ -831,6 +1227,9 @@ def make_min_nodes(
                 "llm_call_count": int(state.get("llm_call_count", 0)),
                 "llm_budget": int(state.get("llm_budget", 0)),
                 "refine_budget": int(state.get("refine_budget", 0)),
+                "patch_candidate_draw_budget": MAX_PATCH_CANDIDATE_DRAWS,
+                "patch_evidence": patch_evidence,
+                **run_identity,
                 "renderer_path": renderer_metrics["renderer_path"],
                 "target_mae": target_mae,
                 "target_loss": target_loss,

@@ -1,6 +1,6 @@
 # 进度
 
-最后更新：2026-07-22
+最后更新：2026-07-23
 
 > 本文件是有界的当前交接页，不是逐会话追加日志。功能状态以 `docs/FEATURES.md` 为准，长期取舍以 `docs/DECISIONS.md` 为准，完整旧记录见 `docs/progress/archive/`。
 
@@ -13,9 +13,13 @@
 - 仓库结构边界已加固：五模型角色离线 benchmark 与在线 Agent Service 分离，共享测试样本归入 `tests/fixtures`，轻量包导入不再 eager-load 浏览器/Runner/V1 契约；前端统一通过 API client 访问后端，Node Lab 只对选中步骤加载完整明细。
 - 正式 run `m5-20260715T023445Z` 的自动质量检查 12/12 通过，但独立人工盲评 final/initial/tie 为 `3/4/3`，final 偏好率 `30%` 低于冻结的 `50%` 门槛；最终 gate 为 `failed`，F09 继续 active、灰度 no-go。
 - 用户已确定《PNG 转无贴图 GLSL Agent—目标架构（详细版）》取代旧 V2–V5 路线，成为 F09 后续算法与演进的权威目标；旧 V2–V5 和最初架构 SVG 均保留为历史/概念参考，不再覆盖后续决策、当前架构或实现事实。该决定不表示详细版能力已经实现，也不改变 F02–F05 的 `not_started` 状态。
-- 《PNG 转无贴图 GLSL Agent—最小骨架（快速版）》已完成固定模板扩展：`png_to_shader_min_scene_v3` 严格区分 solid/radial/linear 并校验 circle 等轴；`png_to_shader_min_template_v3` 使用四个紧凑 feature 槽与 15/16 fragment uniform vectors，支持六类主体内外效果；Refine 支持原子 replace feature/color-field；`min_scene_composite_v3` 改用 global/foreground/background/geometry/edge/worst-tile 通用分量，并按固定 7 例 fallback 内部 loss 中位数冻结 target loss=`0.04`。Initial/fallback 真实仲裁、三档预算、同 run 单 prepared program 和 12 节点 Graph 拓扑不变。
+- 《PNG 转无贴图 GLSL Agent—最小骨架（快速版）》已完成固定模板扩展：`png_to_shader_min_scene_v3` 严格区分 solid/radial/linear 并校验 circle 等轴；`png_to_shader_min_template_v3` 使用四个紧凑 feature 槽与 15/16 fragment uniform vectors，支持六类主体内外效果；Refine 支持原子 replace feature/color-field；`min_scene_composite_v3` 改用 global/foreground/background/geometry/edge/worst-tile 通用分量。MAE/loss 目标和 fast/balanced/high 三档 render/LLM/Refine 预算由 `src/agent/app/config/png_to_shader_min.yaml` 严格加载，当前实验配置为 `0.04/0.02` 与 `48/2/1`、`96/4/2`、`640/9/9`；同 run 单 prepared program 和 12 节点 Graph 拓扑不变。
 - `scene_mvp` 新增运行时可观测：前端预生成 `run_id` 随 POST 发送并轮询 `/api/shader/runs/{run_id}/progress` 增量事件与 `/progress/render` 实时渲染帧，运行中展示 12 节点时间线、render/LLM/Refine 预算、best loss/MAE 对 target、路由决策和事件流；Agent service 以 `astream(stream_mode="updates")` 产出严格白名单事件（图片/Scene/GLSL/渲染字节不进入事件），事件缓冲是单进程内存语义、重启即失，终态 `agent_events` 账本路径不变。
 - `scene_mvp` 固定模板扩展已完成无模型工程验收：真实 Chromium 证明三类颜色场、六类 feature、四槽、prepared/baked 像素语义与固定 program 签名；固定 7 例按外部 `png_to_shader_score_v1` 对照 v2 fallback 为 6/7 改善，其余 global/ROI/bbox 回归低于预设容差。该 v3 只表示 Scene/template/metric 各自顺序升级，不是旧 V3 Oracle/Search 阶段；真实模型和人工质量门禁仍未执行。
+- 已完成真实单例 run `85506ab8-12c4-4a20-8940-824875ea0f97` 的只读复盘：流程成功但以 `render_budget_exhausted` 停止、`target_reached=false`；五次 Refine 全部被拒绝，最终四槽中只有 shadow 实际生效。根因与待验证建议已沉淀到 `docs/superpowers/specs/2026-07-23-scene-mvp-run-85506ab8-agent-optimization.md`，该单例和实验配置不构成冻结 benchmark 或发布证据。
+- 已实施单例复盘建议的 P0 最小增量：YAML 强制声明冻结 benchmark 或独立实验，冻结身份对 D058/D059 配置漂移 fail closed；Refine 获得 worst-tile signed residual、active feature 和最近拒绝摘要，Patch 以规范 SHA-256 脱敏审计。非重复合法 typed Patch 在独立 branch 内使用最多 12 次现有 draw 做范围受限成熟，只有 matured loss 严格改善才提交；重复、非法和 Renderer 失败不能污染 best。实现报告见 `docs/superpowers/specs/2026-07-23-scene-mvp-agent-optimization-implementation-report.md`。
+- 已完成真实独立实验 run `79f51d8a-1aaa-4f92-b806-cd8a44ddf297` 的 Codex/Kimi 联合评估及 P0 无模型诊断：工程闭环正常，但复合 loss `0.048350` 未达到 `0.02`。实际模板 geometry 优先搜索可把 loss 降到 `0.046294`，却使 foreground/global MAE 恶化且仍缺关键高光，证明 scorer 存在视觉语义错位风险；两个合成 Patch 上 32 draw 均优于 12 draw，但方向顺序不稳定。生产 scorer、Prompt、预算和目标均未改，F09 仍为 no-go。报告见 `docs/superpowers/specs/2026-07-23-scene-mvp-run-79f51d8a-evaluation.md` 与 `docs/superpowers/specs/2026-07-23-scene-mvp-run-79f51d8a-p0-no-model-experiment.md`。
+- run `9d10b919-25f6-41a2-a2cf-e88c23ad78be` 的 `GraphRecursionError` 已正式修复；Refine 后不再重复完整 base/feature sweep，合法路径公式修正为 `9+2F+6R`，high 档最坏 65 步、注入 69。配置仍拒绝超过 256 的组合，异常保持 fail-closed，失败账本只保存安全进度快照。
 - 已形成 `docs/superpowers/plans/2026-07-22-png-to-shader-v1-retirement.md` 分阶段退役计划：先抽离 min 仍使用的消息/WebGL1 共享契约，再分别完成 min benchmark、Node Lab、Memory 与默认产品路径门禁，最后由独立下线决策授权删除 V1 可执行代码；该计划不授权当前立即删除，历史决策、benchmark 和失败证据继续只增不改保留。
 
 ## 当前 active 功能
@@ -24,26 +28,30 @@
 
 ## 下一步
 
-- 使用固定 7 例和显式真实模型开关运行新的 `scene_mvp` v3 benchmark，核对模型完整 Scene、fallback 仲裁、Refine replace patch、外部同口径指标与人工偏好是否同向；无模型 6/7 改善只证明确定性下界，不证明模型视觉达标。
-- 为 v3 结果制作独立匿名盲评包并执行既有人工门禁；通过前不得调整 `0.04` target、外部 baseline 容差或把 F09 标为 passing。
-- 后续再独立评估 CMA-ES/2000 draw 搜索；当前 48/96/160 draw 确定性搜索已验证参数接线、累计接受、预算记账和 best 单调性，但不替代更大搜索空间的时延、取消和质量 benchmark。
+- 先把本次 geometry 诊断扩展到固定 7 例，分别度量主体内、主体外投影、边缘、复合 loss 与人工偏好是否同向；单纯调整 hard threshold/软化掩码未消除本例错位，不得直接修改 target 或扩大搜索来掩盖 scorer 问题。
+- 补齐私有可重放 typed Patch、候选 Scene、raw/matured 指标及模型/Prompt/源码/metric 版本证据；公开 Artifact 继续只暴露 hash 和脱敏摘要。在此之后用相同真实 Patch 做 12/32 draw 单因素重放，再决定生产 maturity 预算。
+- scorer 语义和 Patch 重放证据稳定后，再独立调整 Initial Author 的视觉结构分解 Prompt，并使用冻结 D058/D059 配置、固定 7 例和显式真实模型开关运行 `scene_mvp` v3 benchmark；当前 YAML 仍是独立实验配置，任何冻结身份漂移都必须拒绝启动。
+- 为 v3 结果制作独立匿名盲评包并执行既有人工门禁；冻结证据继续使用 D058 的 `target_loss=0.04`，当前 YAML 实验目标/预算必须记录实际配置并单独验收，通过前不得调整外部 baseline 容差或把 F09 标为 passing。
+- 后续再独立评估 CMA-ES/2000 draw 搜索；当前小批确定性搜索与单 Patch 12 draw 成熟已验证参数接线、累计接受、预算记账和 best 单调性，但实验 high=640 不得冒充冻结 high=160，也不替代更大搜索空间的时延、取消和质量 benchmark。
 - `scene_mvp` 继续作为显式实验模式，`procedural_v1` 保持默认；在新 benchmark 与人工门禁通过前不删除 V1、Memory、Node Lab 或既有证据。
 - V1 退役准备必须作为独立增量执行：优先完成通用消息/WebGL1 契约解耦和机器可读依赖 inventory；固定模板扩展、质量 benchmark 与大规模删除不得混在同一改动中。
 
 ## 未解决缺口
 
+- 两个合成 Patch fixture 表明 32 draw 可比 12 draw 到达更低 loss 并救回 overfit 候选，但双向交替顺序并不稳定，且输出仍未恢复正确镜面结构；缺少原 run 被拒 typed Patch 与固定 7 例人工偏好，不能据此直接修改生产 maturity 策略。
+- `scene_mvp` 终态证据仍缺实际模型身份、Prompt/源码 revision、metric background、私有可重放 typed Patch 与完整 durable 路由；Progress 最终 snapshot 也没有累计 LLM/Refine counters。当前 hash-only 公开证据可判断接受结果，不能完整解释或重放被拒候选。
 - `scene_mvp` v3 尚未运行真实模型 7 例 benchmark 和独立人工盲评；当前 6/7 改善来自确定性感知 fallback，不能证明模型会正确选择 linear/lobe/glow 或 replace patch，也不能作为发布通过证据。
 - `scene_mvp` 已具备 prepared program、严格 typed uniform 热上传、原始 RGB 热路径和 100 draw 显式性能探针，但尚无 CMA-ES、2000 draw 生产预算、优化中断/恢复或对应质量证据，不能声称已完成性能版优化器。
 - 当前产品接入覆盖显式模式、Backend/Frontend、账本摘要、三种 Artifact、分档 render/LLM/Refine 预算和专用浏览器 E2E；Memory、Node Lab、独立 benchmark 和真实模型质量验证尚未迁移，V1 垂直切片与冻结失败证据不得删除。
 - `scene_mvp` 的专用浏览器 E2E 使用隔离假 API 验证“达标”和“流程完成但质量未达标”两种成功响应都会显示结果；它不证明真实模型视觉质量、数据库耐久性或线上网络配置。
-- `min_scene_composite_v3` 已去除亮度分位数伪语义，但仍未通过真实模型 benchmark 证明 geometry/edge/worst-tile 与人类偏好的视觉拓扑和高光/阴影层次一致，这是 F09 当前的质量发布阻塞项。
+- `min_scene_composite_v3` 已去除亮度分位数伪语义，但 run `79f51d8a` 的受限搜索已出现 geometry/total loss 改善而 foreground/global MAE 与关键高光视觉恶化的反向证据；固定 7 例分量消融和人工偏好校准是当前发布阻塞项。
 - 正式 M5 与 Node Lab real-model 的完整报告仍位于被忽略的本地 `output/benchmarks/`；`docs/evidence/registry.json` 已登记摘要、字节数和 SHA-256，但耐久性仍为 `partial`。在完整脱敏证据进入 Git LFS、Release 或不可变对象存储前，不能仅凭本地路径独立复验。
 - 服务端仍是阻塞式 API；浏览器停止等待不等于服务端取消。端到端 deadline、任务化/cancel、outbox/reaper、多 worker 分布式锁和真实发生顺序事件属于后续可靠性设计，不与 M6.2 混写。
 - 目标架构详细版当前只有设计方案；多假设、置信度标定、特征块调度、硬约束、两层一致性、沙箱和完整评测体系均未实现。旧 V2–V5 中未落地的契约不再是当前阶段门禁，但相应能力仍不得表述为完成。
 
 ## 当前验证基线
 
-- 2026-07-22 当前工作树通过 `make check`：462 个 Python 单元测试、`docs-check`、LangGraph validate（2 个 Graph）和 Frontend production build；全仓 `ruff check`、`mypy --strict src backend`（147 个源文件）与 `git diff --check` 通过。普通 Integration 为 37 passed/1 skipped，另有 1 个环境性失败：本地 `.env` 的 `TEST_DATABASE_URL` 指向无法解析的占位主机 `HOST`，与本次改动无关。`scene_mvp` 专用浏览器 E2E 通过。
+- 2026-07-23 当前工作树通过 `make check`：496 个 Python 单元测试、`docs-check`、LangGraph validate（2 个 Graph）和 Frontend production build；全仓 `ruff check src backend tests` 加新增诊断脚本、`mypy --strict src backend`（148 个源文件）、诊断脚本单独 strict mypy 与 `git diff --check` 通过。run `79f51d8a` P0 诊断以真实 Chromium 完成 245 draw、精确复现 `0.04835044430924994` 基线且无模型调用。真实 Chromium/固定质量/递归/进度定向 Integration 为 11 passed/1 显式性能探针 skipped，`make test-scene-mvp-ui` 通过；最大四 feature、high 档 9 次 LLM/9 次 Refine 的 Graph 路径完成 65 个节点事件并由业务预算正常终止。完整 Integration 为 38 passed/1 skipped，另有 1 个环境性失败：本地 `.env` 的 `TEST_DATABASE_URL` 指向无法解析的占位主机 `HOST`，与本次改动无关。
 - v3 Renderer/质量基线：真实 Chromium 4 passed/1 显式性能探针 skipped，覆盖 prepared/baked 一致、三颜色场、六 feature、四槽和固定签名；固定 7 例质量回归 2 passed，按外部 `png_to_shader_score_v1` 对照 v2 fallback 为 6/7 改善，`solid_circle` total-loss 回归 `0.000217` 低于冻结的 `0.001` 容差，所有 ROI 与 geometry 回归均低于 `0.01` 容差。未调用真实模型。
 - 2026-07-16 当前工作树在 `UV_LOCKED=1` 下通过 `make check`：414 个 Python 单元测试、`docs-check`、LangGraph validate（1 个 Graph）与 Frontend production build 均成功；Integration 为 27 passed、1 skipped，全仓 Ruff、`mypy --strict src backend` 与 `git diff --check` 通过。未运行真实模型。
 - 数据库和浏览器追加验收通过：`make test-memory-postgres` 为 1 passed；产品 `npm --prefix frontend run e2e:procedural-v1` 与 Node Lab `make test-node-lab-ui` 均通过，使用隔离资源且没有真实模型调用。
@@ -55,11 +63,11 @@
 
 ## 最近重要变更
 
-- 2026-07-22：新增 PNG-to-Shader V1 分阶段退役计划，冻结“先解耦、再迁移 benchmark/Node Lab/Memory、切换默认、最后删除”的顺序；当前未授权删除 V1，F09、默认模式和发布门禁均未改变。
+- 2026-07-23：run `79f51d8a` P0 无模型实验精确复现基线，并发现 geometry/total loss 与像素误差、关键高光视觉反向；32 draw 在两个合成 Patch 上优于 12 draw但顺序不稳定。生产算法保持不变，后续先做固定 7 例 scorer 校准与私有 Patch 重放，F09 继续 active/no-go。
+- 2026-07-23：`scene_mvp` 补齐冻结/独立实验身份、配置指纹、Patch/空间残差/拒绝证据与 12 draw typed Patch 有界成熟；Refine 后不再重复全量 sweep，`current_best` 保持只读锚点，真实模型质量仍未证明，决策见 D061。
+- 2026-07-23：`scene_mvp` 废止固定 Graph recursion limit，改为按合法预算路径和四 feature 上限逐档推导并校验；D061 后公式修正为 `9+2F+6R`、high 注入 69，异常保持 fail-closed，决策见 D060/D061。
+- 2026-07-22：`scene_mvp` 的 MAE/loss 目标和三档 render/LLM/Refine 预算迁移到包内严格 YAML；模型调用最大值同步从配置推导，默认行为、Graph/API 和 F09 no-go 不变，决策见 D059。
 - 2026-07-22：完成 `scene_mvp` 固定模板扩展：分别冻结 v3 Scene/template/metric、四槽 15/16 WebGL1 资源布局、三类颜色场、六类 feature、replace patch、typed optimizer 与通用区域 objective；真实 Chromium 像素/签名测试通过，固定 7 例外部 objective 对照 v2 fallback 为 6/7 改善。它不是旧 V3 阶段，真实模型与人工门禁仍待执行，决策见 D058。
-- 2026-07-22：`scene_mvp` 新增运行时可观测：Agent service 以 `astream` 逐节点产出白名单进度事件，Backend 新增进程内存 `RunProgressRegistry` 与 `/progress`、`/progress/render` 只读端点，前端运行中展示节点时间线、预算、质量进度、路由决策、事件流和实时渲染帧；终态账本与 Graph 拓扑不变，决策见 D057。
-- 2026-07-22：保持 `scene_mvp` Graph 拓扑不变，完成模型/fallback 真实仲裁、WebGL1 最低 uniform 容量安全的 v2 packed 三槽模板、rim/arc/line 独立几何、动态 feature queue、累计候选优化、三档硬预算和局部复合 loss；API、账本、Artifact 与 UI 同步公开模板、指标和预算，F09 仍为 active/no-go。
-- 2026-07-21：保持 `scene_mvp` 12 节点拓扑不变，接入完整 MinScene Initial Author、单个 typed patch Refine Author、一次结构修复、40 draw 确定性参数搜索及达标/未达标双路径 UI E2E；显式产品模式最多 6 次调用和 1 轮 Refine，失败/非法/较差候选不能覆盖 `current_best`。
 
 ## 历史索引
 

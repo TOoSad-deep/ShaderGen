@@ -28,6 +28,7 @@
 
 ## `PngToShaderMinState` 边界
 
-- 轻量字段：`project_id`、`phase`、`status`、`stop_reason`、draw/LLM/Refine 计数与预算、`target_mae`、`current_best_mae`、`feature_queue`。
-- `UntrackedValue`：`run_id`、输入图片、确定性感知和目标 RGB、工作 scene、物化模板、当前 GLSL/render/MAE、不可被失败候选覆盖的 `current_best`、Author 实际模型/安全错误码、路由动作、阶段 trace 与 final manifest/result。
-- `llm_budget` 在初始化时硬限制到 `0..6`，语义调用和结构修复共用 `llm_call_count`；显式 `scene_mvp` 产品模式使用上限 6，供应商/配置错误会回退到确定性 scene，不覆盖 `current_best`。
+- 轻量字段：`project_id`、`phase`、`status`、`stop_reason`、run classification/experiment/report/config fingerprint、draw/LLM/Refine 计数与预算、`target_mae`、`current_best_mae`、`feature_queue` 和 Refine branch 是否已完成选择的过桥标志。
+- `UntrackedValue`：`run_id`、输入图片、确定性感知和目标 RGB、工作 scene、物化模板、当前 GLSL/render/MAE、不可被失败候选覆盖的 `current_best`、空间残差摘要、待选 Patch 安全摘要、最近拒绝窗口、Patch 证据、Author 实际模型/安全错误码、路由动作、阶段 trace 与 final manifest/result。
+- `render_budget`、`llm_budget`、`refine_budget`、`target_mae` 和 `target_loss` 由 `src/agent/app/config/png_to_shader_min.yaml` 选定档位注入；`llm_budget` 再受该 YAML 三档最大值限制，语义调用和结构修复共用 `llm_call_count`。供应商错误会回退到确定性 scene，不覆盖 `current_best`。
+- `pending_patch_summary` 和拒绝历史只保存 typed operation、feature id/type、SHA-256 指纹、数值 delta、拒绝原因与耗时；完整 Patch value、图片/RGB、GLSL、用户输入、模型原始响应和 reasoning 均不得进入 State 摘要或终态 trace。

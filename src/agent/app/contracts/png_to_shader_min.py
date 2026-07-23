@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from hashlib import sha256
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -70,6 +72,39 @@ MinAuthorPatch = (
 )
 
 
+def summarize_min_author_patch(patch: MinAuthorPatch) -> dict[str, str | None]:
+    """返回不含完整 value 的 typed Patch 身份和规范化 SHA-256 指纹。."""
+    canonical = json.dumps(
+        patch.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    operation: str
+    feature_id: str | None = None
+    feature_type: str | None = None
+    if isinstance(patch, AddFeatureAuthorPatch):
+        operation = "add_feature"
+        feature_id = patch.value.id
+        feature_type = patch.value.type
+    elif isinstance(patch, RemoveFeatureAuthorPatch):
+        operation = "remove_feature"
+        feature_id = patch.value
+    elif isinstance(patch, ReplaceFeatureAuthorPatch):
+        operation = "replace_feature"
+        feature_id = patch.value.feature_id
+        feature_type = patch.value.feature.type
+    else:
+        operation = "replace_color_field"
+    return {
+        "patch_operation": operation,
+        "feature_id": feature_id,
+        "feature_type": feature_type,
+        "patch_fingerprint": sha256(canonical).hexdigest(),
+    }
+
+
 def apply_min_author_patch(scene: MinScene, patch: MinAuthorPatch) -> MinScene:
     """把 Agent 白名单 patch 适配到领域 scene patch，并重新完整校验。."""
     if isinstance(patch, AddFeatureAuthorPatch):
@@ -103,4 +138,5 @@ __all__ = [
     "ReplaceColorFieldAuthorPatch",
     "ReplaceFeatureAuthorPatch",
     "apply_min_author_patch",
+    "summarize_min_author_patch",
 ]

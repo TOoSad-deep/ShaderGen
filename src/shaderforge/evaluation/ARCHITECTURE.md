@@ -12,6 +12,7 @@
 - 按前景 mask 置信度衰减 geometry 权重并重新归一化总分；
 - 比较两轮 protection loss 的最大退化。
 - `scene_mvp` 使用 `min_scene_composite_v3` 记录 global/foreground/background MAE、geometry mask loss、edge loss 与固定 `4×4` 网格最坏 2 个 tile MAE，冻结权重为 `0.20/0.25/0.15/0.15/0.10/0.15`；前景证据不足时停用 background/geometry 并重新归一化，不再使用亮度分位数伪 highlight/shadow。
+- `summarize_spatial_residual()` 在不改变 scorer、权重或 metric version 的前提下，报告固定 `4×4` 网格误差最大的 2 个 tile、MAE、亮度与 RGB 有符号偏差；符号固定为 `rendered-reference`，正值表示候选过高、负值表示候选过低。`dominant_metric_component()` 按有效权重后的贡献选择主导分量，只供 Refine 诊断与审计。
 - `CandidateRecord` 强绑定 GLSL、Author/provenance、compile、render、metrics、review 与父候选引用，并把来源收紧为 `model | deterministic`；确定性来源必须由调用方同时保存 generator version；
 - `select_current_best()` 只接受硬约束通过、总损失达到最小改善且保护区最大退化不超阈值的候选；缺失既有保护证据直接拒绝。
 

@@ -2,6 +2,7 @@
 
 from shaderforge.optimization.min_optimize import (
     MAX_CANDIDATES_PER_BATCH,
+    MAX_PATCH_CANDIDATE_DRAWS,
     CandidateProposal,
     OptimizationStage,
     ScoredScene,
@@ -13,6 +14,7 @@ from shaderforge.optimization.min_optimize import (
 
 __all__ = [
     "MAX_CANDIDATES_PER_BATCH",
+    "MAX_PATCH_CANDIDATE_DRAWS",
     "CandidateProposal",
     "OptimizationStage",
     "ScoredScene",

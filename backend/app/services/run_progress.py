@@ -129,6 +129,21 @@ class RunProgressRegistry:
             return None, 0
         return run.render_png, run.render_seq
 
+    def diagnostic_snapshot(self, run_id: str) -> dict[str, Any]:
+        """返回可进入失败账本的最小安全快照，不包含事件、图片或输入内容."""
+        run = self._runs.get(run_id)
+        if run is None:
+            return {}
+        snapshot = run.snapshot
+        result: dict[str, Any] = {
+            "latest_seq": run.latest_seq,
+            "current_node": snapshot.get("current_node"),
+            "counters": dict(snapshot.get("counters", {})),
+            "best": dict(snapshot.get("best", {})),
+            "budgets": dict(snapshot.get("budgets", {})),
+        }
+        return result
+
     def _sweep(self) -> None:
         """丢弃超过 TTL 的条目（含崩溃后永远停在 running 的条目）."""
         now = time.monotonic()

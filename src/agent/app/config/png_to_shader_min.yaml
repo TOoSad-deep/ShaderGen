@@ -1,0 +1,22 @@
+version: scene_mvp_runtime_policy_v1
+run_classification: independent_experiment
+experiment_id: scene-mvp-agent-optimization-20260723
+report_schema_version: scene_mvp_run_report_v1
+
+targets:
+  mae: 0.04
+  loss: 0.02
+
+quality_presets:
+  fast:
+    render_budget: 48
+    llm_budget: 2
+    refine_budget: 1
+  balanced:
+    render_budget: 96
+    llm_budget: 4
+    refine_budget: 2
+  high:
+    render_budget: 1000
+    llm_budget: 32
+    refine_budget: 30

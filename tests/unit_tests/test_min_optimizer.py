@@ -6,6 +6,7 @@ import pytest
 
 from shaderforge.optimization import (
     MAX_CANDIDATES_PER_BATCH,
+    MAX_PATCH_CANDIDATE_DRAWS,
     ScoredScene,
     accept_strict_mae_improvement,
     propose_min_scene_candidates,
@@ -132,6 +133,70 @@ def test_base_candidates_are_color_field_type_aware(field, expected_paths) -> No
         assert not any("inner" in path or ".color[" in path for path in paths)
 
 
+@pytest.mark.parametrize(
+    "field",
+    (
+        SolidColorField(model="solid", color=(0.5, 0.4, 0.3)),
+        RadialColorField(
+            model="radial",
+            inner=(0.9, 0.5, 0.4),
+            outer=(0.4, 0.1, 0.2),
+            origin=(-0.35, 0.55),
+            scale=1.25,
+        ),
+        LinearColorField(
+            model="linear",
+            start=(0.9, 0.2, 0.3),
+            end=(1.0, 0.9, 0.9),
+            direction=(0.0, -1.0),
+            offset=0.5,
+            scale=1.2,
+        ),
+    ),
+)
+def test_color_field_candidates_never_touch_geometry_or_background(field) -> None:
+    scene = _scene().model_copy(
+        update={"object": _scene().object.model_copy(update={"color_field": field})}
+    )
+    proposals = propose_min_scene_candidates(
+        scene,
+        stage="color_field",
+        remaining_draw_budget=MAX_PATCH_CANDIDATE_DRAWS - 1,
+        batch_size=MAX_PATCH_CANDIDATE_DRAWS - 1,
+    )
+
+    assert len(proposals) <= MAX_PATCH_CANDIDATE_DRAWS - 1
+    assert proposals
+    assert all(item.parameter.path.startswith("object.color_field.") for item in proposals)
+    assert all(item.scene.canvas == scene.canvas for item in proposals)
+    assert all(item.scene.object.primitive == scene.object.primitive for item in proposals)
+    assert all(item.scene.object.features == scene.object.features for item in proposals)
+
+
+def test_patch_candidate_draw_limit_reserves_one_raw_draw() -> None:
+    local_draw_budget = MAX_PATCH_CANDIDATE_DRAWS - 1
+
+    feature = propose_min_scene_candidates(
+        _scene(),
+        stage="feature",
+        feature_id="highlight",
+        remaining_draw_budget=local_draw_budget,
+        batch_size=local_draw_budget,
+    )
+    color_field = propose_min_scene_candidates(
+        _scene(),
+        stage="color_field",
+        remaining_draw_budget=local_draw_budget,
+        batch_size=local_draw_budget,
+    )
+
+    assert MAX_PATCH_CANDIDATE_DRAWS == 12
+    assert len(feature) == local_draw_budget
+    assert len(color_field) == local_draw_budget
+    assert 1 + len(feature) <= MAX_PATCH_CANDIDATE_DRAWS
+    assert 1 + len(color_field) <= MAX_PATCH_CANDIDATE_DRAWS
+
+
 @pytest.mark.parametrize("feature_id", ["highlight", "rim", "shadow"])
 def test_feature_candidates_cover_existing_feature_numeric_fields(
     feature_id: str,
@@ -251,6 +316,13 @@ def test_feature_stage_rejects_non_whitelisted_selection() -> None:
             _scene(),
             stage="feature",
             feature_id="unknown",
+            remaining_draw_budget=1,
+        )
+    with pytest.raises(ValueError, match="不接受 feature_id"):
+        propose_min_scene_candidates(
+            _scene(),
+            stage="color_field",
+            feature_id="highlight",
             remaining_draw_budget=1,
         )
 

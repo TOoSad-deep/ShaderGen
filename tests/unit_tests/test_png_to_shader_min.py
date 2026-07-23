@@ -6,8 +6,12 @@ import pytest
 from langchain_core.messages import AIMessage
 from PIL import Image, ImageDraw
 
+from agent.app.config.png_to_shader_min import MIN_PIPELINE_CONFIG
 from agent.app.contracts.llm import LLMResponse
-from agent.app.contracts.png_to_shader_min import apply_min_author_patch
+from agent.app.contracts.png_to_shader_min import (
+    apply_min_author_patch,
+    summarize_min_author_patch,
+)
 from agent.app.graphs.png_to_shader_min_graph import build_png_to_shader_min_graph
 from agent.app.graphs.png_to_shader_min_routing import (
     route_after_base,
@@ -15,11 +19,16 @@ from agent.app.graphs.png_to_shader_min_routing import (
     route_after_render,
 )
 from agent.app.nodes.png_to_shader_min import MinRendererRegistry, make_min_nodes
+from agent.app.nodes.png_to_shader_min.model_author import (
+    MAX_MIN_LLM_CALLS,
+    MIN_AUTHOR_REFINE_PROMPT,
+)
 from agent.app.parsers.png_to_shader_min import (
     MinAuthorParseError,
     parse_min_author_patch,
 )
 from agent.app.services.png_to_shader_min import PngToShaderMinService
+from shaderforge.evaluation import evaluate_min_scene
 from shaderforge.generation import (
     MAX_MIN_FEATURES,
     MIN_TEMPLATE_FRAGMENT_UNIFORM_VECTORS,
@@ -127,6 +136,48 @@ class _UniformValueRenderer(_FakeRenderer):
         self.prepared = _UniformValuePrepared()
 
 
+class _PatchMaturityPrepared(_FakePrepared):
+    async def render_uniforms(self, values, *, capture_png=False):
+        self.render_durations_ms = (*self.render_durations_ms, 1.25)
+        feature_kind = float(values["u_feature_kinds"][0])
+        value = (
+            float(values["u_feature_0_color_power"][3])
+            if feature_kind > 0.0
+            else 0.25
+        )
+        channel = round(value * 255)
+        rgb = bytes((channel, channel, channel)) * self.width * self.height
+        return SimpleNamespace(
+            success=True,
+            rgb_bytes=rgb,
+            image_bytes=None,
+            draw_error=None,
+        )
+
+
+class _PatchMaturityRenderer(_FakeRenderer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.prepared = _PatchMaturityPrepared()
+
+
+class _FailingPrepared(_FakePrepared):
+    async def render_uniforms(self, _values, *, capture_png=False):
+        self.render_durations_ms = (*self.render_durations_ms, 1.25)
+        return SimpleNamespace(
+            success=False,
+            rgb_bytes=None,
+            image_bytes=None,
+            draw_error="synthetic_draw_failure",
+        )
+
+
+class _FailingRenderer(_FakeRenderer):
+    def __init__(self) -> None:
+        super().__init__()
+        self.prepared = _FailingPrepared()
+
+
 class _FakeGateway:
     def __init__(self, *responses: str | Exception) -> None:
         self.responses = list(responses)
@@ -150,9 +201,11 @@ class _FakeGateway:
 class _BudgetGraph:
     def __init__(self) -> None:
         self.inputs: list[dict[str, object]] = []
+        self.configs: list[dict[str, object]] = []
 
-    async def astream(self, state, _config, *, stream_mode="updates"):
+    async def astream(self, state, config, *, stream_mode="updates"):
         self.inputs.append(state)
+        self.configs.append(config)
         yield {
             "finalize": {
                 "final_result": {
@@ -173,6 +226,12 @@ class _BudgetGraph:
                     "llm_call_count": 0,
                     "llm_budget": state["llm_budget"],
                     "refine_budget": state["refine_budget"],
+                    "run_classification": state["run_classification"],
+                    "experiment_id": state["experiment_id"],
+                    "config_fingerprint": state["config_fingerprint"],
+                    "report_schema_version": state["report_schema_version"],
+                    "patch_candidate_draw_budget": 12,
+                    "patch_evidence": (),
                     "renderer_path": "prepared_uniforms_v1",
                     "target_mae": state["target_mae"],
                     "target_loss": state["target_loss"],
@@ -220,7 +279,7 @@ def _author_state(*, llm_budget: int = 2) -> dict[str, object]:
     (
         ("fast", 48, 2, 1),
         ("balanced", 96, 4, 2),
-        ("high", 160, 6, 3),
+        ("high", 640, 9, 9),
     ),
 )
 async def test_scene_mvp_quality_preset_selects_bounded_budgets(
@@ -236,8 +295,8 @@ async def test_scene_mvp_quality_preset_selects_bounded_budgets(
         graph,
         LocalArtifactStore(tmp_path),
         registry,
-        llm_budget=6,
-        refine_budget=3,
+        llm_budget=MIN_PIPELINE_CONFIG.max_llm_budget,
+        refine_budget=MIN_PIPELINE_CONFIG.max_refine_budget,
     )
 
     result = await service.generate(
@@ -251,7 +310,10 @@ async def test_scene_mvp_quality_preset_selects_bounded_budgets(
     assert graph.inputs[-1]["render_budget"] == render_budget
     assert graph.inputs[-1]["llm_budget"] == llm_budget
     assert graph.inputs[-1]["refine_budget"] == refine_budget
-    assert graph.inputs[-1]["target_loss"] == 0.04
+    assert graph.inputs[-1]["target_loss"] == 0.02
+    assert graph.configs[-1]["recursion_limit"] == (
+        MIN_PIPELINE_CONFIG.quality_presets[quality_preset].recursion_limit
+    )
     assert result.quality_preset == quality_preset
     assert result.render_budget == render_budget
 
@@ -463,6 +525,13 @@ def test_min_author_patch_parser_requires_one_whitelisted_typed_patch() -> None:
         )
 
 
+def test_min_refine_prompt_explains_residual_and_rejection_evidence() -> None:
+    assert MIN_AUTHOR_REFINE_PROMPT.version == "min_author_refine_v1_3"
+    assert "rendered-reference" in MIN_AUTHOR_REFINE_PROMPT.prompt
+    assert "active_feature_summary" in MIN_AUTHOR_REFINE_PROMPT.prompt
+    assert "recent_rejected_patch_summaries" in MIN_AUTHOR_REFINE_PROMPT.prompt
+
+
 @pytest.mark.anyio
 async def test_min_author_initial_accepts_complete_strict_scene(tmp_path) -> None:
     state = _author_state()
@@ -602,11 +671,24 @@ async def test_min_author_refine_rejects_illegal_patch_and_keeps_best(tmp_path) 
     )
 
     update = await nodes["author_refine"](state)
+    rendered = await nodes["render_and_evaluate"](
+        {
+            **state,
+            **update,
+            "render_count": 0,
+            "render_budget": 12,
+            "recent_rejected_patch_summaries": (),
+            "patch_evidence": (),
+        }
+    )
 
     assert update["scene"] == state["current_best"]["scene"]  # type: ignore[index]
     assert update["llm_call_count"] == 2
     assert update["refine_count"] == 1
     assert update["author_error"] == "invalid_min_author_patch_json"
+    assert rendered["render_count"] == 0
+    assert rendered["current_best"] == state["current_best"]
+    assert rendered["patch_evidence"][-1]["rejected_reason"] == "invalid_patch"
 
 
 @pytest.mark.anyio
@@ -637,24 +719,209 @@ async def test_refine_candidate_cannot_overwrite_better_current_best(tmp_path) -
 
 
 @pytest.mark.anyio
-async def test_min_author_total_calls_including_repairs_never_exceed_six(
+async def test_structural_patch_can_mature_before_competing_with_current_best(
+    tmp_path,
+) -> None:
+    image = _pink_orb_png()
+    fallback = perceive_min_target(image).fallback_scene
+    scene_data = fallback.model_dump(mode="python")
+    scene_data["object"]["features"] = ()
+    best_scene = MinScene.model_validate(scene_data)
+    target_value = 56 / 255.0
+    anchor_value = 64 / 255.0
+    target_rgb = np.full(
+        (best_scene.canvas.height, best_scene.canvas.width, 3),
+        target_value,
+        dtype=np.float32,
+    )
+    anchor_rgb = np.full_like(target_rgb, anchor_value)
+    anchor_metric = evaluate_min_scene(
+        target_rgb,
+        anchor_rgb,
+        best_scene.canvas.background,
+    )
+    anchor_png = Image.new(
+        "RGB",
+        (best_scene.canvas.width, best_scene.canvas.height),
+        (64, 64, 64),
+    )
+    anchor_buffer = BytesIO()
+    anchor_png.save(anchor_buffer, format="PNG")
+    best = {
+        "scene": best_scene.model_dump(mode="json"),
+        "mae": anchor_metric.global_mae,
+        "loss": anchor_metric.total_loss,
+        "metrics": anchor_metric.to_dict(),
+        "residual_summary": {},
+        "glsl": "anchor-glsl",
+        "render": anchor_buffer.getvalue(),
+    }
+    patch_json = (
+        '{"operation":"add","path":"/object/features","value":'
+        '{"id":"local_highlight","type":"gaussian_lobe","center":[0,0],'
+        '"axes":[0.4,0.3],"color":[1,1,1],"intensity":0.3}}'
+    )
+    state = {
+        **_author_state(llm_budget=1),
+        "scene": best["scene"],
+        "current_best": best,
+        "target_rgb": target_rgb,
+        "metric_background": best_scene.canvas.background,
+        "render_count": 0,
+        "render_budget": 12,
+        "recent_rejected_patch_summaries": (),
+        "patch_evidence": (),
+    }
+    nodes = make_min_nodes(
+        LocalArtifactStore(tmp_path),
+        MinRendererRegistry(_PatchMaturityRenderer),  # type: ignore[arg-type]
+        _FakeGateway(patch_json),
+    )
+
+    refined = await nodes["author_refine"](state)
+    update = await nodes["render_and_evaluate"]({**state, **refined})
+
+    evidence = update["patch_evidence"][-1]
+    assert evidence["raw_candidate_loss"] > evidence["best_loss_before"]
+    assert evidence["matured_candidate_loss"] < evidence["best_loss_before"]
+    assert evidence["accepted"] is True
+    assert evidence["rejected_reason"] is None
+    assert evidence["maturity_draw_count"] == 11
+    assert evidence["total_candidate_draw_count"] == 12
+    assert update["current_best_loss"] < anchor_metric.total_loss
+    assert update["current_best"]["scene"]["object"]["features"][0]["intensity"] == (
+        pytest.approx(0.22)
+    )
+
+
+@pytest.mark.anyio
+async def test_duplicate_rejected_patch_receives_no_render_or_maturity_budget(
+    tmp_path,
+) -> None:
+    patch_json = (
+        '{"operation":"add","path":"/object/features","value":'
+        '{"id":"repeat","type":"gaussian_lobe","center":[0,0],'
+        '"axes":[0.4,0.3],"color":[1,1,1],"intensity":0.3}}'
+    )
+    patch = parse_min_author_patch(patch_json)
+    summary = summarize_min_author_patch(patch)
+    state = {
+        **_author_state(llm_budget=1),
+        "render_count": 4,
+        "render_budget": 12,
+        "recent_rejected_patch_summaries": (
+            {**summary, "rejected_reason": "no_strict_loss_improvement"},
+        ),
+        "patch_evidence": (),
+    }
+    registry = MinRendererRegistry(_PatchMaturityRenderer)  # type: ignore[arg-type]
+    nodes = make_min_nodes(
+        LocalArtifactStore(tmp_path),
+        registry,
+        _FakeGateway(patch_json),
+    )
+
+    refined = await nodes["author_refine"](state)
+    update = await nodes["render_and_evaluate"]({**state, **refined})
+
+    assert refined["author_error"] == "duplicate_recent_patch"
+    assert update["render_count"] == 4
+    assert update["current_best"] == state["current_best"]
+    assert update["patch_evidence"][-1]["duplicate_of_recent"] is True
+    assert update["patch_evidence"][-1]["maturity_draw_count"] == 0
+    assert update["patch_evidence"][-1]["total_candidate_draw_count"] == 0
+
+
+@pytest.mark.anyio
+async def test_refine_renderer_failure_cannot_pollute_current_best(tmp_path) -> None:
+    patch_json = (
+        '{"operation":"replace","path":"/object/color_field","value":'
+        '{"model":"solid","color":[0.9,0.4,0.5]}}'
+    )
+    state = {
+        **_author_state(llm_budget=1),
+        "metric_background": (1.0, 1.0, 1.0),
+        "render_count": 0,
+        "render_budget": 12,
+        "recent_rejected_patch_summaries": (),
+        "patch_evidence": (),
+    }
+    nodes = make_min_nodes(
+        LocalArtifactStore(tmp_path),
+        MinRendererRegistry(_FailingRenderer),  # type: ignore[arg-type]
+        _FakeGateway(patch_json),
+    )
+
+    refined = await nodes["author_refine"](state)
+    update = await nodes["render_and_evaluate"]({**state, **refined})
+
+    assert update["current_best"] == state["current_best"]
+    assert update["error"] is None
+    assert update["render_count"] == 1
+    assert update["patch_evidence"][-1]["rejected_reason"] == "renderer_failed"
+    assert update["patch_evidence"][-1]["maturity_draw_count"] == 0
+
+
+@pytest.mark.anyio
+async def test_remove_feature_uses_only_raw_draw_without_local_maturity(
+    tmp_path,
+) -> None:
+    state = {
+        **_author_state(llm_budget=1),
+        "metric_background": (1.0, 1.0, 1.0),
+        "render_count": 0,
+        "render_budget": 12,
+        "recent_rejected_patch_summaries": (),
+        "patch_evidence": (),
+    }
+    best_scene = MinScene.model_validate(state["current_best"]["scene"])  # type: ignore[index]
+    feature_id = best_scene.object.features[0].id
+    patch_json = (
+        '{"operation":"remove","path":"/object/features","value":'
+        f'"{feature_id}"'
+        "}"
+    )
+    nodes = make_min_nodes(
+        LocalArtifactStore(tmp_path),
+        MinRendererRegistry(_FakeRenderer),  # type: ignore[arg-type]
+        _FakeGateway(patch_json),
+    )
+
+    refined = await nodes["author_refine"](state)
+    update = await nodes["render_and_evaluate"]({**state, **refined})
+
+    evidence = update["patch_evidence"][-1]
+    assert evidence["patch_operation"] == "remove_feature"
+    assert evidence["maturity_draw_count"] == 0
+    assert evidence["total_candidate_draw_count"] == 1
+    assert update["render_count"] == 1
+
+
+@pytest.mark.anyio
+async def test_min_author_total_calls_never_exceed_configured_maximum(
     tmp_path,
 ) -> None:
     state = _author_state(llm_budget=99)
-    gateway = _FakeGateway(*("invalid" for _ in range(6)))
+    gateway = _FakeGateway(*("invalid" for _ in range(MAX_MIN_LLM_CALLS)))
     nodes = make_min_nodes(
         LocalArtifactStore(tmp_path),
         MinRendererRegistry(_FakeRenderer),  # type: ignore[arg-type]
         gateway,
     )
 
-    for node_name in ("author_initial", "author_refine", "author_refine"):
+    for node_name in (
+        "author_initial",
+        *("author_refine" for _ in range(MAX_MIN_LLM_CALLS)),
+    ):
         state.update(await nodes[node_name](state))
     no_budget_update = await nodes["author_refine"](state)
 
-    assert state["llm_call_count"] == 6
-    assert no_budget_update.get("llm_call_count", 6) == 6
-    assert gateway.calls == 6
+    assert state["llm_call_count"] == MAX_MIN_LLM_CALLS
+    assert (
+        no_budget_update.get("llm_call_count", MAX_MIN_LLM_CALLS)
+        == MAX_MIN_LLM_CALLS
+    )
+    assert gateway.calls == MAX_MIN_LLM_CALLS
 
 
 @pytest.mark.anyio
@@ -710,6 +977,14 @@ async def test_min_graph_writes_trace_and_final_artifacts(tmp_path) -> None:
     )
     assert result["final_result"]["uniform_render_count"] == 1
     assert result["final_result"]["target_reached"] is True
+    assert result["final_result"]["run_classification"] == (
+        "independent_experiment"
+    )
+    assert result["final_result"]["experiment_id"] == (
+        "scene-mvp-agent-optimization-20260723"
+    )
+    assert len(result["final_result"]["config_fingerprint"]) == 64
+    assert result["final_result"]["patch_candidate_draw_budget"] == 12
     assert [item["phase"] for item in result["trace"]][-1] == "finalize"
     final_trace = result["trace"][-1]
     assert {
@@ -743,6 +1018,9 @@ async def test_min_graph_writes_trace_and_final_artifacts(tmp_path) -> None:
     assert b'"renderer_path":"prepared_uniforms_v1"' in manifest
     assert b'"template_version":"png_to_shader_min_template_v3"' in manifest
     assert b'"target_reached":true' in manifest
+    assert b'"run_classification":"independent_experiment"' in manifest
+    assert b'"report_schema_version":"scene_mvp_run_report_v1"' in manifest
+    assert b'"patch_candidate_draw_budget":12' in metrics
 
 
 @pytest.mark.anyio

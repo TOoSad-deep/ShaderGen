@@ -96,6 +96,12 @@ def _final_result(project_id: str, run_id: str) -> dict:
         "llm_call_count": 0,
         "llm_budget": 2,
         "refine_budget": 1,
+        "run_classification": "independent_experiment",
+        "experiment_id": "scene-mvp-agent-optimization-20260723",
+        "config_fingerprint": "a" * 64,
+        "report_schema_version": "scene_mvp_run_report_v1",
+        "patch_candidate_draw_budget": 12,
+        "patch_evidence": (),
         "renderer_path": "prepared_uniforms_v1",
         "target_mae": 0.08,
         "target_loss": 0.08,
@@ -175,6 +181,15 @@ def test_registry_begin_publish_read_finish_cycle() -> None:
 
     delta = registry.read("run-1", after=1)
     assert [event["node"] for event in delta["events"]] == ["render_and_evaluate"]
+
+    assert registry.diagnostic_snapshot("run-1") == {
+        "latest_seq": 2,
+        "current_node": "render_and_evaluate",
+        "counters": {"render_count": 2},
+        "best": {"mae": 0.1, "loss": 0.1},
+        "budgets": {},
+    }
+    assert registry.diagnostic_snapshot("unknown-run") == {}
 
     png, render_seq = registry.read_render("run-1")
     assert png == FAKE_PNG

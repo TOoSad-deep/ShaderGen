@@ -52,10 +52,13 @@ make benchmark-node-lab-model
 make test-node-lab-ui
 make test-scene-mvp-ui
 make benchmark-png-to-shader QUALITY_PRESET=balanced MODEL_CALL_BUDGET=80
+uv run python scripts/run_scene_mvp_run_diagnostics.py --run-dir <run-dir> --output-dir <new-output-dir>
 npm --prefix frontend run e2e:procedural-v1
 ```
 
 `make check` 是默认主干验证，只覆盖单元测试、docs-check、LangGraph validate 和前端构建；跨组件改动仍需按范围追加集成测试、浏览器 E2E、PostgreSQL 或 benchmark，真实模型 benchmark 继续要求显式按量调用。
+
+`run_scene_mvp_run_diagnostics.py` 对一个已完成的 `scene_mvp` run 执行无模型 geometry 与 Patch maturity 诊断，使用真实 Chromium Renderer，但不会调用模型、不会改写原 run，也不构成冻结 benchmark 或质量 gate。`--output-dir` 必须是尚不存在的新目录，避免覆盖失败证据。
 
 GitHub 主 CI 使用 Python 3.12、Node 22、`uv sync --locked` 和 `npm ci --prefix frontend` 后执行完整 `make check`、全仓 Ruff 与 `mypy --strict src backend`，另以 Python 3.10/3.11 运行兼容性单测。定时集成测试和 PNG-to-Shader benchmark 才安装 Playwright Chromium；集成测试不注入模型密钥，真实模型 benchmark 仍只在仓库变量或手动输入显式开启时运行。
 
@@ -102,9 +105,11 @@ SHADERGEN_NODE_LAB_BATCH_ROOT=
 SHADERGEN_NODE_LAB_REAL_MODEL_ENABLED=false
 ```
 
+`scene_mvp` 的质量目标和三档运行预算统一配置在 `src/agent/app/config/png_to_shader_min.yaml`：`targets.mae/loss` 控制公开目标值，`quality_presets.fast|balanced|high` 分别配置 render/LLM/Refine 硬预算。配置在进程启动时加载，修改后必须重启 Backend/LangGraph；缺档、未知字段、错误类型、负预算或超出 `[0,1]` 的目标会 fail-fast，不能静默回退。当前只有 `target_loss` 参与停止判断和 `target_reached`，`target_mae` 是整图诊断基准。
+
 `DATABASE_URL` 配置后，Backend 使用独立 psycopg pool 运行 LangGraph Checkpointer/Store，并使用现有 asyncpg pool 写 Agent 过程账本。首次部署或 persistence 包升级后先执行 `make setup-memory-postgres`。`make test-memory-postgres` 优先使用 `TEST_DATABASE_URL`；未配置时会基于 `DATABASE_URL` 创建随机临时数据库，测试结束后自动删除。
 
-当前发布状态、阻塞项和 gate 证据只以 `docs/FEATURES.md` 与 `PROGRESS.md` 为准。当前注册默认 `png_to_shader_v1` 和实验性 `png_to_shader_min` 两个 Graph；产品表单默认 `procedural_v1`，也可显式选择 `scene_mvp` 快速贯通路径。旧基础对话 Graph、legacy 生成、独立 `/review` API 及其专属 Node 已删除。V1 服务端完成 WebGL1 render/evaluate/review/refine；`scene_mvp` 当前完成确定性感知、严格 Model Author、模型/fallback 真实渲染仲裁、多 feature 固定模板、prepared uniform 热渲染、累计式确定性参数搜索、前景/高光/阴影复合评分、Artifact 和 trace，尚未引入 CMA-ES/2000 draw。`fast|balanced|high` 会分别限制 render/LLM/Refine 为 `48/2/1`、`96/4/2`、`160/6/3`，模型失败会安全回退；密钥仍只配置在根目录 `.env`。两条路径均只公开 final-render、metrics 和 manifest，实验入口不代表已获准灰度。
+当前发布状态、阻塞项和 gate 证据只以 `docs/FEATURES.md` 与 `PROGRESS.md` 为准。当前注册默认 `png_to_shader_v1` 和实验性 `png_to_shader_min` 两个 Graph；产品表单默认 `procedural_v1`，也可显式选择 `scene_mvp` 快速贯通路径。旧基础对话 Graph、legacy 生成、独立 `/review` API 及其专属 Node 已删除。V1 服务端完成 WebGL1 render/evaluate/review/refine；`scene_mvp` 当前完成确定性感知、严格 Model Author、模型/fallback 真实渲染仲裁、多 feature 固定模板、prepared uniform 热渲染、Patch 空间残差/拒绝证据、有界候选成熟、累计式确定性参数搜索、局部复合评分、Artifact 和 trace，尚未引入 CMA-ES/2000 draw。当前 YAML 的 `0.04/0.02` 与 `48/2/1`、`96/4/2`、`640/9/9` 明确标记为独立实验；冻结 benchmark 配置漂移会 fail-fast，实际身份和配置指纹进入报告。模型失败会安全回退，Graph recursion limit 按每档合法最坏路径启动推导。密钥仍只配置在根目录 `.env`。两条路径均只公开 final-render、metrics 和 manifest，实验入口不代表已获准灰度。
 
 `SHADER_GEN_MODEL_NAME` 支持 `provider:model` 形式，例如 `dashscope:qwen3.7-plus`。`dashscope`、`openai`、`deepseek`、`glm` 表示凭据和 base URL 来源；真实模型名再决定使用 Qwen、GLM、DeepSeek 或 OpenAI 系列配置。
 

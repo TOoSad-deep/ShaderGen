@@ -5,10 +5,14 @@
 ## 当前文件
 
 - `model_config.py`：定义 `SHADER_GEN_MODEL_NAME`、布尔环境变量解析和冻结的 `NodeModelConfig`。
+- `png_to_shader_min.yaml`：`scene_mvp` 的 run 身份、实验 ID、报告版本、MAE/loss 目标与 fast/balanced/high 三档 render/LLM/Refine 硬预算；当前 `0.04/0.02` 和 `48/2/1`、`96/4/2`、`640/9/9` 显式标记为 `independent_experiment`。
+- `png_to_shader_min.py`：从包资源加载上述 YAML，严格校验字段、类型、值域、三档完整性和身份一致性，生成规范配置 SHA-256，按 LLM/Refine 预算与最多四个 feature 推导每档 Graph recursion limit，并向 Service/Model Author 提供不可变策略。声明 `frozen_benchmark` 时必须精确匹配 D058/D059 的目标与三档预算，否则 fail-fast；独立实验必须提供 `experiment_id`。
 
 ## 边界规则
 
 - 配置模块只解释配置值，不创建模型实例。
+- YAML 在进程导入时加载，修改后必须重启服务；无效配置 fail-fast，不使用代码内备用目标或产品预算。
+- 合法路径的最坏节点步数为 `9 + 2F + 6R`，其中 `R=min(refine_budget,max(llm_budget-1,0))`、`F<=4`；首次遍历 feature，后续 Refine 在 render 节点内局部成熟并经 no-op base 过桥。运行上限再增加 4 步框架余量，推导值超过 256 时拒绝启动。
 - 真实密钥只从 `.env` 或环境变量读取，不写入仓库。
 - provider 的 API key/base URL 和 model-family 兼容差异放在 `app/llms/`。
 - 与模型实例创建和调用相关的逻辑放在 `app/llms/`；通用调用类型放在 `app/contracts/`。

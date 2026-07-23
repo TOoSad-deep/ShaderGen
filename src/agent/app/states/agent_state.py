@@ -84,6 +84,10 @@ class PngToShaderMinState(TypedDict, total=False):
     status: str
     stop_reason: str
     quality_preset: str
+    run_classification: str
+    experiment_id: str | None
+    config_fingerprint: str
+    report_schema_version: str
     render_count: int
     render_budget: int
     llm_call_count: int
@@ -95,6 +99,7 @@ class PngToShaderMinState(TypedDict, total=False):
     current_best_mae: float
     current_best_loss: float
     feature_queue: tuple[str, ...]
+    refine_branch_resolved: bool
 
     run_id: Annotated[str, UntrackedValue]
     image: Annotated[bytes, UntrackedValue]
@@ -110,6 +115,12 @@ class PngToShaderMinState(TypedDict, total=False):
     current_render: Annotated[bytes, UntrackedValue]
     current_mae: Annotated[float, UntrackedValue]
     current_best: Annotated[dict[str, Any], UntrackedValue]
+    residual_summary: Annotated[dict[str, Any], UntrackedValue]
+    pending_patch_summary: Annotated[dict[str, Any] | None, UntrackedValue]
+    recent_rejected_patch_summaries: Annotated[
+        tuple[dict[str, Any], ...], UntrackedValue
+    ]
+    patch_evidence: Annotated[tuple[dict[str, Any], ...], UntrackedValue]
     author_model: Annotated[str | None, UntrackedValue]
     author_error: Annotated[str | None, UntrackedValue]
     next_action: Annotated[str, UntrackedValue]

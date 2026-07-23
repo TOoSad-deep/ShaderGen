@@ -9,12 +9,13 @@ from typing import TypeVar
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from agent.app.config.model_config import SHADER_GEN_MODEL_NAME
+from agent.app.config.png_to_shader_min import MIN_PIPELINE_CONFIG
 from agent.app.contracts.llm import LLMCallOptions, LLMGateway, LLMResponse
 from agent.app.messages.png_to_shader_v1 import canonical_json
 from agent.app.parsers.png_to_shader_min import MinAuthorParseError
 from agent.app.prompts.prompt_loader import PromptDefinition, load_prompt_definition
 
-MAX_MIN_LLM_CALLS = 6
+MAX_MIN_LLM_CALLS = MIN_PIPELINE_CONFIG.max_llm_budget
 MAX_STRUCTURED_ATTEMPTS = 2
 
 MIN_AUTHOR_INITIAL_PROMPT = load_prompt_definition("min_author_initial_v1")
@@ -53,7 +54,7 @@ def _response_total_tokens(response: LLMResponse) -> int | None:
 
 
 def effective_llm_budget(value: object) -> int:
-    """把任意输入预算限制在 run 级 0..6 硬边界。."""
+    """把任意输入预算限制在 YAML 配置的 run 级硬边界内."""
     if isinstance(value, bool):
         return 0
     if isinstance(value, int):

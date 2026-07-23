@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from langgraph.errors import GraphRecursionError
 
 from agent.app.services.png_to_shader_v1 import (
     NoValidatedShaderError,
@@ -15,6 +16,7 @@ from agent.app.services.png_to_shader_v1 import (
 from backend.app.api.routes import shader as shader_route
 from backend.app.main import app
 from backend.app.services import shader_generation as shader_generation_service
+from backend.app.services.run_progress import RunProgressRegistry
 
 
 def score() -> dict:
@@ -158,6 +160,21 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
             llm_call_count=1,
             llm_budget=6,
             refine_budget=3,
+            run_classification="frozen_benchmark",
+            experiment_id=None,
+            config_fingerprint="a" * 64,
+            report_schema_version="scene_mvp_run_report_v1",
+            patch_candidate_draw_budget=12,
+            patch_evidence=(
+                {
+                    "patch_operation": "add_feature",
+                    "feature_id": "highlight",
+                    "feature_type": "gaussian_lobe",
+                    "patch_fingerprint": "b" * 64,
+                    "accepted": False,
+                    "rejected_reason": "no_strict_loss_improvement",
+                },
+            ),
             renderer_path="prepared_uniforms_v1",
             target_mae=0.08,
             target_loss=0.08,
@@ -247,6 +264,21 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
         "llm_call_count": 1,
         "llm_budget": 6,
         "refine_budget": 3,
+        "run_classification": "frozen_benchmark",
+        "experiment_id": None,
+        "config_fingerprint": "a" * 64,
+        "report_schema_version": "scene_mvp_run_report_v1",
+        "patch_candidate_draw_budget": 12,
+        "patch_evidence": [
+            {
+                "patch_operation": "add_feature",
+                "feature_id": "highlight",
+                "feature_type": "gaussian_lobe",
+                "patch_fingerprint": "b" * 64,
+                "accepted": False,
+                "rejected_reason": "no_strict_loss_improvement",
+            }
+        ],
         "renderer_path": "prepared_uniforms_v1",
         "target_mae": 0.08,
         "target_loss": 0.08,
@@ -293,6 +325,8 @@ def test_generate_scene_mvp_contract_and_ledger(monkeypatch) -> None:
     )
     assert success["result_summary"]["quality_preset"] == "high"
     assert success["result_summary"]["render_budget"] == 160
+    assert success["result_summary"]["run_classification"] == "frozen_benchmark"
+    assert success["result_summary"]["patch_evidence"][0]["feature_id"] == "highlight"
     assert success["result_summary"]["renderer_path"] == "prepared_uniforms_v1"
     assert success["result_summary"]["target_reached"] is True
     assert success["record_default_model_call"] is False
@@ -841,6 +875,99 @@ def test_unexpected_procedural_error_maps_to_internal_pipeline_error(
     assert "error_type=AssertionError" in caplog.text
     assert "PRIVATE_INTERNAL_DETAIL" not in response.text
     assert "PRIVATE_INTERNAL_DETAIL" not in caplog.text
+
+
+def test_scene_mvp_graph_recursion_error_persists_safe_progress_snapshot(
+    monkeypatch,
+) -> None:
+    calls: dict[str, object] = {}
+
+    async def fake_start(*args, **kwargs):
+        calls["start"] = kwargs
+
+    async def fake_failure(*args, **kwargs):
+        calls["failure"] = kwargs
+
+    async def broken_scene_pipeline(*args, **kwargs):
+        on_progress = kwargs["on_progress"]
+        on_progress(
+            {
+                "node": "decide_after_feature",
+                "status": "completed",
+                "budgets": {
+                    "render_budget": 640,
+                    "llm_budget": 9,
+                    "refine_budget": 9,
+                },
+                "counters": {
+                    "render_count": 333,
+                    "llm_call_count": 6,
+                    "refine_count": 5,
+                },
+                "best": {"mae": 0.0336, "loss": 0.0417},
+            },
+            None,
+        )
+        raise GraphRecursionError("PRIVATE_GRAPH_DETAIL")
+
+    monkeypatch.setattr(
+        shader_generation_service,
+        "start_shader_generation_run",
+        fake_start,
+    )
+    monkeypatch.setattr(
+        shader_generation_service,
+        "record_shader_generation_failure",
+        fake_failure,
+    )
+    monkeypatch.setattr(
+        shader_generation_service,
+        "generate_scene_shader_from_image",
+        broken_scene_pipeline,
+    )
+    previous_pool = getattr(app.state, "db_pool", None)
+    previous_progress = getattr(app.state, "run_progress", None)
+    app.state.db_pool = object()
+    app.state.run_progress = RunProgressRegistry()
+    try:
+        response = TestClient(app, raise_server_exceptions=False).post(
+            "/api/shader/generate",
+            files={"file": ("target.png", b"image", "image/png")},
+            data={"generation_mode": "scene_mvp", "quality_preset": "high"},
+        )
+    finally:
+        if previous_pool is None:
+            del app.state.db_pool
+        else:
+            app.state.db_pool = previous_pool
+        if previous_progress is None:
+            del app.state.run_progress
+        else:
+            app.state.run_progress = previous_progress
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail["code"] == "internal_pipeline_error"
+    assert detail["retryable"] is False
+    failure = calls["failure"]
+    assert isinstance(failure, dict)
+    assert failure["diagnostics"]["failure_error_type"] == "GraphRecursionError"
+    assert failure["diagnostics"]["progress_snapshot"] == {
+        "latest_seq": 1,
+        "current_node": "decide_after_feature",
+        "counters": {
+            "render_count": 333,
+            "llm_call_count": 6,
+            "refine_count": 5,
+        },
+        "best": {"mae": 0.0336, "loss": 0.0417},
+        "budgets": {
+            "render_budget": 640,
+            "llm_budget": 9,
+            "refine_budget": 9,
+        },
+    }
+    assert "PRIVATE_GRAPH_DETAIL" not in response.text
 
 
 def test_empty_procedural_result_is_recorded_and_uses_typed_internal_error(

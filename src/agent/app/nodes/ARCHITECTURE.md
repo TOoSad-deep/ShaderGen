@@ -8,7 +8,7 @@
 - `png_to_shader_v1/model/`：VisualAnalysis、三模式 ShaderAuthor、VisualCritic、结构化输出和有界模型预算包装器。它只依赖 Gateway/业务契约，不运行 Renderer、Evaluator、Selector 或 Artifact Store。
 - `png_to_shader_v1/deterministic/`：Context、运行准备、候选物化、证据校验、真实 WebGL1 渲染、确定性评分、current_best 选择/复核、finalize 和策略晋升。
 - `png_to_shader_v1/integrations/node_lab/`：V1 Node 向通用 Node Lab 暴露的 Provider；`registry.py` 维护 descriptor，`deterministic.py` / `model.py` 只做 Lab JSON/Artifact 与生产 callable 的边界适配。Node Lab 内核不导入具体 Node。
-- `png_to_shader_min/`：`scene_mvp` 的 12 节点运行时与 Model Author helper；Initial 生成完整 scene，Refine 只从 `current_best` 派生单个 typed patch，结构修复和语义调用共用 6 次 run 级硬预算。
+- `png_to_shader_min/`：`scene_mvp` 的 12 节点运行时与 Model Author helper；Initial 生成完整 scene，Refine 只从 `current_best` 派生单个 typed patch。Refine 同时接收确定性 worst-tile signed residual、active feature 和最近拒绝摘要；非重复合法 Patch 在独立 branch 内使用最多 12 次总 draw 做范围受限成熟，matured candidate 严格改善才提交。
 
 根目录 `nodes/__init__.py` 不导出 V1 实现，也不保留“看起来通用、实际绑定 V1 契约”的兼容模块。详细模块职责见 `png_to_shader_v1/ARCHITECTURE.md`。
 
@@ -21,7 +21,7 @@
 - State 和 `model_calls` 中的模型名只使用 `LLMResponse.model_ref`。
 - V1 三个结构化角色默认 `temperature=0`、`thinking=off`、`capture_reasoning=false`、`response_format=json_object`；JSON 修复沿用同一请求模型和 JSON mode，并再次强制关闭 thinking。
 - JSON/契约失败最多允许一次 Gateway 修复；M3 剩余 model budget 只有一次时禁止修复。VisualAnalysis 的 `regions_of_interest[*].purpose` 若全部错误都只属于显式别名表，可先在本地归一化并重新执行完整严格 Parser；该路径记录 `visual_analysis_roi_purpose_alias_v1`、字段路径和源错误码，不放宽公共 Parser，不猜测未知值，也不消耗第二次模型调用。预算内最后一次失败抛出带已有安全审计、但不含原始响应的明确错误。合法的单个 JSON fence 在本地解析，不消耗修复调用。
-- `scene_mvp` Model Author 同样最多追加一次结构修复，但只接受裸 JSON；调用、修复、解析或 patch 应用失败均收敛为 fallback/current_best，不保存原始响应，也不把失败候选写入 best。
+- `scene_mvp` Model Author 同样最多追加一次结构修复，但只接受裸 JSON；调用、修复、解析或 patch 应用失败均收敛为 fallback/current_best，不保存原始响应，也不把失败候选写入 best。Patch trace 只允许 operation、feature id/type、规范 SHA-256、metric delta、拒绝原因、重复标记和节点耗时；禁止持久化完整 Patch、图片、Scene diff、GLSL、用户输入、模型原始响应或 reasoning。
 - `agent.png_to_shader` logger 记录 run/project、模型阶段、剩余调用/时间预算、模型累计延迟、Renderer/静态校验/评估失败和 finalize 摘要；禁止打印图片、完整 GLSL、reasoning、供应商原始响应和密钥。
 - 模型阶段 cap 为 VisualAnalysis 60 秒、Initial Author 120 秒、compile repair 60 秒、Critic 45 秒、visual refine 90 秒，并为下游保留总 wall-time 的 10%、最多 30 秒。Renderer、Evaluator 和 3 秒 bounded close 不得消耗或覆盖已有可返回 best 的事实。
 - 编译器日志可能回显源码，只能写入私有 compile Artifact；Graph event 只保留字符数、SHA-256、行号和安全错误码。常量倒序 `smoothstep` 是确定性意图修复，不是对 GLSL 未定义行为的语义等价证明，修后必须重新跑完整 Validator。

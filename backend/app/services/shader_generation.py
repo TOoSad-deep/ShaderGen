@@ -614,6 +614,10 @@ async def execute_shader_generation(
             "failure_error_type": type(exc).__name__,
             "backend_duration_ms": round(duration_ms, 2),
         }
+        if progress is not None:
+            progress_snapshot = progress.diagnostic_snapshot(str(run_id))
+            if progress_snapshot:
+                diagnostics["progress_snapshot"] = progress_snapshot
         if pool is not None and run_started:
             await _record_failure_without_masking(
                 pool,
@@ -701,6 +705,16 @@ async def execute_shader_generation(
                     llm_call_count=int(result.llm_call_count),
                     llm_budget=int(result.llm_budget),
                     refine_budget=int(result.refine_budget),
+                    run_classification=result.run_classification,
+                    experiment_id=result.experiment_id,
+                    config_fingerprint=str(result.config_fingerprint),
+                    report_schema_version=str(result.report_schema_version),
+                    patch_candidate_draw_budget=int(
+                        result.patch_candidate_draw_budget
+                    ),
+                    patch_evidence=[
+                        dict(item) for item in result.patch_evidence
+                    ],
                     renderer_path="prepared_uniforms_v1",
                     target_mae=float(result.target_mae),
                     target_loss=float(result.target_loss),
@@ -761,6 +775,12 @@ async def execute_shader_generation(
             "llm_call_count": int(result.llm_call_count),
             "llm_budget": int(result.llm_budget),
             "refine_budget": int(result.refine_budget),
+            "run_classification": str(result.run_classification),
+            "experiment_id": result.experiment_id,
+            "config_fingerprint": str(result.config_fingerprint),
+            "report_schema_version": str(result.report_schema_version),
+            "patch_candidate_draw_budget": int(result.patch_candidate_draw_budget),
+            "patch_evidence": [dict(item) for item in result.patch_evidence],
             "renderer_path": str(result.renderer_path),
             "target_mae": float(result.target_mae),
             "target_loss": float(result.target_loss),

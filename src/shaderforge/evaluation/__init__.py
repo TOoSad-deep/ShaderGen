@@ -5,8 +5,10 @@ from shaderforge.evaluation.mae import (
     MIN_SCENE_METRIC_WEIGHTS,
     MinSceneMetricBreakdown,
     decode_rgb,
+    dominant_metric_component,
     evaluate_min_scene,
     rgb_mae,
+    summarize_spatial_residual,
 )
 from shaderforge.evaluation.models import MetricWeights, ScoreBreakdownV1
 from shaderforge.evaluation.oracle import (
@@ -30,9 +32,11 @@ __all__ = [
     "MinSceneMetricBreakdown",
     "ScoreBreakdownV1",
     "decode_rgb",
+    "dominant_metric_component",
     "evaluate_render",
     "evaluate_min_scene",
     "max_protected_regression",
     "rgb_mae",
     "select_current_best",
+    "summarize_spatial_residual",
 ]

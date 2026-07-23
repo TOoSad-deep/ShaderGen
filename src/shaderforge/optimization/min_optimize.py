@@ -8,10 +8,13 @@ from typing import Any, Literal
 
 from shaderforge.scene import MinScene
 
-OptimizationStage = Literal["base", "feature"]
+OptimizationStage = Literal["base", "feature", "color_field"]
 
 # 单次调用始终是小预算邻域搜索；较大的 run 预算由调用方分批调度。
 MAX_CANDIDATES_PER_BATCH = 32
+# Refine typed patch 的候选分支总 draw 上限；包含 1 次 raw candidate，
+# 因而上层传入本模块的局部成熟预算最多为 11。
+MAX_PATCH_CANDIDATE_DRAWS = 12
 _DEFAULT_BASE_BATCH_SIZE = 32
 _DEFAULT_FEATURE_BATCH_SIZE = 12
 
@@ -77,63 +80,9 @@ def _parameter(
     )
 
 
-def _base_bindings(scene: MinScene) -> tuple[_ParameterBinding, ...]:
-    unit = float(min(scene.canvas.width, scene.canvas.height))
-    extent_x = scene.canvas.width / unit
-    extent_y = scene.canvas.height / unit
-    primitive = ("object", "primitive")
+def _color_field_bindings(scene: MinScene) -> tuple[_ParameterBinding, ...]:
+    """只返回 typed color field 的数值叶子，不夹带几何或背景参数。."""
     field = ("object", "color_field")
-    geometry = [
-        _parameter(
-            "object.primitive.center[0]",
-            (*primitive, "center", 0),
-            -extent_x,
-            extent_x,
-            0.03,
-        ),
-        _parameter(
-            "object.primitive.center[1]",
-            (*primitive, "center", 1),
-            -extent_y,
-            extent_y,
-            0.03,
-        ),
-    ]
-    if scene.object.primitive.type == "circle":
-        geometry.append(
-            _parameter(
-                "object.primitive.axes.radius",
-                (*primitive, "axes", 0),
-                0.02,
-                min(extent_x, extent_y),
-                0.04,
-                linked_segments=(*primitive, "axes", 1),
-            )
-        )
-    else:
-        geometry.extend(
-            (
-                _parameter(
-                    "object.primitive.axes[0]",
-                    (*primitive, "axes", 0),
-                    0.02,
-                    extent_x,
-                    0.04,
-                ),
-                _parameter(
-                    "object.primitive.axes[1]",
-                    (*primitive, "axes", 1),
-                    0.02,
-                    extent_y,
-                    0.04,
-                ),
-            )
-        )
-    common = [
-        _parameter("canvas.background[0]", ("canvas", "background", 0), 0.0, 1.0, 0.04),
-        _parameter("canvas.background[1]", ("canvas", "background", 1), 0.0, 1.0, 0.04),
-        _parameter("canvas.background[2]", ("canvas", "background", 2), 0.0, 1.0, 0.04),
-    ]
     color_bindings: list[_ParameterBinding] = []
     if scene.object.color_field.model == "solid":
         for channel in range(3):
@@ -195,7 +144,66 @@ def _base_bindings(scene: MinScene) -> tuple[_ParameterBinding, ...]:
                 0.08,
             )
         )
-    return tuple((*geometry, *common, *color_bindings))
+    return tuple(color_bindings)
+
+
+def _base_bindings(scene: MinScene) -> tuple[_ParameterBinding, ...]:
+    unit = float(min(scene.canvas.width, scene.canvas.height))
+    extent_x = scene.canvas.width / unit
+    extent_y = scene.canvas.height / unit
+    primitive = ("object", "primitive")
+    geometry = [
+        _parameter(
+            "object.primitive.center[0]",
+            (*primitive, "center", 0),
+            -extent_x,
+            extent_x,
+            0.03,
+        ),
+        _parameter(
+            "object.primitive.center[1]",
+            (*primitive, "center", 1),
+            -extent_y,
+            extent_y,
+            0.03,
+        ),
+    ]
+    if scene.object.primitive.type == "circle":
+        geometry.append(
+            _parameter(
+                "object.primitive.axes.radius",
+                (*primitive, "axes", 0),
+                0.02,
+                min(extent_x, extent_y),
+                0.04,
+                linked_segments=(*primitive, "axes", 1),
+            )
+        )
+    else:
+        geometry.extend(
+            (
+                _parameter(
+                    "object.primitive.axes[0]",
+                    (*primitive, "axes", 0),
+                    0.02,
+                    extent_x,
+                    0.04,
+                ),
+                _parameter(
+                    "object.primitive.axes[1]",
+                    (*primitive, "axes", 1),
+                    0.02,
+                    extent_y,
+                    0.04,
+                ),
+            )
+        )
+    common = [
+        _parameter("canvas.background[0]", ("canvas", "background", 0), 0.0, 1.0, 0.04),
+        _parameter("canvas.background[1]", ("canvas", "background", 1), 0.0, 1.0, 0.04),
+        _parameter("canvas.background[2]", ("canvas", "background", 2), 0.0, 1.0, 0.04),
+    ]
+    return tuple((*geometry, *common, *_color_field_bindings(scene)))
 
 
 def _feature_bindings(
@@ -355,16 +363,20 @@ def propose_min_scene_candidates(
     batch_size: int | None = None,
 ) -> tuple[CandidateProposal, ...]:
     """按固定顺序返回被 draw 预算截断的单参数合法候选。."""
-    if stage not in ("base", "feature"):
-        raise ValueError("stage 必须是 base 或 feature。")
+    if stage not in ("base", "feature", "color_field"):
+        raise ValueError("stage 必须是 base、feature 或 color_field。")
     if stage == "base":
         if feature_id is not None:
             raise ValueError("base 阶段不接受 feature_id。")
         bindings = _base_bindings(scene)
-    else:
+    elif stage == "feature":
         if feature_id is None:
             raise ValueError("feature 阶段必须指定稳定 feature_id。")
         bindings = _feature_bindings(scene, feature_id)
+    else:
+        if feature_id is not None:
+            raise ValueError("color_field 阶段不接受 feature_id。")
+        bindings = _color_field_bindings(scene)
 
     limit = _candidate_limit(stage, remaining_draw_budget, batch_size)
     if limit == 0:
@@ -420,11 +432,12 @@ def rebase_candidate_proposal(
     proposal: CandidateProposal,
 ) -> CandidateProposal | None:
     """把固定候选计划重放到最新 best，使同批已接受变化可以累积。."""
-    bindings = (
-        _base_bindings(scene)
-        if proposal.stage == "base"
-        else _feature_bindings(scene, proposal.feature_id or "")
-    )
+    if proposal.stage == "base":
+        bindings = _base_bindings(scene)
+    elif proposal.stage == "feature":
+        bindings = _feature_bindings(scene, proposal.feature_id or "")
+    else:
+        bindings = _color_field_bindings(scene)
     binding = next(
         (item for item in bindings if item.parameter.path == proposal.parameter.path),
         None,
@@ -477,6 +490,7 @@ def _validate_mae(value: float) -> None:
 
 __all__ = [
     "MAX_CANDIDATES_PER_BATCH",
+    "MAX_PATCH_CANDIDATE_DRAWS",
     "CandidateProposal",
     "OptimizationStage",
     "ScoredScene",

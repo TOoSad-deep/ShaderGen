@@ -134,7 +134,7 @@ flowchart TD
     initialize_run --> perceive_target[perceive_target]
     perceive_target --> author_initial[author_initial]
     author_initial --> materialize_shader[materialize_shader]
-    materialize_shader --> render_and_evaluate[render_and_evaluate]
+    materialize_shader --> render_and_evaluate[render_and_evaluate<br/>raw + patch-local maturity]
     render_and_evaluate --> decide_after_render[decide_after_render]
     decide_after_render -. optimize_base .-> optimize_base[optimize_base]
     decide_after_render -. finalize .-> finalize[finalize]
@@ -158,7 +158,7 @@ flowchart TD
 
 | 决定节点 | 路由函数 | 结果 | 下一节点 | 含义 |
 |---|---|---|---|---|
-| `decide_after_render` | `route_after_render` | `optimize_base` | `optimize_base` | 首帧真实渲染成功、复合 loss 未达标且仍有 draw 预算 |
+| `decide_after_render` | `route_after_render` | `optimize_base` | `optimize_base` | Initial 首帧后进入完整 base sweep；Refine branch 已在 render 节点内完成局部成熟/选择时进入 no-op 过桥 |
 | 同上 | 同上 | `finalize` | `finalize` | 已达标、失败或预算耗尽 |
 | `decide_after_base` | `route_after_base` | `optimize_feature` | `optimize_feature` | 获胜 scene 的真实 feature id queue 仍非空 |
 | 同上 | 同上 | `author_refine` | `author_refine` | 特征耗尽但仍有模型与 Refine 预算 |
@@ -167,8 +167,9 @@ flowchart TD
 | 同上 | 同上 | `author_refine` | `author_refine` | feature queue 已空且仍可 Refine |
 | 同上 | 同上 | `finalize` | `finalize` | 达标或预算结束 |
 
-- 黄色节点构成最小图的 `current_best` 安全边界。Initial 的模型 scene 与确定性感知 fallback 在预算允许时都由 `render_and_evaluate` 真实渲染，先按 `min_scene_composite_v3` 选择较优起点；基础与特征优化都只在复合 loss 严格改善时提交。该指标组合 global/foreground/background/geometry/edge/worst-tile，避免背景面积稀释、几何漂移与局部误差被整图平均掩盖。
-- `author_initial` 通过注入的 `LLMGateway` 请求完整 `png_to_shader_min_scene_v3`，调用或严格解析失败则使用确定性感知 fallback；`author_refine` 只接受一个 add/remove/replace feature 或完整 replace color field 的白名单 patch，并且永远从 `current_best.scene` 派生候选。语义调用与最多一次结构修复共用 run 级 6 次硬上限；质量档位分别把 render/LLM/Refine 硬预算设为 `fast=48/2/1`、`balanced=96/4/2`、`high=160/6/3`。
+- 黄色节点构成最小图的 `current_best` 安全边界。Initial 的模型 scene 与确定性感知 fallback 在预算允许时都由 `render_and_evaluate` 真实渲染，先按 `min_scene_composite_v3` 选择较优起点；首次基础/特征优化只在复合 loss 严格改善时提交。Refine 的 raw Scene 始终位于独立 branch，不能临时覆盖 best。
+- `author_initial` 通过注入的 `LLMGateway` 请求完整 `png_to_shader_min_scene_v3`，调用或严格解析失败则使用确定性感知 fallback；`author_refine` 只接受一个 add/remove/replace feature 或完整 replace color field 的白名单 patch，并且永远从 `current_best.scene` 派生候选。语义调用与最多一次结构修复共用 `src/agent/app/config/png_to_shader_min.yaml` 中当前质量档位的 LLM 预算；同一 YAML 还必须声明 `frozen_benchmark|independent_experiment` 身份、独立实验 ID、报告版本和实际配置指纹。当前 `0.04/0.02`、`48/2/1`、`96/4/2`、`640/9/9` 明确属于独立实验；声明冻结 benchmark 时若不精确匹配 D058/D059 的 `0.08/0.04` 与 `48/2/1`、`96/4/2`、`160/6/3`，启动即失败。
+- Service 不再使用固定 Graph recursion limit。每个 run 按 `R=min(refine_budget,max(llm_budget-1,0))` 和最多四个 feature 推导合法最坏路径 `9 + 2F + 6R`，再增加 4 步框架余量；当前 high 档需要 65 步并注入 69。配置加载会拒绝超过全局安全上限 256 的预算组合。`GraphRecursionError` 仍按内部流水线错误 fail-closed，不能静默导出 best，以免掩盖真实路由死循环。
 - `optimize_base` 与 `optimize_feature` 使用固定顺序、白名单、边界裁剪的小批确定性候选；模块单批硬上限为 32，Graph 对 base/每个真实 feature 分别请求最多 32/12 个，并按所选档位剩余 draw 预算截断。每个 proposal 会重放到最新 best，使同批接受的参数变化累计生效；不实现随机搜索或 CMA-ES。
-- Refine patch 只产生待评估工作 scene，不能直接写 `current_best`；随后 `render_and_evaluate` 仅在真实复合 loss 严格改善时提交，否则回滚工作 scene，非法输出、调用异常和较差候选均保留原 best。
+- Refine patch 只产生待评估 branch，不能直接写 `current_best`。每个非重复合法候选最多使用 12 次现有 render budget（1 次 raw + 最多 11 次局部成熟）：add/replace feature 只调整该稳定 feature，replace color field 只调整颜色场，remove 只做 raw 重评分。matured candidate 严格优于只读 best 才原子提交；非法、重复、Renderer 失败或成熟后仍较差的分支整体丢弃。`optimize_base` 随后只做 no-op 过桥，不再为同一 Refine 重跑完整 base/feature sweep。
 - 同一 run 的固定模板通过 `prepared_uniforms_v1` 只编译/链接一次，候选只热更新 typed uniform；最终导出 GLSL 仍烘焙常量，可由旧 `render()` 独立执行。prepared 对象只存在 run registry，`finalize` 与 Service `finally` 共用幂等关闭；CMA-ES 仍未实现。
