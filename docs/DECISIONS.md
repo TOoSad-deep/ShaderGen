@@ -27,6 +27,7 @@
 | D032 | updated | D038 | Node 是唯一语义实现仍有效，Provider 当前位于 V1 功能命名空间。 |
 | D034 | updated | D038 | 按职责拆分仍有效，文件已进一步迁入 V1 功能命名空间。 |
 | D035 | updated | D036、D044 | 薄 Route、Backend Service 和 Renderer 双层清理仍有效；Backend persistence 清理由 D044 加固。 |
+| D064 | updated | D065 | 实验结论与证据仍有效；"待切换生产 acceptance" 的表述已由 D065 纠正：生产自始为 strict total-loss，无切换对象。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -495,3 +496,10 @@
 - 决策：记录固定 7 例 acceptance live 直接 A/B 的结论：在同一候选生成器、参数范围、阶段顺序、每 stage 32 draw 预算和同一 fallback 初始快照下，strict total-loss acceptance 在 6/7 案例的内部 total loss 与外部 `png_to_shader_score_v1` objective 严格优于 geometry-first 字典序（`solid_circle` 两臂轨迹完全相同），两项 aggregate 同时更优，且不复现 geometry-first 的两例实质 ROI 回退（`ellipse_gradient/upper_color +0.019894`、`arc_highlight_orb/highlight_upper_left +0.011853`）。在固定 7 例、当前确定性候选生成与 32+32 draw 搜索契约下，轨迹差异的唯一实验变量是 acceptance，两例实质回退在该契约内可归因于 geometry-first 字典序 acceptance；该归因不外推为真实模型或其他搜索空间下的普遍结论。生产 acceptance、scorer、Prompt、Graph、预算、目标和 `current_best` 安全边界本次均不改变；是否切换生产 acceptance 需要后续独立决策。
 - 原因：D063 否决 tile guard 的离线 replay 形式后，遗留问题正是“两次实验的 ROI 差异能否因果归属于 acceptance”。本次 live 直接 A/B 两臂候选数完全相同（各 448 次）、无 offline replay，轨迹分叉只来自 acceptance 谓词；903 次真实 Chromium draw、0 模型调用，机器可读 gate 的 outcome 为 `strict_total_supported`（逐 case 外部 objective 与 ROI 的 0.01 实质回退双向检查、aggregate mean/median 双向比较，输入缺字段显式 fail closed）。权威产物为 `output/diagnostics/scene-mvp/acceptance-live-ab/20260723-v2`（`scene_mvp_acceptance_live_ab_v2` schema），报告 SHA-256 `2daa4c77b274efed7ede863444b4ce6d5141bf92168075f722e7b0ded00cdd11`；output run iteration 与 report schema 是两个独立版本轴，`20260723-v1`（gate 前探索性运行）与 `20260723-v2-schema-v1-superseded`（gate 完整但 schema `_v1`）均标记 superseded 并保留。
 - 影响：本决策只固化实验结论与证据身份，不授权生产变更。该实验是 independent no-model diagnostic，不是 D058/D059 冻结 benchmark，不能使 F09 passing；切换生产 acceptance 前仍需真实模型固定 7 例 benchmark 与独立人工偏好 gate，自动代理看片不替代人工盲评。rim、弧形高光和双高光缺失在两臂下均未解决，仍属模板/特征表达能力缺口的发布阻塞项。
+
+## D065 - 生产 acceptance 自始为 strict total-loss，不存在 geometry-first 切换对象
+
+- 日期：2026-07-23
+- 决策：记录事实纠正：生产 `scene_mvp` 不存在 geometry-first 字典序 acceptance。全部 acceptance 比较点——`render_and_evaluate` 初始/fallback 择优与 incumbent 提交、`optimize_base`、`optimize_feature`、Refine branch matured 提交（`src/agent/app/nodes/png_to_shader_min/runtime.py`）——自始只按 `min_scene_composite_v3` 的 `total_loss` 严格改善提交；`geometry_mask_loss` 仅作为复合 loss 的加权分量与证据 delta key 出现，从未单独决定接受。D064 Arm G 的 `(geometry_mask_loss, total_loss)` 字典序谓词只存在于诊断脚本（`scripts/run_scene_mvp_acceptance_live_ab.py` 的 `geometry_first_accepts` 与 `scripts/run_scene_mvp_run_diagnostics.py` 的 `_run_geometry_local_search`），其反复 re-propose 加方向交错的搜索循环也与生产单批 rebase 循环不同。因此"把生产 acceptance 从 geometry-first 切换为 strict total-loss"没有对应的生产改动对象；作为防漂移加固，生产五处 total-loss 严格比较统一收口到纯函数 `shaderforge.optimization.accepts_strict_total_loss`，在有效 metric 域内行为与原有内联比较完全等价；唯一差异是 helper 对候选或锚点的非有限/负 loss 显式 fail-closed，该差异只在有效 metric 域之外生效，属防御性契约加固，不是搜索语义变化。
+- 原因：D064 后续增量在第一步核对生产调用点时发现，PROGRESS"下一步"与 A/B 报告把 Arm G 表述为"既有/生产 geometry-first acceptance"，与代码事实不符；git 历史显示生产 runtime 只引入过 `geometry_mask_loss` 证据 delta key，从未引入字典序谓词。若不纠正，后续决策会基于一个不存在的切换对象。
+- 影响：PROGRESS、FEATURES、A/B 报告与 README 的误导表述同步纠正；新增 `tests/unit_tests/test_scene_mvp_acceptance.py` 聚焦锁定 acceptance 语义（geometry 改善但 total 变差拒绝、total 严格改善即使 geometry 变差接受、total 持平拒绝、非有限/负值 candidate 或 incumbent loss 均 fail-closed、失败候选不污染 incumbent、预算与候选数不变）。D064 的实验结论与证据身份不变，但其含义应理解为"生产既有 strict total-loss 语义优于被测的 geometry-first 诊断语义"，而不是一次待执行的生产切换。Graph 节点、边、路由、终止路径、`current_best` 安全边界、scorer、Prompt、候选生成、参数范围、draw 预算与 high=`640/9/9`、manual=`1000/32/30` 均不变，故 Builder ASCII、Graph Mermaid 与路由表无需变更。F09 继续 active/no-go：真实模型固定 7 例 benchmark 与独立人工盲评仍是发布阻塞项，本决策不替代它们。

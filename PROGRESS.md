@@ -21,7 +21,7 @@
 - 已完成真实独立实验 run `79f51d8a-1aaa-4f92-b806-cd8a44ddf297` 的 Codex/Kimi 联合评估及 P0 无模型诊断：工程闭环正常，但复合 loss `0.048350` 未达到 `0.02`。实际模板 geometry 优先搜索可把 loss 降到 `0.046294`，却使 foreground/global MAE 恶化且仍缺关键高光，证明 scorer 存在视觉语义错位风险；两个合成 Patch 上 32 draw 均优于 12 draw，但方向顺序不稳定。生产 scorer、Prompt、预算和目标均未改，F09 仍为 no-go。报告见 `docs/superpowers/specs/2026-07-23-scene-mvp-run-79f51d8a-evaluation.md` 与 `docs/superpowers/specs/2026-07-23-scene-mvp-run-79f51d8a-p0-no-model-experiment.md`。
 - 固定 7 例 scorer 校准已完成：geometry-first 在 462 次真实 Chromium draw 中令 7/7 的 geometry、内部复合 loss 和外部 objective 改善，但 6/7 存在至少一个局部补偿，`ellipse_gradient/upper_color` 与 `arc_highlight_orb/highlight_upper_left` 两例超过实质回退阈值。看片同时确认整体轮廓/错误 shadow 多数改善，但 rim、弧形高光和 pink-gel 双高光仍未恢复；结论是保留 geometry 的整体作用，下一步验证多尺度 tile no-regression guard。报告见 `docs/superpowers/specs/2026-07-23-scene-mvp-fixed-7-scorer-calibration.md`。
 - 多尺度 tile no-regression guard A/B 已完成，其 offline replay 形式未通过预声明接入门禁：在固定 7 例、相同 geometry-first 候选机制和相同 draw 预算（455 次真实 Chromium draw、0 模型调用）下，Arm A（total_loss 严格改善即接受）的 7 例 ROI 回退全部低于冻结 `0.01` 容差，两个 watch ROI 无回退可保护；Arm B 在预声明 `0/0.001/0.0025/0.005/0.01` 容差上要么零保护收益，要么连首个改善候选都整体拦截（`t≤0.005` 误拒 4/7，`t=0.01` 仍误拒 2/7），吞掉 `color_lobes` 等明确改善；live guard 轨迹未验证。本离线形式不采用，生产未改，报告见 `docs/superpowers/specs/2026-07-23-scene-mvp-tile-guard-ab.md`。
-- acceptance live 单因素直接 A/B 已完成：两臂共享候选生成器、阶段顺序、每 stage 32 draw 预算与同一 fallback 快照，各自 live 搜索（各 448 候选、无 replay，共 903 draw、0 模型调用）。strict total-loss 在 6/7 内部 total loss 与外部 objective 严格更优（`solid_circle` 相同），aggregate 双优，且不复现 geometry-first 的两例实质 ROI 回退（`upper_color +0.019894`、`highlight_upper_left +0.011853`）；在固定 7 例/32+32 draw 契约内实质回退归因于 geometry-first acceptance（唯一实验变量），不外推。生产 acceptance 未改，见 D064 与 `docs/superpowers/specs/2026-07-23-scene-mvp-acceptance-live-ab.md`。
+- acceptance live 单因素直接 A/B 已完成：两臂共享候选生成器、阶段顺序、每 stage 32 draw 预算与同一 fallback 快照，各自 live 搜索（各 448 候选、无 replay，共 903 draw、0 模型调用）。strict total-loss 在 6/7 内部 total loss 与外部 objective 严格更优（`solid_circle` 相同），aggregate 双优，且不复现 geometry-first 的两例实质 ROI 回退（`upper_color +0.019894`、`highlight_upper_left +0.011853`）；在固定 7 例/32+32 draw 契约内实质回退归因于 geometry-first 诊断语义（唯一实验变量），不外推。生产 acceptance 已确认本来即为 strict total-loss、未发生任何算法改动，见 D064/D065 与 `docs/superpowers/specs/2026-07-23-scene-mvp-acceptance-live-ab.md`。
 - run `9d10b919-25f6-41a2-a2cf-e88c23ad78be` 的 `GraphRecursionError` 已正式修复；Refine 后不再重复完整 base/feature sweep，合法路径公式为 `9+2F+6R`，high/manual 最坏分别为 65/197 步、注入 69/201。配置拒绝超过 256 的组合，异常保持 fail-closed，失败账本只保存安全进度快照。
 - 已形成 `docs/superpowers/plans/2026-07-22-png-to-shader-v1-retirement.md` 分阶段退役计划：先抽离 min 仍使用的消息/WebGL1 共享契约，再分别完成 min benchmark、Node Lab、Memory 与默认产品路径门禁，最后由独立下线决策授权删除 V1 可执行代码；该计划不授权当前立即删除，历史决策、benchmark 和失败证据继续只增不改保留。
 
@@ -31,7 +31,7 @@
 
 ## 下一步
 
-- 生产 acceptance 是否从 geometry-first 字典序切换为 strict total-loss：固定 7 例 live 单因素 A/B 已建立因果证据（D064），切换需独立 ADR 授权并重跑工程验收。
+- 生产 acceptance 经 D065 核实自始为 strict total-loss，D064 Arm G 仅是诊断脚本语义、无生产切换对象；acceptance 议题关闭，五处比较已收口到行为等价的纯函数 `accepts_strict_total_loss`。
 - 补齐私有可重放 typed Patch、候选 Scene、raw/matured 指标及模型/Prompt/源码/metric 版本证据；公开 Artifact 继续只暴露 hash 和脱敏摘要。在此之后用相同真实 Patch 做 12/32 draw 单因素重放，再决定生产 maturity 预算。
 - scorer 语义和 Patch 重放证据稳定后，再独立调整 Initial Author 的视觉结构分解 Prompt，并使用冻结 D058/D059 配置、固定 7 例和显式真实模型开关运行 `scene_mvp` v3 benchmark；当前 YAML 仍是独立实验配置，任何冻结身份漂移都必须拒绝启动。
 - 为 v3 结果制作独立匿名盲评包并执行既有人工门禁；冻结证据继续使用 D058 的 `target_loss=0.04`，当前 YAML 实验目标/预算必须记录实际配置并单独验收，通过前不得调整外部 baseline 容差或把 F09 标为 passing。
@@ -47,16 +47,15 @@
 - `scene_mvp` 已具备 prepared program、严格 typed uniform 热上传、原始 RGB 热路径和 100 draw 显式性能探针，但尚无 CMA-ES、2000 draw 生产预算、优化中断/恢复或对应质量证据，不能声称已完成性能版优化器。
 - 当前产品接入覆盖显式模式、Backend/Frontend、账本摘要、三种 Artifact、分档 render/LLM/Refine 预算和专用浏览器 E2E；Memory、Node Lab、独立 benchmark 和真实模型质量验证尚未迁移，V1 垂直切片与冻结失败证据不得删除。
 - `scene_mvp` 的专用浏览器 E2E 使用隔离假 API 验证“达标”和“流程完成但质量未达标”两种成功响应都会显示结果；它不证明真实模型视觉质量、数据库耐久性或线上网络配置。
-- `min_scene_composite_v3` 已去除亮度分位数伪语义；固定 7 例证明 geometry 对整体轮廓/错误 shadow 有效，但 aggregate loss 会补偿局部结构回退，且不保证 rim/arc/双高光出现。4×4/8×8 tile guard 离线 replay 形式未通过接入门禁（无可保护回退且高误拒），live guard 轨迹未验证；两例实质 ROI 回退已归因到 geometry-first acceptance（D064），生产 acceptance 切换、真实模型固定 7 例和独立人工偏好仍是发布阻塞项。
+- `min_scene_composite_v3` 已去除亮度分位数伪语义；固定 7 例证明 geometry 对整体轮廓/错误 shadow 有效，但 aggregate loss 会补偿局部结构回退，且不保证 rim/arc/双高光出现。4×4/8×8 tile guard 离线 replay 形式未通过接入门禁（无可保护回退且高误拒），live guard 轨迹未验证；两例实质 ROI 回退已归因到 geometry-first 诊断语义（D064），生产 acceptance 经 D065 核实自始为 strict total-loss、无切换对象，真实模型固定 7 例和独立人工偏好仍是发布阻塞项。
 - 正式 M5 与 Node Lab real-model 的完整报告仍位于被忽略的本地 `output/benchmarks/`；`docs/evidence/registry.json` 已登记摘要、字节数和 SHA-256，但耐久性仍为 `partial`。在完整脱敏证据进入 Git LFS、Release 或不可变对象存储前，不能仅凭本地路径独立复验。
 - 服务端仍是阻塞式 API；浏览器停止等待不等于服务端取消。端到端 deadline、任务化/cancel、outbox/reaper、多 worker 分布式锁和真实发生顺序事件属于后续可靠性设计，不与 M6.2 混写。
 - 目标架构详细版当前只有设计方案；多假设、置信度标定、特征块调度、硬约束、两层一致性、沙箱和完整评测体系均未实现。旧 V2–V5 中未落地的契约不再是当前阶段门禁，但相应能力仍不得表述为完成。
 
 ## 当前验证基线
 
-- 2026-07-23 当前工作树通过 `make check`：526 个 Python 单元测试、`docs-check`、LangGraph validate（2 个 Graph）与 Frontend production build 均成功；high=`640/9/9`、manual=`1000/32/30` 的递归预算及 Progress API 集成为 6 passed，`make test-scene-mvp-ui` 已验证 Manual 仅在 scene_mvp 展示且切回 V1 自动回落 High。全仓 Ruff、`mypy --strict src backend`（148 个源文件）、诊断脚本 strict mypy 与 `git diff --check` 通过。固定 7 例 acceptance live A/B 真实 Chromium 完成 903 draw、0 模型调用，gate outcome=`strict_total_supported`，权威 v2（schema `_v2`）报告 SHA-256 为 `2daa4c77b274efed7ede863444b4ce6d5141bf92168075f722e7b0ded00cdd11`（run/schema 版本轴独立，旧 v1/v2 均 superseded 保留）；tile guard A/B 报告 SHA-256 为 `d844dc6bf47bb37451807d083b1677dc497ead1d6a19fc361454ccf94b09c5d3`；全程未调用模型。
+- 2026-07-23 当前工作树通过 `make check`：533 个 Python 单元测试（含新增 acceptance 7 例）、`docs-check`、2 个 Graph validate 与 Frontend build 均成功；Integration 在显式禁用未配置 PostgreSQL 后为 39 passed/2 skipped，根 `.env` 的 `TEST_DATABASE_URL` 仍是 `HOST` 占位值，PostgreSQL 单例需隔离实例才能验收。high=`640/9/9`、manual=`1000/32/30` 递归预算/Progress API 为 6 passed，scene_mvp UI 已验证 Manual 可见性与 V1 回落。全仓 Ruff、`mypy --strict src backend`（148 个源文件）及 `git diff --check` 通过。acceptance live A/B 完成 903 Chromium draw、0 模型调用，gate=`strict_total_supported`，权威 v2 报告 SHA-256=`2daa4c77b274efed7ede863444b4ce6d5141bf92168075f722e7b0ded00cdd11`；tile guard A/B SHA-256=`d844dc6bf47bb37451807d083b1677dc497ead1d6a19fc361454ccf94b09c5d3`。
 - v3 Renderer/质量基线：真实 Chromium 4 passed/1 显式性能探针 skipped，覆盖 prepared/baked 一致、三颜色场、六 feature、四槽和固定签名；固定 7 例质量回归 2 passed，按外部 `png_to_shader_score_v1` 对照 v2 fallback 为 6/7 改善，`solid_circle` total-loss 回归 `0.000217` 低于冻结的 `0.001` 容差，所有 ROI 与 geometry 回归均低于 `0.01` 容差。未调用真实模型。
-- 2026-07-16 当前工作树在 `UV_LOCKED=1` 下通过 `make check`：414 个 Python 单元测试、`docs-check`、LangGraph validate（1 个 Graph）与 Frontend production build 均成功；Integration 为 27 passed、1 skipped，全仓 Ruff、`mypy --strict src backend` 与 `git diff --check` 通过。未运行真实模型。
 - 数据库和浏览器追加验收通过：`make test-memory-postgres` 为 1 passed；产品 `npm --prefix frontend run e2e:procedural-v1` 与 Node Lab `make test-node-lab-ui` 均通过，使用隔离资源且没有真实模型调用。
 - `H02` 权威验收命令 `make benchmark-node-lab-ai-off`、`make benchmark-node-lab-model`、`make test-node-lab-ui` 均通过；本次离线五角色 run id 为 `node-lab-model-78520d334d0a`。这些结果只覆盖 AI-off、离线 fixture 和页面流程，不构成真实模型质量证明。
 - 2026-07-16 wheel 审计确认 `backend.sql`、V1 嵌套包、Prompt、许可证和三个 `py.typed` 均进入发布包且无 package-discovery 警告；独立导入探针确认 `shaderforge.contracts`、`agent.app.contracts.llm` 与 `agent.app.lab.models` 不再 eager-load Renderer、Runner、Playwright 或 V1 Agent 契约，同时根包兼容导出的对象 identity 保持不变。
@@ -66,11 +65,10 @@
 
 ## 最近重要变更
 
-- 2026-07-23：acceptance live A/B 在固定搜索契约内建立因果：strict total-loss aggregate 双优且不复现两例实质 ROI 回退；生产 acceptance 未改，见 D064，F09 继续 active/no-go。
-- 2026-07-23：固定 7 例多尺度 tile no-regression guard A/B 的离线 replay 形式未通过预声明接入门禁：strict total-loss acceptance 下无 watch ROI 回退可保护，声明容差上 guard 要么零收益要么高误拒；与校准的差异只把怀疑定位到 acceptance/轨迹，下一步用同一候选预算的 live 单因素直接 A/B 建立因果，live guard 轨迹未验证，生产算法不变，F09 继续 active/no-go，决策见 D063。
+- 2026-07-23：D065 纠正事实——生产 acceptance 自始为 strict total-loss，D064 Arm G 仅是诊断脚本语义、无生产切换对象；五处比较收口到有效域内行为等价的纯函数并补聚焦回归测试，Graph/预算/候选/失败语义不变，F09 继续 active/no-go。
+- 2026-07-23：acceptance live A/B 在固定搜索契约内建立因果：strict total-loss aggregate 双优且不复现两例实质 ROI 回退；生产 acceptance 已确认本来即为 strict、未发生算法改动，见 D064，F09 继续 active/no-go。
+- 2026-07-23：固定 7 例多尺度 tile no-regression guard A/B 的离线 replay 形式未通过预声明接入门禁：strict total-loss acceptance 下无 watch ROI 回退可保护，声明容差上 guard 要么零收益要么高误拒；与校准的差异当时只把怀疑定位到 acceptance/轨迹（已由 D065 关闭），live guard 轨迹未验证，生产算法不变，F09 继续 active/no-go，决策见 D063。
 - 2026-07-23：保留 scene_mvp high=`640/9/9` 的可比语义，并新增仅限独立实验的 manual=`1000/32/30`；冻结 benchmark 禁止 manual，V1+manual 返回 422，high/manual recursion limit 分别为 69/201，决策见 D062。
-- 2026-07-23：run `79f51d8a` P0 与固定 7 例无模型校准确认 geometry 能改善整体轮廓/错误 shadow，但 aggregate loss 可补偿局部 ROI 回退且不恢复关键高光；下一增量收敛为多尺度 tile no-regression guard A/B，生产算法暂不改，F09 继续 active/no-go。
-- 2026-07-23：`scene_mvp` 补齐冻结/独立实验身份、配置指纹、Patch/空间残差/拒绝证据与 12 draw typed Patch 有界成熟；Refine 后不再重复全量 sweep，`current_best` 保持只读锚点，真实模型质量仍未证明，决策见 D061。
 
 ## 历史索引
 

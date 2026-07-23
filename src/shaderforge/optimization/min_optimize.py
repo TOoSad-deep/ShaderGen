@@ -483,6 +483,23 @@ def accept_strict_mae_improvement(
     return current
 
 
+def accepts_strict_total_loss(candidate_loss: float, incumbent_loss: float) -> bool:
+    """生产 scene_mvp 唯一 acceptance 谓词：仅复合 total_loss 严格改善才接受.
+
+    不存在 geometry-first 字典序 acceptance；`geometry_mask_loss` 只作为
+    `min_scene_composite_v3` 的加权分量与证据 delta 出现，从不单独决定接受。
+    非有限或负 loss 一律 fail-closed 拒绝；该检查只在有效 metric 域之外
+    生效，不改变有效域内的搜索语义。
+    """
+    return (
+        math.isfinite(candidate_loss)
+        and candidate_loss >= 0.0
+        and math.isfinite(incumbent_loss)
+        and incumbent_loss >= 0.0
+        and candidate_loss < incumbent_loss
+    )
+
+
 def _validate_mae(value: float) -> None:
     if not math.isfinite(value) or value < 0.0:
         raise ValueError("MAE 必须是有限非负数。")
@@ -496,6 +513,7 @@ __all__ = [
     "ScoredScene",
     "TunableParameter",
     "accept_strict_mae_improvement",
+    "accepts_strict_total_loss",
     "propose_min_scene_candidates",
     "rebase_candidate_proposal",
 ]

@@ -143,9 +143,13 @@ def test_docs_check_detects_progress_growth_and_changelog_overflow(monkeypatch) 
     docs_check = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(docs_check)
     original_read = docs_check._read
+    # 固定注入六条，避免测试依赖当前主文件恰好保留多少条最近变更。
+    overflow_entries = "".join(
+        f"- 2026-07-15：溢出条目 {index}。\n" for index in range(1, 7)
+    )
     oversized_progress = _read("PROGRESS.md").replace(
         "\n## 历史索引",
-        "\n- 2026-07-15：第六条不应留在主文件。\n\n## 历史索引",
+        f"\n{overflow_entries}\n## 历史索引",
         1,
     ) + ("x" * 20_000)
 

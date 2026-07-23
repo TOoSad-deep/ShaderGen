@@ -8,6 +8,7 @@ from shaderforge.optimization.min_optimize import (
     ScoredScene,
     TunableParameter,
     accept_strict_mae_improvement,
+    accepts_strict_total_loss,
     propose_min_scene_candidates,
     rebase_candidate_proposal,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "ScoredScene",
     "TunableParameter",
     "accept_strict_mae_improvement",
+    "accepts_strict_total_loss",
     "propose_min_scene_candidates",
     "rebase_candidate_proposal",
 ]

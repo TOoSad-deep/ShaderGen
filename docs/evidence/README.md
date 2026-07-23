@@ -18,4 +18,4 @@
 - 发布 gate 只有在对应 evidence 达到 `durable` 且功能验证命令通过后才能作为 `passing` 证据；`partial` 必须继续显示为缺口。
 - 大型 PNG、逐候选 Artifact 和浏览器包优先使用 Git LFS、Release 或不可变对象存储；registry 不复制二进制内容。
 
-当前正式 M5 和 Node Lab real-model 证据仍为 `partial`：公开盲评 zip 已受版本控制，但完整 gate report、私有映射和 real-model report 仍只在本地 `output/benchmarks/`。在持久存储方案落地前，不得把 registry 本身解释成该缺口已经关闭。
+当前正式 M5 和 Node Lab real-model 证据仍为 `partial`：公开盲评 zip 已受版本控制，但完整 gate report、私有映射和 real-model report 仍只在本地 `output/benchmarks/`。`scene_mvp` acceptance live A/B 同样仅登记本地忽略的诊断报告；它不是冻结 benchmark 或发布 gate，且搜索契约不同于生产。持久存储落地前，不得把 registry 本身解释成这些缺口已经关闭。

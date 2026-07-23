@@ -49,6 +49,7 @@ from shaderforge.generation import (
 )
 from shaderforge.optimization import (
     MAX_PATCH_CANDIDATE_DRAWS,
+    accepts_strict_total_loss,
     propose_min_scene_candidates,
     rebase_candidate_proposal,
 )
@@ -361,17 +362,13 @@ def make_min_nodes(
             "status": "running",
             "quality_preset": str(state.get("quality_preset", "balanced")),
             "run_classification": str(
-                state.get(
-                    "run_classification", MIN_PIPELINE_CONFIG.run_classification
-                )
+                state.get("run_classification", MIN_PIPELINE_CONFIG.run_classification)
             ),
             "experiment_id": state.get(
                 "experiment_id", MIN_PIPELINE_CONFIG.experiment_id
             ),
             "config_fingerprint": str(
-                state.get(
-                    "config_fingerprint", MIN_PIPELINE_CONFIG.config_fingerprint
-                )
+                state.get("config_fingerprint", MIN_PIPELINE_CONFIG.config_fingerprint)
             ),
             "report_schema_version": str(
                 state.get(
@@ -599,13 +596,15 @@ def make_min_nodes(
                         matured = None
                         break
                     candidate = _candidate_from_outcome(rebased.scene, outcome)
-                    if _best_loss(candidate) < _best_loss(matured):
+                    if accepts_strict_total_loss(
+                        _best_loss(candidate), _best_loss(matured)
+                    ):
                         matured = candidate
 
         accepted = (
             rejected_reason is None
             and isinstance(matured, dict)
-            and _best_loss(matured) < _best_loss(anchor)
+            and accepts_strict_total_loss(_best_loss(matured), _best_loss(anchor))
         )
         if not accepted and rejected_reason is None:
             rejected_reason = "no_strict_loss_improvement"
@@ -732,8 +731,8 @@ def make_min_nodes(
             "glsl": selected_outcome["glsl"],
             "render": selected_outcome["image"],
         }
-        accepted = not isinstance(previous, dict) or _best_loss(candidate) < _best_loss(
-            previous
+        accepted = not isinstance(previous, dict) or accepts_strict_total_loss(
+            _best_loss(candidate), _best_loss(previous)
         )
         best = candidate if accepted else previous
         assert isinstance(best, dict)
@@ -841,7 +840,9 @@ def make_min_nodes(
                 capture_png=False,
             )
             render_count = outcome["render_count"]
-            if outcome["success"] and float(outcome["loss"]) < _best_loss(best):
+            if outcome["success"] and accepts_strict_total_loss(
+                float(outcome["loss"]), _best_loss(best)
+            ):
                 best = {
                     "scene": rebased.scene.model_dump(mode="json"),
                     "mae": outcome["mae"],
@@ -856,7 +857,7 @@ def make_min_nodes(
                     ),
                 }
                 accepted_parameter = rebased.parameter.path
-        improved = _best_loss(best) < _best_loss(baseline)
+        improved = accepts_strict_total_loss(_best_loss(best), _best_loss(baseline))
         return {
             "phase": "base",
             "scene": best["scene"],
@@ -914,7 +915,9 @@ def make_min_nodes(
                 capture_png=False,
             )
             render_count = outcome["render_count"]
-            if outcome["success"] and float(outcome["loss"]) < _best_loss(best):
+            if outcome["success"] and accepts_strict_total_loss(
+                float(outcome["loss"]), _best_loss(best)
+            ):
                 best = {
                     "scene": rebased.scene.model_dump(mode="json"),
                     "mae": outcome["mae"],
@@ -929,7 +932,7 @@ def make_min_nodes(
                     ),
                 }
                 accepted_parameter = rebased.parameter.path
-        improved = _best_loss(best) < _best_loss(baseline)
+        improved = accepts_strict_total_loss(_best_loss(best), _best_loss(baseline))
         return {
             "phase": "feature",
             "scene": best["scene"],
