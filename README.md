@@ -54,6 +54,7 @@ make test-scene-mvp-ui
 make benchmark-png-to-shader QUALITY_PRESET=balanced MODEL_CALL_BUDGET=80
 uv run python scripts/run_scene_mvp_run_diagnostics.py --run-dir <run-dir> --output-dir <new-output-dir>
 uv run python scripts/run_scene_mvp_scorer_calibration.py --output-dir <new-output-dir>
+uv run python scripts/run_scene_mvp_tile_guard_ab.py --output-dir <new-output-dir>
 npm --prefix frontend run e2e:procedural-v1
 ```
 
@@ -62,6 +63,8 @@ npm --prefix frontend run e2e:procedural-v1
 `run_scene_mvp_run_diagnostics.py` 对一个已完成的 `scene_mvp` run 执行无模型 geometry 与 Patch maturity 诊断，使用真实 Chromium Renderer，但不会调用模型、不会改写原 run，也不构成冻结 benchmark 或质量 gate。`--output-dir` 必须是尚不存在的新目录，避免覆盖失败证据。
 
 `run_scene_mvp_scorer_calibration.py` 使用冻结的 7 个支持案例，对 fallback 与 geometry-first 反事实执行主体内部、边缘、主体外效果和关键 ROI 的方向一致性校准，并输出三列 contact sheet。它同样不调用模型、不修改生产 scorer，输出目录必须不存在。
+
+`run_scene_mvp_tile_guard_ab.py` 在相同冻结 7 例、相同 geometry-first 候选机制和相同 draw 预算上做 acceptance 单因素 A/B：Arm A 为 total_loss 严格改善即接受，Arm B 在 Arm A 实跑的同一批候选流上离线重放，附加 4×4/8×8 全 tile 最大回退不超过预先声明容差的 guard；benchmark ROI 只用于事后评价。它不调用模型、不修改生产 scorer/Prompt/预算/目标，输出目录必须不存在。
 
 GitHub 主 CI 使用 Python 3.12、Node 22、`uv sync --locked` 和 `npm ci --prefix frontend` 后执行完整 `make check`、全仓 Ruff 与 `mypy --strict src backend`，另以 Python 3.10/3.11 运行兼容性单测。定时集成测试和 PNG-to-Shader benchmark 才安装 Playwright Chromium；集成测试不注入模型密钥，真实模型 benchmark 仍只在仓库变量或手动输入显式开启时运行。
 

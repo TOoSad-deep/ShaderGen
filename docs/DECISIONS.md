@@ -480,3 +480,10 @@
 - 决策：保留 fast/balanced/high=`48/2/1`、`96/4/2`、`640/9/9` 的当前可比语义，新增 `scene_mvp` 专用 manual=`1000/32/30` render/LLM/Refine 档。独立实验 YAML 必须完整声明四档；D058/D059 冻结 benchmark 仍只允许原三档 `48/2/1`、`96/4/2`、`160/6/3`，携带 manual 必须 fail closed。Backend 表单契约接受 manual，但 `procedural_v1 + manual` 返回 422；Frontend 仅在 `scene_mvp` 下展示 Manual，从 Manual 切回 V1 时回落到 V1 high。
 - 原因：把 `1000/32/30` 直接覆盖 high 会破坏既有 high run、测试和报告的配置可比性，也会把显著更高的模型成本隐藏在原档位名称下。显式 manual 能让高成本探索保留实际身份、配置指纹和预算证据，同时避免扩张 V1 的冻结预算契约。
 - 影响：按 D061 路径公式，manual 最多执行 30 轮 Refine，合法最坏路径为 197 步、注入 recursion limit 201，仍低于全局 256 上限；Model Author 的进程级最大 LLM/Refine 包装预算相应为 32/30。浏览器 manual 默认等待上限为 30 分钟，但仍只是客户端停止等待，不提供服务端取消。manual 不得进入冻结 gate，其成本、质量和时延必须单独记录；本决策不改变 Graph 节点、边、路由、`current_best` 安全边界、scorer、Prompt 或 F09 active/no-go。
+
+## D063 - 不接入多尺度 tile 最大回退 guard 的离线 replay 形式
+
+- 日期：2026-07-23
+- 决策：不把本轮 `4×4/8×8` 全 tile RGB MAE 最大回退 guard 的 offline replay 形式接入生产 scorer 或候选选择。固定 7 例继续保留 strict total-loss Arm A 和预声明容差 `0/0.001/0.0025/0.005/0.01` 的完整负结果；下一质量增量改为在同一候选预算和 draw 预算下直接运行 geometry-first 字典序与 strict total-loss 两种 live acceptance 的单因素 A/B。
+- 原因：strict total-loss Arm A 的两个 watch ROI 没有达到冻结 `0.01` 回退阈值，offline Arm B 因而没有保护收益；较严格容差反而拦截 `color_lobes` 等明确改善，`t≤0.005` 时四例丢失全部改进，`t=0.01` 时 `shadow_disk` 和 `pink_gel` 仍全部拒绝。该证据足以否决当前 offline replay 形式的生产接入，但 Arm B 沿用 Arm A 生成的候选流；拒绝早期候选后 live candidate generation 会改变，不能据此因果性地证伪 live guard，或把两次实验的 ROI 差异直接归属为某一种 acceptance。
+- 影响：生产 `min_scene_composite_v3`、Prompt、Graph、预算、目标和 `current_best` 安全边界均不改变，F09 继续 `active/no-go`。离线脚本、11 个纯函数测试、455 次真实 Chromium draw、0 模型调用和报告 SHA-256 作为负证据保留；benchmark ROI 只做事后评价，不进入 guard。rim、弧形高光和双高光缺失仍是发布阻塞项，自动代理看片不替代独立人工偏好 gate。
