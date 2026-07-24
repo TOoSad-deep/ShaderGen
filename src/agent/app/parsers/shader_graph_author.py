@@ -21,10 +21,30 @@ _PATCH_MAX_CHARS = 20_000
 class ShaderGraphAuthorParseError(ValueError):
     """表示模型输出不是当前节点允许的完整 JSON 值."""
 
-    def __init__(self, code: str) -> None:
-        """只保留稳定错误码，不泄露原始模型输出."""
+    def __init__(
+        self,
+        code: str,
+        *,
+        details: tuple[dict[str, str], ...] = (),
+    ) -> None:
+        """保留稳定错误码和脱敏校验位置，不泄露原始值."""
         self.code = code
+        self.details = details
         super().__init__(code)
+
+
+def _validation_details(
+    error: ValidationError,
+) -> tuple[dict[str, str], ...]:
+    """提取 repair 可消费的字段位置、类型和安全消息，不包含 input."""
+    return tuple(
+        {
+            "location": ".".join(str(part) for part in item["loc"]),
+            "type": str(item["type"]),
+            "message": str(item["msg"])[:240],
+        }
+        for item in error.errors(include_input=False, include_url=False)[:12]
+    )
 
 
 def _reject_non_finite(value: str) -> None:
@@ -59,9 +79,15 @@ def parse_shader_graph_document(
     """解析完整 ShaderDocument，并固定参考图画布，禁止模型改变维度."""
     try:
         _assert_strict_json(text, max_chars=_DOCUMENT_MAX_CHARS)
-        document = ShaderDocument.model_validate_json(text, strict=True)
-    except (ValidationError, ValueError) as exc:
+    except ValueError as exc:
         raise ShaderGraphAuthorParseError("invalid_shader_graph_document_json") from exc
+    try:
+        document = ShaderDocument.model_validate_json(text, strict=True)
+    except ValidationError as exc:
+        raise ShaderGraphAuthorParseError(
+            "invalid_shader_graph_document_json",
+            details=_validation_details(exc),
+        ) from exc
     if (
         document.canvas.width != expected_width
         or document.canvas.height != expected_height
@@ -74,10 +100,16 @@ def parse_shader_graph_author_patch(text: str) -> ShaderGraphAuthorPatch:
     """解析恰好一个绑定 base 哈希的 typed layer patch 对象."""
     try:
         _assert_strict_json(text, max_chars=_PATCH_MAX_CHARS)
-        return _PATCH_ADAPTER.validate_json(text, strict=True)
-    except (ValidationError, ValueError) as exc:
+    except ValueError as exc:
         raise ShaderGraphAuthorParseError(
             "invalid_shader_graph_author_patch_json"
+        ) from exc
+    try:
+        return _PATCH_ADAPTER.validate_json(text, strict=True)
+    except ValidationError as exc:
+        raise ShaderGraphAuthorParseError(
+            "invalid_shader_graph_author_patch_json",
+            details=_validation_details(exc),
         ) from exc
 
 

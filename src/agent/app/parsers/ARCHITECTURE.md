@@ -5,7 +5,7 @@
 ## 当前文件
 
 - `png_to_shader_min.py`：严格解析 legacy MinScene 或恰好一个旧 typed patch，供显式 legacy Builder 测试。
-- `shader_graph_author.py`：严格解析 ShaderGraph Initial 的完整 `ShaderDocument`（固定参考图画布维度）或恰好一个 typed layer patch；同样拒绝非严格 JSON、未知字段、非法 operation 和不合法 `base_document_sha256` 形状，只暴露稳定错误码。
+- `shader_graph_author.py`：严格解析 ShaderGraph Initial 的完整 `ShaderDocument`（固定参考图画布维度）或恰好一个 typed layer patch；同样拒绝非严格 JSON、未知字段、非法 operation 和不合法 `base_document_sha256` 形状。失败对 Node 暴露稳定错误码；Pydantic 校验失败可额外携带最多 12 项脱敏 `location/type/message` 给结构修复，不携带原始 input/value。
 
 ## 边界规则
 

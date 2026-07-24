@@ -86,6 +86,7 @@ def _repair_messages(
     payload = {
         "source_prompt_version": source_prompt.version,
         "validation_error_code": error_code,
+        "validation_error_details": getattr(error, "details", ()),
         "expected_json_schema": schema,
         "untrusted_original_output": original_output,
     }

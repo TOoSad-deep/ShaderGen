@@ -110,6 +110,22 @@ def test_parse_initial_rejects_oversize_output() -> None:
     assert raised.value.code == "invalid_shader_graph_document_json"
 
 
+def test_parse_initial_exposes_safe_validation_details_for_repair() -> None:
+    payload = json.loads(_document_json(_document()))
+    payload["layers"][0]["shape"]["radius"] = 0.0
+
+    with pytest.raises(ShaderGraphAuthorParseError) as raised:
+        parse_shader_graph_document(
+            json.dumps(payload),
+            expected_width=64,
+            expected_height=64,
+        )
+
+    assert raised.value.details
+    assert raised.value.details[0]["location"].endswith("radius")
+    assert "input" not in raised.value.details[0]
+
+
 # --- Refine：单个 typed layer patch 解析 ---
 
 

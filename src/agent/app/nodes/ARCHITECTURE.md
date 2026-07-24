@@ -13,3 +13,4 @@
 - `current_best` 使用冻结 `ShaderGraphCandidateSnapshot`，Prepared handle 只保存在 `MinRendererRegistry` 的 run-scoped program cache。`finalize` 输出权威 `shader-graph.json`、specialized WebGL1 GLSL、Render、metrics 和 manifest。
 - `shader_graph_shadow.py` 仍保留给显式 legacy Builder 测试与兼容审计；默认产品组合根不再运行二次 shadow，也不把 MinScene 固定模板作为真相源。
 - `shader_graph_author.py` 加载 Initial/Refine Prompt 与严格 Schema；契约与解析由 `app/contracts/shader_graph_author.py` 和 `app/parsers/shader_graph_author.py` 承担，调用继续复用 `invoke_min_author` 的有界调用与结构修复。
+- 结构修复消息除稳定错误码外，只接收 Parser 提取的脱敏校验位置、类型和安全消息；模型原始输出仍作为不可信修复输入，不写入 State、日志或 Artifact。
