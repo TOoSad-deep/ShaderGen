@@ -52,6 +52,8 @@ class PngToShaderMinState(TypedDict, total=False):
         tuple[dict[str, Any], ...], UntrackedValue
     ]
     patch_evidence: Annotated[tuple[dict[str, Any], ...], UntrackedValue]
+    pending_replay_step: Annotated[dict[str, Any] | None, UntrackedValue]
+    replay_step_refs: Annotated[tuple[dict[str, Any], ...], UntrackedValue]
     author_model: Annotated[str | None, UntrackedValue]
     author_error: Annotated[str | None, UntrackedValue]
     next_action: Annotated[str, UntrackedValue]

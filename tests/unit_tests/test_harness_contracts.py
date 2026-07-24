@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -40,7 +41,94 @@ def test_progress_is_bounded_current_handoff() -> None:
         assert heading in progress
 
 
-def test_h01_evidence_matches_graph_registry() -> None:
+def test_docs_check_rejects_unclassified_root_markdown(
+    tmp_path, monkeypatch
+) -> None:
+    spec = importlib.util.spec_from_file_location(
+        "docs_check_root_markdown_guard",
+        ROOT / "scripts/docs_check.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    docs_check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(docs_check)
+    (tmp_path / "旧阶段总结.md").write_text("# 历史总结\n", encoding="utf-8")
+    monkeypatch.setattr(docs_check, "ROOT", tmp_path)
+    docs_check.ERRORS.clear()
+
+    docs_check._check_root_markdown_classification()
+
+    assert any("旧阶段总结.md" in error for error in docs_check.ERRORS)
+
+
+def test_docs_check_requires_archive_warning_in_preamble(
+    tmp_path, monkeypatch
+) -> None:
+    spec = importlib.util.spec_from_file_location(
+        "docs_check_archive_warning_guard",
+        ROOT / "scripts/docs_check.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    docs_check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(docs_check)
+    archive_dir = tmp_path / "docs/progress/archive"
+    archive_dir.mkdir(parents=True)
+    (archive_dir / "OLD.md").write_text(
+        "# 旧记录\n" + ("\n占位" * 12) + "\n不代表当前事实\n",
+        encoding="utf-8",
+    )
+    progress = "\n".join(
+        (
+            "# 进度",
+            "不是逐会话追加日志，历史见 docs/progress/archive/。",
+            *docs_check.PROGRESS_REQUIRED_HEADINGS,
+        )
+    )
+    (tmp_path / "PROGRESS.md").write_text(progress, encoding="utf-8")
+    monkeypatch.setattr(docs_check, "ROOT", tmp_path)
+    docs_check.ERRORS.clear()
+
+    docs_check._check_progress_handoff()
+
+    assert any("必须在首屏" in error for error in docs_check.ERRORS)
+
+
+def test_docs_check_detects_progress_growth_and_changelog_overflow(monkeypatch) -> None:
+    spec = importlib.util.spec_from_file_location(
+        "docs_check_progress_guard",
+        ROOT / "scripts/docs_check.py",
+    )
+    assert spec is not None
+    assert spec.loader is not None
+    docs_check = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(docs_check)
+    original_read = docs_check._read
+    # 固定注入六条，避免测试依赖当前主文件恰好保留多少条最近变更。
+    overflow_entries = "".join(
+        f"- 2026-07-15：溢出条目 {index}。\n" for index in range(1, 7)
+    )
+    oversized_progress = _read("PROGRESS.md").replace(
+        "\n## 历史索引",
+        f"\n{overflow_entries}\n## 历史索引",
+        1,
+    ) + ("x" * 20_000)
+
+    def fake_read(path: str) -> str:
+        if path == "PROGRESS.md":
+            return oversized_progress
+        return original_read(path)
+
+    monkeypatch.setattr(docs_check, "_read", fake_read)
+    docs_check.ERRORS.clear()
+
+    docs_check._check_progress_handoff()
+
+    assert any("20,000 bytes" in error for error in docs_check.ERRORS)
+    assert any("最多保留 5 条" in error for error in docs_check.ERRORS)
+
+
+def test_h01_evidence_matches_current_harness_shape() -> None:
     h01 = _feature_row("H01")
     graph_count = len(json.loads(_read("langgraph.json"))["graphs"])
     assert f"{graph_count} 个 graph" in h01

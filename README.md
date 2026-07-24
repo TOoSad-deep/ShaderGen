@@ -28,6 +28,8 @@ uv run python scripts/run_scene_mvp_run_diagnostics.py --run-dir <run-dir> --out
 
 `make check` 执行单元测试、文档边界检查、LangGraph validate 和前端构建。跨组件改动还需按范围运行集成测试或页面 E2E。
 
+`run_scene_mvp_acceptance_live_ab.py` 与 `run_scene_mvp_maturity_budget_replay.py` 仅保留旧 MinScene 纯函数、历史实现和既有报告审计。D076 已退役其 benchmark/Oracle 运行依赖，当前分支不得把它们作为可执行入口，也不能用旧结果证明 ShaderGraph 产品质量或授权修改当前预算。
+
 ## 当前边界
 
 - `langgraph.json` 只注册 `png_to_shader_min`。

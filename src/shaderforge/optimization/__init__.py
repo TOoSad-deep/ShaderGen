@@ -13,6 +13,7 @@ from shaderforge.optimization.min_optimize import (
     ScoredScene,
     TunableParameter,
     accept_strict_mae_improvement,
+    accepts_strict_total_loss,
     propose_min_scene_candidates,
     rebase_candidate_proposal,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "TunableParameter",
     "accept_strict_mae_improvement",
     "dsl_parameter_specs",
+    "accepts_strict_total_loss",
     "propose_min_scene_candidates",
     "rebase_candidate_proposal",
     "replace_dsl_parameter",

@@ -19,3 +19,5 @@
 - 大型 PNG、逐候选 Artifact 和浏览器包优先使用 Git LFS、Release 或不可变对象存储；registry 不复制二进制内容。
 
 2026-07-23 用户明确授权删除整个本地 `output/`，包括正式 M5、旧 Node Lab real-model report、公开盲评 zip 和其他历史运行产物。对应 registry 条目已降为 `missing`，只保留审计摘要、原路径、字节数和 SHA-256；这些信息不能恢复文件、复验 gate 或证明当前版本质量。
+
+合并自 mvp 的 acceptance live A/B 与 maturity budget replay 报告仍存在于来源 worktree 的本地忽略目录，因此登记为 `partial`；当前工作树没有复制这些报告。两者只解释旧 MinScene Feature/typed Patch 候选空间，不是冻结 benchmark 或发布 gate，也不能外推为当前 ShaderGraph 产品结论。持久存储落地前，不得把 registry 本身解释成这些缺口已经关闭。
