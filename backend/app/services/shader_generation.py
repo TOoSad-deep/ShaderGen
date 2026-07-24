@@ -10,6 +10,7 @@ from uuid import UUID
 
 from backend.app.schemas.shader import (
     QualityPresetName,
+    ShaderGraphShadowSummary,
     ShaderMinPipelineSummary,
     ShaderResponse,
 )
@@ -383,10 +384,19 @@ async def execute_shader_generation(
             run_id
         ):
             raise ValueError("scene_mvp 返回的 project_id/run_id 与请求不一致。")
-        if result.renderer_path != "prepared_uniforms_v1":
+        if result.renderer_path not in {
+            "prepared_uniforms_v1",
+            "compiled_graph_program_cache_v1",
+        }:
             raise ValueError("scene_mvp 返回了未知 Renderer 路径。")
         scene = _scene_value(result.scene)
         trace = _scene_trace(result.trace)
+        raw_shader_graph_shadow = getattr(result, "shader_graph_shadow", None)
+        shader_graph_shadow = (
+            ShaderGraphShadowSummary.model_validate(raw_shader_graph_shadow)
+            if isinstance(raw_shader_graph_shadow, dict)
+            else None
+        )
         response = ShaderResponse(
             project_id=project_id,
             run_id=run_id,
@@ -415,7 +425,7 @@ async def execute_shader_generation(
                 report_schema_version=str(result.report_schema_version),
                 patch_candidate_draw_budget=int(result.patch_candidate_draw_budget),
                 patch_evidence=[dict(item) for item in result.patch_evidence],
-                renderer_path="prepared_uniforms_v1",
+                renderer_path=result.renderer_path,
                 target_mae=float(result.target_mae),
                 target_loss=float(result.target_loss),
                 target_reached=bool(result.target_reached),
@@ -424,6 +434,7 @@ async def execute_shader_generation(
                 uniform_render_p95_ms=float(result.uniform_render_p95_ms),
                 scene=scene,
                 trace=trace,
+                shader_graph_shadow=shader_graph_shadow,
             ),
         )
     except Exception as exc:
@@ -480,6 +491,11 @@ async def execute_shader_generation(
         "uniform_render_p95_ms": float(result.uniform_render_p95_ms),
         "scene": scene,
         "trace": trace,
+        "shader_graph_shadow": (
+            dict(result.shader_graph_shadow)
+            if isinstance(getattr(result, "shader_graph_shadow", None), dict)
+            else None
+        ),
         "final_render_url": f"{artifact_base}/final-render",
         "metrics_url": f"{artifact_base}/metrics",
         "manifest_url": f"{artifact_base}/manifest",

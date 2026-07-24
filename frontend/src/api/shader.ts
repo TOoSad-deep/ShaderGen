@@ -9,6 +9,28 @@ export interface MinPipelineTracePhase {
   message?: string | null;
 }
 
+export interface ShaderGraphShadowSummary {
+  status: "rendered" | "unsupported" | "failed";
+  renderer_path?: string | null;
+  dsl_schema_version?: string | null;
+  compiler_version?: string | null;
+  document_sha256?: string | null;
+  topology_sha256?: string | null;
+  layer_count?: number | null;
+  primitive_count?: number | null;
+  compile_count?: number | null;
+  cache_hit_count?: number | null;
+  cache_size?: number | null;
+  render_duration_ms?: number | null;
+  unsupported_features?: string[] | null;
+  error_code?: string | null;
+  shader_graph?: {
+    schema_version?: string;
+    layers?: Array<Record<string, unknown>>;
+    [key: string]: unknown;
+  } | null;
+}
+
 // scene_mvp 最小管线的运行摘要；后端字段可缺省，前端全部按可选处理。
 export interface MinPipelineSummary {
   mae?: number | null;
@@ -40,6 +62,7 @@ export interface MinPipelineSummary {
   // prepared 后复用 uniform 的热渲染统计
   uniform_render_count?: number | null;
   uniform_render_p95_ms?: number | null;
+  shader_graph_shadow?: ShaderGraphShadowSummary | null;
 }
 
 export interface ShaderResponse {

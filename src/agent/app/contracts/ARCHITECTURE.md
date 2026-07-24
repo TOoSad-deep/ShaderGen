@@ -6,6 +6,7 @@
 
 - `llm.py`：定义 `LLMGateway`、`LLMCallOptions`、`LLMResponse`、token usage、thinking、`text | json_object` 输出格式和统一错误。
 - `png_to_shader_min.py`：定义 `scene_mvp` Refine Author 的单个 typed patch 联合类型；只允许 add/remove/replace feature 与完整 replace color field 四种固定 `path/operation/value` 组合，并适配到领域 scene patch。`summarize_min_author_patch()` 以规范 typed JSON 生成 SHA-256，只公开 operation、feature id/type 和指纹，不泄露完整 Patch value。
+- `shader_graph_author.py`：定义 ShaderGraph Refine Author 的单个 typed layer patch 判别联合（`operation` 判别），只允许 add_layer_bundle/remove_layer/replace_layer_bundle/reorder_layer/replace_canvas_background 五种原子 op；每个 patch 必须携带 `base_document_sha256`，应用时先比对 `document_sha256`，再以完整重建触发全图校验（id 唯一、层级/primitive/CSG 预算、opaque 背景），失败只抛稳定错误码。DSL shape 为内联树、无 id 引用，不可达节点在结构上不可表示。`summarize_shader_graph_author_patch()` 只公开 operation、layer id、节点类型集合、base hash 前缀和指纹。
 
 ## 边界规则
 

@@ -158,10 +158,15 @@ async def test_large_policy_four_features_finishes_before_graph_limit(
         on_progress=lambda event, _render: events.append(event),
     )
 
-    assert len(events) == required_min_graph_steps(
-        llm_budget=policy.llm_budget,
-        refine_budget=policy.refine_budget,
-    ) == expected_steps
+    assert (
+        len(events)
+        == required_min_graph_steps(
+            llm_budget=policy.llm_budget,
+            refine_budget=policy.refine_budget,
+            max_features=4,
+        )
+        == expected_steps
+    )
     assert len(events) < policy.recursion_limit
     assert events[-1]["node"] == "finalize"
     expected_calls = 1 + max_min_refine_iterations(

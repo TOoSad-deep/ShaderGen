@@ -39,6 +39,7 @@ class PngToShaderMinState(TypedDict, total=False):
     target_rgb: Annotated[Any, UntrackedValue]
     metric_background: Annotated[Any, UntrackedValue]
     fallback_scene: Annotated[dict[str, Any], UntrackedValue]
+    fallback_shader_graph: Annotated[dict[str, Any], UntrackedValue]
     scene: Annotated[dict[str, Any], UntrackedValue]
     materialized: Annotated[Any, UntrackedValue]
     current_glsl: Annotated[str, UntrackedValue]

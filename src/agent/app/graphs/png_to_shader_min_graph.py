@@ -15,7 +15,14 @@ from agent.app.graphs.png_to_shader_min_routing import (
     route_after_render,
 )
 from agent.app.llms.gateway import LangChainLLMGateway
-from agent.app.nodes.png_to_shader_min import MinRendererRegistry, make_min_nodes
+from agent.app.nodes.png_to_shader_min import (
+    MinRendererRegistry,
+    make_min_nodes,
+    make_shader_graph_nodes,
+)
+from agent.app.nodes.png_to_shader_min.shader_graph_shadow import (
+    ShaderGraphShadowRunner,
+)
 from agent.app.states.agent_state import PngToShaderMinState
 from shaderforge.rendering import PlaywrightWebGL1Renderer
 from shaderforge.store import LocalArtifactStore
@@ -50,27 +57,38 @@ PNG_TO_SHADER_MIN_RECURSION_LIMIT = MIN_PIPELINE_CONFIG.max_recursion_limit
 #                                                               v
 #                                                          finalize -> END
 #
-# Model Author 只通过 Builder 注入的 LLMGateway 调用；Initial 的模型 scene 与感知
-# fallback 在预算允许时都先真实渲染并择优，current_best 只在前景/高光/阴影复合
-# loss 改善后更新；全局 MAE 保留为诊断，失败/非法 patch 候选不能覆盖 best。
-# Refine 的合法非重复 typed patch 先在独立 branch 内执行最多 12 次真实 draw
-# （含 raw draw）的 Patch-local 成熟，再与只读 current_best 严格比较；未改善、
-# 重复、非法或 Renderer 失败的分支整体丢弃，随后经 optimize_base no-op 过桥。
+# 产品组合根使用 ShaderDocument；Initial 的模型文档与感知 fallback 在预算允许时
+# 都先真实编译、渲染并择优。current_best 是绑定 document/compiler/program/render/
+# metric 的不可变 CandidateSnapshot，只在复合 loss 严格改善后替换；失败、非法或
+# 未改善的 typed layer patch 不能覆盖锚点。optimize_feature 节点名为兼容现有
+# 路由保留，内部按稳定 layer/node parameter block 优化，不代表旧 Feature。
 # 每个 run 的 recursion limit 按 LLM/Refine 预算与最多四个 feature 的合法最坏路径
 # 推导并留出框架余量；它只防御意外路由循环，不能作为正常预算停止条件。
 # Renderer 正常由 finalize 关闭，Graph 外异常由 Agent Service finally 使用同一
-# registry 幂等兜底。
+# registry 幂等兜底。finalize 在产品 best 冻结后可额外执行非权威 ShaderGraph
+# shadow；它不参与 scorer、render_count、current_best 或任何路由。
 def build_png_to_shader_min_graph(
     *,
     artifact_store: LocalArtifactStore | None = None,
     renderer_registry: MinRendererRegistry | None = None,
     gateway: LLMGateway | None = None,
+    shader_graph_shadow: ShaderGraphShadowRunner | None = None,
+    shader_graph_product: bool = False,
 ) -> Any:
     """装配可注入 Gateway、Artifact 和 Renderer 的 12 节点最小 Graph。."""
     artifacts = artifact_store or LocalArtifactStore(DEFAULT_MIN_ARTIFACT_ROOT)
     registry = renderer_registry or MinRendererRegistry(PlaywrightWebGL1Renderer)
     model_gateway = gateway or LangChainLLMGateway()
-    nodes = make_min_nodes(artifacts, registry, model_gateway)
+    nodes = (
+        make_shader_graph_nodes(artifacts, registry, model_gateway)
+        if shader_graph_product
+        else make_min_nodes(
+            artifacts,
+            registry,
+            model_gateway,
+            shader_graph_shadow,
+        )
+    )
     graph = cast(Any, StateGraph(PngToShaderMinState))
     for name in (
         "initialize_run",
@@ -126,11 +144,15 @@ def build_png_to_shader_min_graph(
 
 png_to_shader_min_artifact_store = LocalArtifactStore(DEFAULT_MIN_ARTIFACT_ROOT)
 png_to_shader_min_renderer_registry = MinRendererRegistry(PlaywrightWebGL1Renderer)
+png_to_shader_min_shader_graph_shadow = ShaderGraphShadowRunner(
+    PlaywrightWebGL1Renderer
+)
 png_to_shader_min_gateway = LangChainLLMGateway()
 png_to_shader_min_graph = build_png_to_shader_min_graph(
     artifact_store=png_to_shader_min_artifact_store,
     renderer_registry=png_to_shader_min_renderer_registry,
     gateway=png_to_shader_min_gateway,
+    shader_graph_product=True,
 )
 
 
@@ -142,4 +164,5 @@ __all__ = [
     "png_to_shader_min_gateway",
     "png_to_shader_min_graph",
     "png_to_shader_min_renderer_registry",
+    "png_to_shader_min_shader_graph_shadow",
 ]

@@ -9,6 +9,27 @@ GenerationMode = Literal["scene_mvp"]
 QualityPresetName = Literal["fast", "balanced", "high", "manual"]
 
 
+class ShaderGraphShadowSummary(BaseModel):
+    """不参与产品选择的 ShaderGraph shadow 纵向切片摘要."""
+
+    status: Literal["rendered", "unsupported", "failed"]
+    renderer_path: Literal["compiled_graph_program_cache_v1"] | None = None
+    dsl_schema_version: str | None = None
+    compiler_version: str | None = None
+    document_sha256: str | None = None
+    topology_sha256: str | None = None
+    layer_count: int = 0
+    primitive_count: int = 0
+    compile_count: int = 0
+    cache_hit_count: int = 0
+    cache_size: int = 0
+    render_duration_ms: float | None = None
+    unsupported_features: list[str] = Field(default_factory=list)
+    error_code: str | None = None
+    resource_summary: dict[str, int] = Field(default_factory=dict)
+    shader_graph: dict[str, Any] | None = None
+
+
 class ShaderMinPipelineSummary(BaseModel):
     """scene_mvp 最小流水线的公开运行摘要."""
 
@@ -27,7 +48,7 @@ class ShaderMinPipelineSummary(BaseModel):
     report_schema_version: str
     patch_candidate_draw_budget: int
     patch_evidence: list[dict[str, Any]] = Field(default_factory=list)
-    renderer_path: Literal["prepared_uniforms_v1"]
+    renderer_path: Literal["prepared_uniforms_v1", "compiled_graph_program_cache_v1"]
     target_mae: float
     target_loss: float
     target_reached: bool
@@ -36,6 +57,7 @@ class ShaderMinPipelineSummary(BaseModel):
     uniform_render_p95_ms: float
     scene: dict[str, Any] | None = None
     trace: list[dict[str, Any]] = Field(default_factory=list)
+    shader_graph_shadow: ShaderGraphShadowSummary | None = None
 
 
 class ShaderResponse(BaseModel):

@@ -30,6 +30,10 @@ function formatSceneJson(scene: unknown): string {
   }
 }
 
+function shortHash(value: string | null | undefined): string {
+  return typeof value === "string" && value.length > 12 ? value.slice(0, 12) : value || "—";
+}
+
 export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSummaryProps) {
   const trace = Array.isArray(minPipeline?.trace) ? minPipeline.trace : [];
   // 质量达标只来自后端 target_reached；缺省（旧响应）时不展示结论，避免误报。
@@ -39,6 +43,20 @@ export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSumm
     typeof minPipeline?.renderer_path === "string" && minPipeline.renderer_path.trim()
       ? minPipeline.renderer_path
       : null;
+  const graphShadow = minPipeline?.shader_graph_shadow;
+  const productGraph =
+    typeof minPipeline?.scene === "object" &&
+    minPipeline.scene !== null &&
+    (minPipeline.scene as Record<string, unknown>).schema_version === "shader_graph_v1"
+      ? (minPipeline.scene as {
+          schema_version: string;
+          layers?: Array<Record<string, unknown>>;
+        })
+      : null;
+  const productLayers = Array.isArray(productGraph?.layers) ? productGraph.layers : [];
+  const graphLayers = Array.isArray(graphShadow?.shader_graph?.layers)
+    ? graphShadow.shader_graph.layers
+    : [];
   return (
     <section className="scene-mvp-panel" aria-label="scene_mvp 运行摘要">
       <div className="panel-header">
@@ -122,6 +140,111 @@ export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSumm
             : ""}
         </p>
       ) : null}
+      {productGraph ? (
+        <section className="shader-graph-shadow" aria-label="ShaderGraph 产品摘要">
+          <div className="panel-header">
+            <h3>ShaderGraph 产品文档</h3>
+            <span>{productGraph.schema_version}</span>
+          </div>
+          <p>
+            当前 GLSL、渲染结果与 current_best 均由该 typed ShaderGraph 编译产生。
+          </p>
+          <details className="scene-mvp-details">
+            <summary>图层检查器（{productLayers.length}）</summary>
+            <ol>
+              {productLayers.map((layer, index) => (
+                <li key={String(layer.id || index)}>
+                  <strong>{String(layer.id || `layer-${index + 1}`)}</strong>
+                  <span>
+                    {String(
+                      (layer.shape as Record<string, unknown> | undefined)?.kind ||
+                        "unknown",
+                    )}
+                  </span>
+                  <span>
+                    {String(
+                      (layer.fill as Record<string, unknown> | undefined)?.kind ||
+                        "unknown",
+                    )}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          </details>
+        </section>
+      ) : null}
+      {graphShadow ? (
+        <section className="shader-graph-shadow" aria-label="ShaderGraph shadow 摘要">
+          <div className="panel-header">
+            <h3>ShaderGraph shadow</h3>
+            <span>{graphShadow.status}</span>
+          </div>
+          <p>
+            该结果用于验证 DSL → Compiler → WebGL1 链路，不参与当前产品 GLSL、
+            scorer 或 current_best 选择。
+          </p>
+          <div className="score-grid">
+            <div>
+              <span>图层 / Primitive</span>
+              <strong>
+                {formatCount(graphShadow.layer_count)} /{" "}
+                {formatCount(graphShadow.primitive_count)}
+              </strong>
+            </div>
+            <div>
+              <span>编译 / 缓存命中</span>
+              <strong>
+                {formatCount(graphShadow.compile_count)} /{" "}
+                {formatCount(graphShadow.cache_hit_count)}
+              </strong>
+            </div>
+            <div>
+              <span>shadow 渲染耗时</span>
+              <strong>{formatMs(graphShadow.render_duration_ms)}</strong>
+            </div>
+            <div>
+              <span>Document hash</span>
+              <strong>{shortHash(graphShadow.document_sha256)}</strong>
+            </div>
+            <div>
+              <span>Topology hash</span>
+              <strong>{shortHash(graphShadow.topology_sha256)}</strong>
+            </div>
+            <div>
+              <span>Compiler</span>
+              <strong>{graphShadow.compiler_version || "—"}</strong>
+            </div>
+          </div>
+          {graphShadow.unsupported_features?.length ? (
+            <p>未映射能力：{graphShadow.unsupported_features.join("、")}</p>
+          ) : null}
+          {graphShadow.error_code ? <p>shadow 错误：{graphShadow.error_code}</p> : null}
+          {graphLayers.length ? (
+            <details className="scene-mvp-details">
+              <summary>图层检查器（{graphLayers.length}）</summary>
+              <ol>
+                {graphLayers.map((layer, index) => (
+                  <li key={String(layer.id || index)}>
+                    <strong>{String(layer.id || `layer-${index + 1}`)}</strong>
+                    <span>
+                      {String(
+                        (layer.shape as Record<string, unknown> | undefined)?.kind ||
+                          "unknown",
+                      )}
+                    </span>
+                    <span>
+                      {String(
+                        (layer.fill as Record<string, unknown> | undefined)?.kind ||
+                          "unknown",
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          ) : null}
+        </section>
+      ) : null}
       {trace.length ? (
         <details className="scene-mvp-details">
           <summary>阶段追踪（{trace.length}）</summary>
@@ -140,7 +263,7 @@ export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSumm
         </details>
       ) : null}
       <details className="scene-mvp-details">
-        <summary>场景 JSON</summary>
+        <summary>{productGraph ? "ShaderGraph JSON" : "场景 JSON"}</summary>
         <pre>{formatSceneJson(minPipeline?.scene)}</pre>
       </details>
     </section>

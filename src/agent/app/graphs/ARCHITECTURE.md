@@ -50,16 +50,18 @@ flowchart TD
 
 | 决定节点 | 路由函数 | 结果 | 下一节点 | 含义 |
 |---|---|---|---|---|
-| `decide_after_render` | `route_after_render` | `optimize_base` | `optimize_base` | Initial 首帧后进入 base sweep；Refine 已完成局部成熟时经 no-op 过桥 |
+| `decide_after_render` | `route_after_render` | `optimize_base` | `optimize_base` | Initial 首帧后进入 canvas base sweep；Refine 候选完成严格选择后经 no-op 过桥 |
 | 同上 | 同上 | `finalize` | `finalize` | 已达标、失败或预算耗尽 |
-| `decide_after_base` | `route_after_base` | `optimize_feature` | `optimize_feature` | 获胜 scene 的 feature queue 非空 |
-| 同上 | 同上 | `author_refine` | `author_refine` | feature 已耗尽且仍有模型与 Refine 预算 |
+| `decide_after_base` | `route_after_base` | `optimize_feature` | `optimize_feature` | 获胜 ShaderDocument 的稳定参数 block queue 非空 |
+| 同上 | 同上 | `author_refine` | `author_refine` | 参数 block 已耗尽且仍有模型与 Refine 预算 |
 | 同上 | 同上 | `finalize` | `finalize` | 已达标或预算耗尽 |
-| `decide_after_feature` | `route_after_feature` | `optimize_feature` | `optimize_feature` | 消费下一个稳定 feature id |
-| 同上 | 同上 | `author_refine` | `author_refine` | feature queue 已空且仍可 Refine |
+| `decide_after_feature` | `route_after_feature` | `optimize_feature` | `optimize_feature` | 消费下一个稳定 `layer:<id>.*` / `node:<id>.*` 参数 block；节点名为兼容路由保留 |
+| 同上 | 同上 | `author_refine` | `author_refine` | 参数 block queue 已空且仍可 Refine |
 | 同上 | 同上 | `finalize` | `finalize` | 已达标或预算耗尽 |
 
-- 黄色节点构成 `current_best` 安全边界。模型 scene、感知 fallback、确定性候选和 Refine branch 都必须真实渲染并按 `min_scene_composite_v3` 严格改善后才能提交。
-- Refine 永远从只读 `current_best.scene` 派生单个 typed patch；非法、重复、Renderer 失败或成熟后仍较差的分支整体丢弃。
+- 黄色节点构成 `current_best` 安全边界。产品组合根中，模型 ShaderDocument、感知转换 fallback、node-id 参数候选和 typed layer patch 都必须经 specialized Compiler 与真实 WebGL1 渲染，并按 `min_scene_composite_v3` 严格改善后才能提交。
+- `current_best` 是不可变 `ShaderGraphCandidateSnapshot`，绑定 document/compiler/program key/render/metric、父文档 hash 与 provenance；Prepared handle 只存在于 run-scoped registry，不进入 State 或 Artifact。
+- Refine 永远从只读 `current_best.document` 派生一个绑定 `base_document_sha256` 的 typed layer patch；非法、重复、Renderer 失败或 loss 未严格改善的分支整体丢弃。
 - Service 按 `9 + 2F + 6R` 推导 run 级 recursion limit，并增加 4 步余量；超过全局安全上限的配置在加载时拒绝。
-- 同一 run 使用 `prepared_uniforms_v1` 只编译一次模板，候选仅更新 typed uniform；`finalize` 和 Service `finally` 幂等关闭资源。
+- 公式中的 `F` 在产品 ShaderGraph 组合根表示最多 12 个有界参数 block，不再表示 MinScene Feature；当前 YAML 的上限仍在全局 256 防御线内。
+- 同一 topology/active block 通过 `compiled_graph_program_cache_v1` 复用 packed uniform program；结构变化产生新 key，compile/cache 均有硬上限。`finalize` 和 Service `finally` 幂等关闭资源。

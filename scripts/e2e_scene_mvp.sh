@@ -69,7 +69,7 @@ INSTRUCTION_REF="$(find_role_ref textbox '补充约束')"
 "$PWCLI" -s="$SESSION" fill "$INSTRUCTION_REF" '保留纯白背景' >/dev/null
 UPLOAD_REF="$(find_upload_ref)"
 "$PWCLI" -s="$SESSION" click "$UPLOAD_REF" >/dev/null
-"$PWCLI" -s="$SESSION" upload "$ROOT/output/static_pink_glass_orb.png" >/dev/null
+"$PWCLI" -s="$SESSION" upload "$ROOT/static/studio_ui.png" >/dev/null
 RUN_REF="$(find_role_ref button '开始运行')"
 # DOM click 立即返回；CLI click 会等 network idle，被长 POST 阻塞到运行结束
 "$PWCLI" -s="$SESSION" eval "el => el.click()" "$RUN_REF" >/dev/null

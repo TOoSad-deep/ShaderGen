@@ -530,3 +530,17 @@
 - 决策：按用户最终确认，保留 `src/agent/app/memory/`、`src/agent/app/context/`、Backend Memory 数据库适配与相关 SQL，以及 PostgreSQL 中已有 checkpoint/Memory 数据。当前 `scene_mvp` Graph、Backend lifespan、HTTP API 和 Frontend 继续不接入这套能力。
 - 原因：保留实现与数据可以避免在尚未确定 scene_mvp 新 Memory 契约和 namespace 前做不可逆迁移，同时不让旧 V1 语义重新进入当前产品路径。
 - 影响：Memory 代码和数据库数据不是待清理残留；未来重新启用必须建立 scene_mvp 专用契约、namespace、保留期和迁移验收，不能直接恢复旧 V1 Service/API。现有 `make setup-memory-postgres` 与 `make test-memory-postgres` 仅用于维护休眠基础设施，不代表在线产品已启用 Memory。
+
+## D069 - 最小 Shader DSL 先以非权威 shadow 纵向切片接入 F09
+
+- 日期：2026-07-24
+- 决策：采用“有序 Layer + 层内受限 CSG 树”的 `shader_graph_v1`，由确定性 specialized Compiler 静态展开为 WebGL1 GLSL；公开契约支持最多 8 层、四种 primitive、transform、三种 Boolean、三种 Fill、rim/shadow/glow、opacity 和 source-over。Compiler 默认全参数烘焙，也允许单个 active block 提升为不超过 14 个 packed `vec4` uniform；不同 topology 通过 run-scoped 有界多 program registry 隔离。当前只在 `scene_mvp.finalize` 的产品 best 已冻结后执行一次非权威 shadow：MinScene 可证明子集转换、编译、真实 Chromium 渲染，再把状态、版本/hash、资源计数和只读 graph 写入 manifest/API/UI；产品 GLSL、scorer、render_count、预算、Graph 拓扑和 `current_best` 均不改变。
+- 原因：直接把固定四槽扩成 8 层动态图会同时改写 Model Author、Renderer 生命周期、优化地址、API/UI 和质量门禁，也会触碰 WebGL1 最低 uniform 容量。先落确定性契约、Compiler、program cache 和完整纵向 shadow，可以验证架构方向与资源关闭语义，同时把尚无 benchmark 的像素质量风险隔离在产品选择之外。
+- 影响：`circle|ellipse`、`solid|linear|radial` 和 `rim|shadow|glow` 可以进入 shadow；旧 radial 从 object-local 椭圆坐标映射到 Canvas radial 时暂用短轴近似。旧 `shadow` 是独立椭圆 footprint，不得误映射为复制整个主体的 SDF ShadowEffect，适配器将其转换为主体后方的独立低 Alpha Layer；该映射仍只用于链路验证，不宣称像素等价。`polar_arc|edge_line|gaussian_lobe` 当前明确返回 `unsupported`，不得静默丢弃或宣称无损迁移。辅助 graph/GLSL/PNG 文件保存在 run 内，但公开 Artifact 白名单仍只有 final-render、metrics、manifest；普通进度事件不携带 Scene、ShaderGraph 或 GLSL。F09 继续是唯一 `active` 功能，F03 不因非权威 shadow 自动变为 active/passing；产品切换、Graph Author/typed layer patch、参数优化与正式质量 benchmark 仍需后续独立决策和证据。
+
+## D070 - F09 默认产品真相源切换为有界 ShaderGraph
+
+- 日期：2026-07-24
+- 决策：保持 `png_to_shader_min` 的 12 个 LangGraph 节点、直接边、条件边和终止路径不变，默认组合根把领域表示从 MinScene/固定模板切换为 `ShaderDocument`。Initial Author 输出完整严格文档；Refine 每轮只输出一个绑定 `base_document_sha256` 的 typed layer patch。`current_best` 改为不可变 `ShaderGraphCandidateSnapshot`，绑定文档、Compiler 产物、program key、真实 Render、metric、父文档 hash 与 provenance；Prepared handle 只留在 run-scoped registry。参数优化按稳定 `node:<id>.*` / `layer:<id>.*` 地址和最多 12 个 block 做 current±step 小邻域，保持 strict total-loss 单调接受。`optimize_feature` 与 `feature_queue` 名称暂为兼容既有 Graph 路由保留，但不再表示旧 Feature。
+- 原因：D069 已证明 DSL、specialized Compiler、WebGL1 资源规划和多 program cache 可以独立运行；继续让 ShaderGraph 只做 finalize shadow 会形成两套表示、两次渲染和无法进入模型/优化器的架构死角。直接增加 DSL 对应 LangGraph 节点则会把领域 DAG 错当工作流并扩大递归与路由复杂度。沿用宏观闭环、只替换领域真相源，可以用最小改动贯通 Author、Compiler、Renderer、Optimizer、选择与 Artifact。
+- 影响：默认 final manifest 升级为 `png_to_shader_graph_manifest_v1`，权威文档写入 `shader_graph`，API 兼容字段 `min_pipeline.scene` 返回该文档，Renderer 路径为 `compiled_graph_program_cache_v1`；旧 shadow runner 仅供显式 legacy Builder 测试和兼容审计。结构 patch 首版只分配一次 raw draw，不沿用旧 MinScene 的 12-draw 局部成熟；数值优化跳过需要成对归一化的 rotation 标量，旋转表达能力仍可由 Author 使用。Graph 最坏路径按最多 12 个参数 block 重新推导，manual recursion limit 为 217，仍低于 256。当前只完成架构与链路 canary，不改变 scorer/目标，不引入 CMA-ES、正式大 benchmark、可视拖线编辑器、异步任务或人工 gate；F09 保持 `active`。

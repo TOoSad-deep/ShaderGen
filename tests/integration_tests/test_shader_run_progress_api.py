@@ -110,6 +110,27 @@ def _final_result(project_id: str, run_id: str) -> dict:
         "uniform_render_count": 1,
         "uniform_render_p95_ms": 1.0,
         "scene": {"background": "white"},
+        "shader_graph_shadow": {
+            "status": "rendered",
+            "renderer_path": "compiled_graph_program_cache_v1",
+            "dsl_schema_version": "shader_graph_v1",
+            "compiler_version": "shader_dsl_compiler_v1",
+            "document_sha256": "a" * 64,
+            "topology_sha256": "b" * 64,
+            "layer_count": 1,
+            "primitive_count": 1,
+            "compile_count": 1,
+            "cache_hit_count": 0,
+            "cache_size": 0,
+            "render_duration_ms": 1.0,
+            "unsupported_features": [],
+            "error_code": None,
+            "resource_summary": {"layer_count": 1},
+            "shader_graph": {
+                "schema_version": "shader_graph_v1",
+                "layers": [{"id": "legacy_body"}],
+            },
+        },
         "trace": _TRACE_3,
     }
 
@@ -276,6 +297,9 @@ def test_scene_mvp_post_with_client_run_id_publishes_progress(tmp_path: Path) ->
     assert generated.status_code == 200
     assert generated.json()["run_id"] == CLIENT_RUN_ID
     assert generated.json()["generation_mode"] == "scene_mvp"
+    graph_shadow = generated.json()["min_pipeline"]["shader_graph_shadow"]
+    assert graph_shadow["status"] == "rendered"
+    assert graph_shadow["shader_graph"]["layers"][0]["id"] == "legacy_body"
 
     payload = progress.json()
     assert payload["status"] == "succeeded"

@@ -10,7 +10,9 @@ Frontend React
   -> backend.app.services.shader_generation
   -> agent.app.services.png_to_shader_min
   -> png_to_shader_min LangGraph
-  -> ShaderForge Scene / template / WebGL1 / metric / optimizer / Artifact
+  -> ShaderGraph Author / typed layer patch
+  -> ShaderForge DSL / Compiler / bounded program cache / metric / optimizer
+  -> Artifact
 ```
 
 - `frontend/`：上传、配置、运行进度、服务端/客户端 Render 和 GLSL 展示。
@@ -22,12 +24,14 @@ Backend 只能通过 `agent.app.services.*` 调用 Agent。Agent 不持有数据
 
 ## scene_mvp Graph
 
-`png_to_shader_min_graph.py` 用 12 个节点完成输入登记、确定性感知、严格 Scene Author、固定模板物化、真实渲染、复合评分、base/feature 优化、可选 Refine 和 final Artifact。
+`png_to_shader_min_graph.py` 继续用 12 个节点完成输入登记、确定性感知、严格 ShaderGraph Author、specialized Compiler、真实渲染、复合评分、canvas/node/layer 参数优化、可选 typed layer Refine 和 final Artifact。DSL node 是领域数据，不映射为 LangGraph node。
 
-- 模型 Scene 与感知 fallback 都必须真实渲染后择优。
-- Refine 只能从只读 `current_best.scene` 派生一个 typed patch。
+- 模型 ShaderDocument 与由感知 MinScene 转换的 fallback 都必须真实编译、渲染后择优。
+- Refine 只能从只读 `current_best.document` 派生一个绑定 `base_document_sha256` 的 typed layer patch。
 - 候选只有在 `min_scene_composite_v3` 严格改善时才能提交。
-- 同一 run 通过 `prepared_uniforms_v1` 只编译一次模板。
+- `current_best` 是绑定文档、Compiler、program key、Render、metric、父 hash 与 provenance 的不可变 CandidateSnapshot。
+- 同一 run 通过 `compiled_graph_program_cache_v1` 隔离 topology，并在单个 active block 内复用 packed uniform program；cache、compile 和优化 block 都有硬上限。
+- `finalize` 直接固化权威 `shader-graph.json`、specialized WebGL1 GLSL 和 Render，不再为默认产品重复执行 MinScene shadow。
 - Graph recursion limit 按合法最坏路径推导；未知递归错误 fail-closed。
 - 完整拓扑、条件边和安全边界见 `src/agent/app/graphs/ARCHITECTURE.md`。
 
@@ -41,7 +45,7 @@ GET /api/shader/runs/{run_id}/progress/render
 GET /api/shader/runs/{run_id}/artifacts/{final-render|metrics|manifest}
 ```
 
-`RunProgressRegistry` 是单进程内存状态，重启即失；事件 JSON 不包含图片、Scene、GLSL、Patch value、用户输入、模型原始响应或 reasoning。终态审计以数据库过程账本和 Artifact 为准。
+`RunProgressRegistry` 是单进程内存状态，重启即失；事件 JSON 不包含图片、ShaderGraph、GLSL、Patch value、用户输入、模型原始响应或 reasoning。终态审计以数据库过程账本和 Artifact 为准。完整 ShaderGraph 只出现在终态 manifest/API 的 `scene` 字段和私有 run 内 `shader-graph.json`。
 
 ## Persistence 边界
 

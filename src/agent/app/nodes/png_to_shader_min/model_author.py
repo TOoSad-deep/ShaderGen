@@ -12,7 +12,6 @@ from agent.app.config.model_config import SHADER_GEN_MODEL_NAME
 from agent.app.config.png_to_shader_min import MIN_PIPELINE_CONFIG
 from agent.app.contracts.llm import LLMCallOptions, LLMGateway, LLMResponse
 from agent.app.messages.structured_multimodal import canonical_json
-from agent.app.parsers.png_to_shader_min import MinAuthorParseError
 from agent.app.prompts.prompt_loader import PromptDefinition, load_prompt_definition
 
 MAX_MIN_LLM_CALLS = MIN_PIPELINE_CONFIG.max_llm_budget
@@ -80,12 +79,13 @@ def _repair_messages(
     *,
     source_prompt: PromptDefinition,
     schema: dict[str, object],
-    error: MinAuthorParseError,
+    error: ValueError,
     original_output: str,
 ) -> list[BaseMessage]:
+    error_code = getattr(error, "code", "invalid_structured_output")
     payload = {
         "source_prompt_version": source_prompt.version,
-        "validation_error_code": error.code,
+        "validation_error_code": error_code,
         "expected_json_schema": schema,
         "untrusted_original_output": original_output,
     }
@@ -132,13 +132,14 @@ async def invoke_min_author(
     total_tokens = _response_total_tokens(response)
     try:
         value = parser(response.text)
-    except MinAuthorParseError as first_error:
+    except ValueError as first_error:
+        first_error_code = getattr(first_error, "code", "invalid_structured_output")
         if allowed < 2:
             return MinAuthorCallResult(
                 None,
                 calls,
                 response.model_ref,
-                first_error.code,
+                first_error_code,
                 latency_ms=latency_ms,
                 total_tokens=total_tokens,
             )
@@ -169,12 +170,12 @@ async def invoke_min_author(
             total_tokens = (total_tokens or 0) + repaired_tokens
         try:
             value = parser(repaired.text)
-        except MinAuthorParseError as second_error:
+        except ValueError as second_error:
             return MinAuthorCallResult(
                 None,
                 calls,
                 repaired.model_ref,
-                second_error.code,
+                getattr(second_error, "code", "invalid_structured_output"),
                 latency_ms=latency_ms,
                 total_tokens=total_tokens,
             )

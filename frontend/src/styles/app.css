@@ -464,6 +464,34 @@ body {
   word-break: break-all;
 }
 
+.shader-graph-shadow {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  background: #f8fbff;
+}
+
+.shader-graph-shadow h3,
+.shader-graph-shadow p {
+  margin: 0;
+}
+
+.shader-graph-shadow ol {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding-left: 24px;
+}
+
+.shader-graph-shadow li {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(90px, auto) minmax(90px, auto);
+  gap: 10px;
+}
+
 .scene-mvp-details {
   margin-top: 10px;
 }

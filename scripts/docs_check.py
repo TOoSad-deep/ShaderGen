@@ -36,6 +36,7 @@ SHADERFORGE_PUBLIC_IMPORT_ROOTS = frozenset(
         "shaderforge",
         "shaderforge.public",
         "shaderforge.contracts",
+        "shaderforge.dsl",
         "shaderforge.evaluation",
         "shaderforge.generation",
         "shaderforge.optimization",

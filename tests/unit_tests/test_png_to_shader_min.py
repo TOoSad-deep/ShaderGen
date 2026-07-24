@@ -23,6 +23,9 @@ from agent.app.nodes.png_to_shader_min.model_author import (
     MAX_MIN_LLM_CALLS,
     MIN_AUTHOR_REFINE_PROMPT,
 )
+from agent.app.nodes.png_to_shader_min.shader_graph_shadow import (
+    ShaderGraphShadowResult,
+)
 from agent.app.parsers.png_to_shader_min import (
     MinAuthorParseError,
     parse_min_author_patch,
@@ -141,9 +144,7 @@ class _PatchMaturityPrepared(_FakePrepared):
         self.render_durations_ms = (*self.render_durations_ms, 1.25)
         feature_kind = float(values["u_feature_kinds"][0])
         value = (
-            float(values["u_feature_0_color_power"][3])
-            if feature_kind > 0.0
-            else 0.25
+            float(values["u_feature_0_color_power"][3]) if feature_kind > 0.0 else 0.25
         )
         channel = round(value * 255)
         rgb = bytes((channel, channel, channel)) * self.width * self.height
@@ -878,9 +879,7 @@ async def test_remove_feature_uses_only_raw_draw_without_local_maturity(
     best_scene = MinScene.model_validate(state["current_best"]["scene"])  # type: ignore[index]
     feature_id = best_scene.object.features[0].id
     patch_json = (
-        '{"operation":"remove","path":"/object/features","value":'
-        f'"{feature_id}"'
-        "}"
+        f'{{"operation":"remove","path":"/object/features","value":"{feature_id}"}}'
     )
     nodes = make_min_nodes(
         LocalArtifactStore(tmp_path),
@@ -919,8 +918,7 @@ async def test_min_author_total_calls_never_exceed_configured_maximum(
 
     assert state["llm_call_count"] == MAX_MIN_LLM_CALLS
     assert (
-        no_budget_update.get("llm_call_count", MAX_MIN_LLM_CALLS)
-        == MAX_MIN_LLM_CALLS
+        no_budget_update.get("llm_call_count", MAX_MIN_LLM_CALLS) == MAX_MIN_LLM_CALLS
     )
     assert gateway.calls == MAX_MIN_LLM_CALLS
 
@@ -978,9 +976,7 @@ async def test_min_graph_writes_trace_and_final_artifacts(tmp_path) -> None:
     )
     assert result["final_result"]["uniform_render_count"] == 1
     assert result["final_result"]["target_reached"] is True
-    assert result["final_result"]["run_classification"] == (
-        "independent_experiment"
-    )
+    assert result["final_result"]["run_classification"] == ("independent_experiment")
     assert result["final_result"]["experiment_id"] == (
         "scene-mvp-agent-optimization-20260723"
     )
@@ -1022,6 +1018,68 @@ async def test_min_graph_writes_trace_and_final_artifacts(tmp_path) -> None:
     assert b'"run_classification":"independent_experiment"' in manifest
     assert b'"report_schema_version":"scene_mvp_run_report_v1"' in manifest
     assert b'"patch_candidate_draw_budget":12' in metrics
+
+
+@pytest.mark.anyio
+async def test_min_graph_publishes_non_authoritative_shader_graph_shadow(
+    tmp_path,
+) -> None:
+    class FakeShadowRunner:
+        async def run(self, _scene):
+            return ShaderGraphShadowResult(
+                summary={
+                    "status": "rendered",
+                    "renderer_path": "compiled_graph_program_cache_v1",
+                    "dsl_schema_version": "shader_graph_v1",
+                    "compiler_version": "shader_dsl_compiler_v1",
+                    "document_sha256": "a" * 64,
+                    "topology_sha256": "b" * 64,
+                    "layer_count": 1,
+                    "primitive_count": 1,
+                    "compile_count": 1,
+                    "cache_hit_count": 0,
+                    "cache_size": 0,
+                    "render_duration_ms": 1.0,
+                    "unsupported_features": [],
+                    "error_code": None,
+                    "resource_summary": {"layer_count": 1},
+                    "shader_graph": {
+                        "schema_version": "shader_graph_v1",
+                        "layers": [{"id": "legacy_body"}],
+                    },
+                },
+                fragment_source="void main(){gl_FragColor=vec4(1.0);}",
+                image_bytes=b"shadow-png",
+            )
+
+    artifacts = LocalArtifactStore(tmp_path)
+    graph = build_png_to_shader_min_graph(
+        artifact_store=artifacts,
+        renderer_registry=MinRendererRegistry(_FakeRenderer),  # type: ignore[arg-type]
+        shader_graph_shadow=FakeShadowRunner(),  # type: ignore[arg-type]
+    )
+
+    result = await graph.ainvoke(
+        {
+            "project_id": "project-shadow",
+            "run_id": "run-shadow",
+            "image": _pink_orb_png(),
+            "content_type": "image/png",
+            "render_budget": 1,
+            "llm_budget": 0,
+            "refine_budget": 0,
+            "target_mae": 1.0,
+            "target_loss": 1.0,
+        }
+    )
+
+    summary = result["final_result"]["shader_graph_shadow"]
+    assert summary["status"] == "rendered"
+    assert summary["shader_graph"]["layers"][0]["id"] == "legacy_body"
+    run = artifacts.resolve_run("run-shadow")
+    assert run.read_bytes("final/shader-graph-shadow.glsl")
+    assert run.read_bytes("final/shader-graph-shadow.png") == b"shadow-png"
+    assert b'"shader_graph_shadow"' in run.read_bytes("final/manifest.json")
 
 
 @pytest.mark.anyio

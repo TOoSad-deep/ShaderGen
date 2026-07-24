@@ -76,6 +76,7 @@ class PngToShaderMinResult:
     uniform_render_p95_ms: float
     scene: dict[str, Any]
     trace: tuple[dict[str, Any], ...]
+    shader_graph_shadow: dict[str, Any] | None = None
 
 
 MIN_QUALITY_BUDGETS = MIN_PIPELINE_CONFIG.quality_presets
@@ -328,6 +329,11 @@ class PngToShaderMinService:
             uniform_render_p95_ms=float(final["uniform_render_p95_ms"]),
             scene=dict(final["scene"]),
             trace=tuple(final["trace"]),
+            shader_graph_shadow=(
+                dict(final["shader_graph_shadow"])
+                if isinstance(final.get("shader_graph_shadow"), dict)
+                else None
+            ),
         )
 
     def read_public_artifact(self, run_id: str, name: str) -> MinPublicArtifact:
@@ -357,6 +363,7 @@ def create_png_to_shader_min_service(
         artifact_store=artifacts,
         renderer_registry=renderers,
         gateway=gateway,
+        shader_graph_product=True,
     )
     return PngToShaderMinService(
         graph,

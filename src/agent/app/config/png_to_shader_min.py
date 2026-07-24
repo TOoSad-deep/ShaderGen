@@ -13,12 +13,8 @@ from typing import Any, Literal
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from shaderforge.generation import MAX_MIN_FEATURES
-
 _FROZEN_QUALITY_PRESET_NAMES = frozenset({"fast", "balanced", "high"})
-_INDEPENDENT_QUALITY_PRESET_NAMES = frozenset(
-    {"fast", "balanced", "high", "manual"}
-)
+_INDEPENDENT_QUALITY_PRESET_NAMES = frozenset({"fast", "balanced", "high", "manual"})
 _DEFAULT_CONFIG_RESOURCE = "png_to_shader_min.yaml"
 _FROZEN_TARGETS = (0.08, 0.04)
 _FROZEN_QUALITY_PRESETS = {
@@ -28,6 +24,7 @@ _FROZEN_QUALITY_PRESETS = {
 }
 MIN_GRAPH_RECURSION_SAFETY_MARGIN = 4
 MAX_MIN_GRAPH_RECURSION_LIMIT = 256
+MAX_MIN_OPTIMIZATION_ITEMS = 12
 
 
 def _non_negative_int(value: int, name: str) -> int:
@@ -48,17 +45,19 @@ def required_min_graph_steps(
     llm_budget: int,
     refine_budget: int,
     *,
-    max_features: int = MAX_MIN_FEATURES,
+    max_features: int = MAX_MIN_OPTIMIZATION_ITEMS,
 ) -> int:
     """按当前固定拓扑推导一次合法 run 的最坏节点步数.
 
-    固定前缀、首次 base/feature sweep 与 finalize 共 ``9 + 2F`` 步。
+    固定前缀、首次 base/参数 block sweep 与 finalize 共 ``9 + 2F`` 步。
     每轮 Refine 在 render 节点内完成 Patch 局部成熟，随后经 no-op base
     过桥到决定节点，共 6 步；不会重新遍历全部 feature。
     """
     features = _non_negative_int(max_features, "max_features")
-    if features > MAX_MIN_FEATURES:
-        raise ValueError(f"max_features 不得超过固定槽位 {MAX_MIN_FEATURES}。")
+    if features > MAX_MIN_OPTIMIZATION_ITEMS:
+        raise ValueError(
+            f"max_features 不得超过产品参数队列上限 {MAX_MIN_OPTIMIZATION_ITEMS}。"
+        )
     refinements = max_min_refine_iterations(llm_budget, refine_budget)
     return 9 + 2 * features + refinements * 6
 
@@ -67,7 +66,7 @@ def derive_min_graph_recursion_limit(
     llm_budget: int,
     refine_budget: int,
     *,
-    max_features: int = MAX_MIN_FEATURES,
+    max_features: int = MAX_MIN_OPTIMIZATION_ITEMS,
 ) -> int:
     """为合法预算路径派生带小幅框架余量的 run 级递归上限."""
     required = required_min_graph_steps(
@@ -270,6 +269,7 @@ MIN_PIPELINE_CONFIG = load_min_pipeline_config()
 
 __all__ = [
     "MAX_MIN_GRAPH_RECURSION_LIMIT",
+    "MAX_MIN_OPTIMIZATION_ITEMS",
     "MIN_PIPELINE_CONFIG",
     "MIN_GRAPH_RECURSION_SAFETY_MARGIN",
     "MinPipelineConfig",

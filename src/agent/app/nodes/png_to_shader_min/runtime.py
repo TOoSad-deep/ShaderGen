@@ -32,6 +32,9 @@ from agent.app.nodes.png_to_shader_min.model_author import (
     invoke_min_author,
     remaining_llm_calls,
 )
+from agent.app.nodes.png_to_shader_min.shader_graph_shadow import (
+    ShaderGraphShadowRunner,
+)
 from agent.app.parsers.png_to_shader_min import (
     min_author_patch_json_schema,
     parse_min_author_patch,
@@ -55,6 +58,8 @@ from shaderforge.optimization import (
 from shaderforge.public import MinScene, perceive_min_target
 from shaderforge.rendering import (
     PREPARED_RENDERER_PATH,
+    GraphProgramKey,
+    GraphProgramRegistry,
     PlaywrightWebGL1Renderer,
     PreparedWebGL1Renderer,
 )
@@ -104,6 +109,10 @@ class MinRendererRegistry:
         self._factory = factory
         self._renderers: dict[tuple[str, str], PlaywrightWebGL1Renderer] = {}
         self._prepared: dict[tuple[str, str], _PreparedEntry] = {}
+        self._graph_programs: dict[tuple[str, str], GraphProgramRegistry] = {}
+        self._graph_prepared: dict[
+            tuple[str, str], dict[GraphProgramKey, PreparedWebGL1Renderer]
+        ] = {}
 
     def get(self, project_id: str, run_id: str) -> PlaywrightWebGL1Renderer:
         """获取或创建指定 run 的 Renderer。."""
@@ -146,6 +155,78 @@ class MinRendererRegistry:
         self._prepared[key] = _PreparedEntry(signature, prepared)
         return prepared
 
+    async def prepare_graph(
+        self,
+        project_id: str,
+        run_id: str,
+        key: GraphProgramKey,
+        fragment_source: str,
+        uniform_schema: dict[str, Any],
+    ) -> PreparedWebGL1Renderer:
+        """在同一 run 内按 program key 编译或复用 ShaderGraph program."""
+        run_key = (project_id, run_id)
+        programs = self._graph_programs.get(run_key)
+        if programs is None:
+            programs = GraphProgramRegistry(
+                self.get(project_id, run_id),
+                max_programs=4,
+                max_compiles=16,
+            )
+            self._graph_programs[run_key] = programs
+        prepared = cast(
+            PreparedWebGL1Renderer,
+            await programs.get_or_prepare(
+                key,
+                fragment_source,
+                uniform_schema,
+            ),
+        )
+        self._graph_prepared.setdefault(run_key, {})[key] = prepared
+        return prepared
+
+    async def discard_graph(
+        self,
+        project_id: str,
+        run_id: str,
+        key: GraphProgramKey,
+    ) -> bool:
+        """丢弃被拒结构分支的 program，不影响当前 best 的 program."""
+        programs = self._graph_programs.get((project_id, run_id))
+        if programs is None:
+            return False
+        return await programs.discard(key)
+
+    def graph_metrics(self, project_id: str, run_id: str) -> dict[str, float | int]:
+        """返回 ShaderGraph program cache 的公开安全计数."""
+        run_key = (project_id, run_id)
+        programs = self._graph_programs.get(run_key)
+        if programs is None:
+            return {
+                "compile_count": 0,
+                "cache_hit_count": 0,
+                "cache_size": 0,
+                "max_programs": 4,
+                "max_compiles": 16,
+                "prepare_duration_ms": 0.0,
+                "uniform_render_count": 0,
+                "uniform_render_p95_ms": 0.0,
+            }
+        prepared = tuple(self._graph_prepared.get(run_key, {}).values())
+        durations = sorted(
+            duration for item in prepared for duration in item.render_durations_ms
+        )
+        p95 = (
+            durations[max(0, math.ceil(len(durations) * 0.95) - 1)]
+            if durations
+            else 0.0
+        )
+        return {
+            **programs.summary(),
+            "prepare_duration_ms": sum(item.prepare_duration_ms for item in prepared),
+            "uniform_render_count": len(durations),
+            "uniform_render_p95_ms": p95,
+        }
+
     def metrics(self, project_id: str, run_id: str) -> dict[str, float | int | str]:
         """返回 run 内 prepared 路径的公开可观测摘要."""
         entry = self._prepared.get((project_id, run_id))
@@ -171,9 +252,16 @@ class MinRendererRegistry:
 
     async def close(self, project_id: str, run_id: str) -> None:
         """幂等关闭指定 run 的 Renderer。."""
+        graph_programs = self._graph_programs.pop((project_id, run_id), None)
+        self._graph_prepared.pop((project_id, run_id), None)
         prepared_entry = self._prepared.pop((project_id, run_id), None)
         renderer = self._renderers.pop((project_id, run_id), None)
         first_error: Exception | None = None
+        if graph_programs is not None:
+            try:
+                await graph_programs.close_all()
+            except Exception as exc:
+                first_error = exc
         if prepared_entry is not None:
             try:
                 await prepared_entry.prepared.close()
@@ -347,6 +435,7 @@ def make_min_nodes(
     artifacts: LocalArtifactStore,
     registry: MinRendererRegistry,
     gateway: LLMGateway,
+    shader_graph_shadow: ShaderGraphShadowRunner | None = None,
 ) -> dict[str, Callable[..., Any]]:
     """创建共享 Gateway/Artifact/Renderer 边界的九个工作节点和三个决定节点。."""
 
@@ -361,17 +450,13 @@ def make_min_nodes(
             "status": "running",
             "quality_preset": str(state.get("quality_preset", "balanced")),
             "run_classification": str(
-                state.get(
-                    "run_classification", MIN_PIPELINE_CONFIG.run_classification
-                )
+                state.get("run_classification", MIN_PIPELINE_CONFIG.run_classification)
             ),
             "experiment_id": state.get(
                 "experiment_id", MIN_PIPELINE_CONFIG.experiment_id
             ),
             "config_fingerprint": str(
-                state.get(
-                    "config_fingerprint", MIN_PIPELINE_CONFIG.config_fingerprint
-                )
+                state.get("config_fingerprint", MIN_PIPELINE_CONFIG.config_fingerprint)
             ),
             "report_schema_version": str(
                 state.get(
@@ -1141,6 +1226,39 @@ def make_min_nodes(
         run.write_text("final/webgl1.glsl", str(best["glsl"]))
         run.write_text("final/shadertoy.glsl", materialized.shadertoy_source)
         run.write_bytes("final/render.png", best["render"], content_type="image/png")
+        shader_graph_shadow_summary: dict[str, Any] | None = None
+        if shader_graph_shadow is not None:
+            try:
+                shadow_result = await shader_graph_shadow.run(scene)
+                shader_graph_shadow_summary = dict(shadow_result.summary)
+                if shadow_result.fragment_source is not None:
+                    run.write_text(
+                        "final/shader-graph-shadow.glsl",
+                        shadow_result.fragment_source,
+                    )
+                if shadow_result.image_bytes is not None:
+                    run.write_bytes(
+                        "final/shader-graph-shadow.png",
+                        shadow_result.image_bytes,
+                        content_type="image/png",
+                    )
+                graph_document = shader_graph_shadow_summary.get("shader_graph")
+                if isinstance(graph_document, dict):
+                    run.write_json(
+                        "final/shader-graph.json",
+                        graph_document,
+                    )
+            except Exception:
+                shader_graph_shadow_summary = {
+                    "status": "failed",
+                    "layer_count": 0,
+                    "primitive_count": 0,
+                    "compile_count": 0,
+                    "cache_hit_count": 0,
+                    "cache_size": 0,
+                    "unsupported_features": [],
+                    "error_code": "shadow_internal_error",
+                }
         renderer_metrics = registry.metrics(project_id, run_id)
         target_mae = float(state["target_mae"])
         target_loss = float(state["target_loss"])
@@ -1188,6 +1306,16 @@ def make_min_nodes(
             prepare_duration_ms=renderer_metrics["prepare_duration_ms"],
             uniform_render_count=renderer_metrics["uniform_render_count"],
             uniform_render_p95_ms=renderer_metrics["uniform_render_p95_ms"],
+            shader_graph_shadow_status=(
+                shader_graph_shadow_summary.get("status")
+                if shader_graph_shadow_summary is not None
+                else "disabled"
+            ),
+            shader_graph_topology_sha256=(
+                shader_graph_shadow_summary.get("topology_sha256")
+                if shader_graph_shadow_summary is not None
+                else None
+            ),
         )
         manifest = {
             "schema_version": "png_to_shader_min_manifest_v1",
@@ -1200,6 +1328,7 @@ def make_min_nodes(
             "scene": best["scene"],
             "metrics": metrics,
             "patch_evidence": patch_evidence,
+            "shader_graph_shadow": shader_graph_shadow_summary,
             "trace": trace,
         }
         manifest_ref = run.write_json("final/manifest.json", manifest)
@@ -1238,6 +1367,7 @@ def make_min_nodes(
                 "uniform_render_count": renderer_metrics["uniform_render_count"],
                 "uniform_render_p95_ms": renderer_metrics["uniform_render_p95_ms"],
                 "scene": best["scene"],
+                "shader_graph_shadow": shader_graph_shadow_summary,
                 "trace": trace,
             },
         }

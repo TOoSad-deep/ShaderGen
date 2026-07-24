@@ -16,6 +16,7 @@
 - WebGL context 固定 `antialias: false`、`preserveDrawingBuffer: true`，且不创建、不绑定输入纹理。
 - 静态校验错误、GLSL 编译错误和 renderer 不可用是三个不同失败面；前两者返回结构化结果，最后一个抛出 `RendererUnavailableError`。
 - PNG 本体通过 `RenderResult.image_bytes` 或 `PreparedRenderResult.image_bytes` 交给 Artifact Store；热路径 RGB 只在运行时消费，不进入 LangGraph State。prepared 对象由 run registry 持有，`close()` 幂等。
+- `GraphProgramRegistry` 是 ShaderGraph 的单 run 有界多 program cache：program key 绑定 `compiler_version`、`topology_sha256`、`active_parameter_manifest_sha256`、`baked_parameter_sha256` 与宽高；命中时还会核对真实源码与 uniform schema 签名，错误 key 不得静默复用。不同 key 可以并存；新 branch 先成功 prepare 再执行 LRU 淘汰，因此编译失败不会逐出 anchor；compile 预算耗尽或 registry 关闭后 fail-closed 抛错，`discard(key)` 只释放指定 branch。淘汰、discard 或批量关闭失败时保留原 handle 追踪，允许后续 `close_all()` 重试。renderer 通过 `ProgramRendererProtocol` 依赖注入，不引入线程池、持久化或跨 run 全局缓存；安全摘要只含 `compile_count`/`cache_hit_count`/`cache_size` 等计数。
 
 ## 确定性约束
 

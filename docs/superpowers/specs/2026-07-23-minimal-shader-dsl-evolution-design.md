@@ -2,12 +2,12 @@
 
 ## 1. 状态与结论
 
-- 日期：2026-07-23
-- 状态：待审核草案，未实施
+- 日期：2026-07-24
+- 状态：架构链路已按 D070 切换为默认产品表示；质量与发布门禁未完成
 - 当前功能：`F09` 继续是唯一 `active` 功能
-- 当前产品事实：仍使用 `png_to_shader_min_scene_v3`、固定模板和单主体最多四个 feature
+- 当前产品事实：默认产品选择使用 `shader_graph_v1`、specialized Compiler、run-scoped program cache 和不可变 CandidateSnapshot；MinScene 只作为确定性感知 fallback seed 与 legacy 审计
 
-本方案不改变当前架构、功能状态、质量门禁或运行配置。只有审核通过并形成正式决策后，才进入实现。
+当前实现保持 scorer、Graph 节点/边和质量目标不变，但已把产品 GLSL、`current_best`、Author、优化地址与 final Artifact 切换为 ShaderGraph。已完成的是架构与最小链路，不代表兼容迁移无损、模型质量提升或发布门禁通过；未完成项以 `PROGRESS.md` 为准。
 
 建议采用的方向是：
 
@@ -372,7 +372,7 @@ resource_summary
 哈希语义：
 
 - `document_sha256` 绑定结构、层序和全部参数；
-- `topology_sha256` 只绑定节点类型、连接和层序；
+- `topology_sha256` 绑定 schema、节点/材质/effect 类型、连接和层序；
 - map key 规范排序；
 - layers 数组顺序保持原样；
 - 不可达节点在严格校验阶段直接拒绝，不静默保留。

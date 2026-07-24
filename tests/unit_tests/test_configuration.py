@@ -64,17 +64,17 @@ def test_scene_mvp_runtime_policy_loads_packaged_yaml() -> None:
     assert high.refine_budget == 9
     assert high.target_mae == 0.04
     assert high.target_loss == 0.02
-    assert required_min_graph_steps(9, 9) == 65
-    assert high.recursion_limit == 65 + MIN_GRAPH_RECURSION_SAFETY_MARGIN == 69
+    assert required_min_graph_steps(9, 9) == 81
+    assert high.recursion_limit == 81 + MIN_GRAPH_RECURSION_SAFETY_MARGIN == 85
     manual = MIN_PIPELINE_CONFIG.quality_presets["manual"]
     assert manual.render_budget == 1000
     assert manual.llm_budget == 32
     assert manual.refine_budget == 30
-    assert required_min_graph_steps(32, 30) == 197
-    assert manual.recursion_limit == 201
+    assert required_min_graph_steps(32, 30) == 213
+    assert manual.recursion_limit == 217
     assert MIN_PIPELINE_CONFIG.max_llm_budget == 32
     assert MIN_PIPELINE_CONFIG.max_refine_budget == 30
-    assert MIN_PIPELINE_CONFIG.max_recursion_limit == 201
+    assert MIN_PIPELINE_CONFIG.max_recursion_limit == 217
 
 
 def test_scene_mvp_runtime_policy_accepts_custom_yaml(tmp_path: Path) -> None:
@@ -107,7 +107,7 @@ quality_presets:
     assert configured.quality_presets["high"].llm_budget == 9
     assert configured.max_llm_budget == 10
     assert configured.max_refine_budget == 5
-    assert configured.quality_presets["high"].recursion_limit == 45
+    assert configured.quality_presets["high"].recursion_limit == 61
     assert configured.quality_presets["balanced"].target_mae == 0.12
     assert configured.quality_presets["balanced"].target_loss == 0.06
 
@@ -249,8 +249,8 @@ def test_scene_mvp_runtime_policy_derives_feature_aware_graph_bound() -> None:
     assert derive_min_graph_recursion_limit(6, 3, max_features=4) == 39
     assert derive_min_graph_recursion_limit(9, 9, max_features=4) == 69
 
-    with pytest.raises(ValueError, match="固定槽位"):
-        required_min_graph_steps(2, 1, max_features=5)
+    with pytest.raises(ValueError, match="参数队列上限"):
+        required_min_graph_steps(2, 1, max_features=13)
     with pytest.raises(ValueError, match="安全上限"):
         derive_min_graph_recursion_limit(100, 99)
 
