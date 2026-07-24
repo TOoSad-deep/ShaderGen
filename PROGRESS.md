@@ -6,6 +6,7 @@
 
 ## 当前状态
 
+- 已完成项目结构只读审阅，并形成尚未纳入 Git 的 `docs/PROJECT_STRUCTURE_REFACTOR_PLAN.md`；当前只记录候选阶段与决策门，尚未移动代码或改变任何运行契约。
 - 当前 `main` 已先快进吸收 `TOoSad-deep/feature-improve@4768aa5`，再合并 `origin/mvp@6d4aac6`；代码、Graph 文档、ADR、进度和证据冲突已按当前 ShaderGraph 产品事实收口。
 - 产品仍只有 `scene_mvp`，`langgraph.json` 只注册 `png_to_shader_min`。默认组合根使用 `shader_graph_v1`：Initial/Refine Author、specialized Compiler、真实 WebGL1、多 program cache、CandidateSnapshot、node/layer 参数 block、Backend/API/UI 已贯通，12 节点拓扑未改变。
 - 感知阶段同时保留 legacy MinScene 测量与产品 `fallback_shader_graph`；默认产品使用 ShaderDocument。Memory/checkpoint Python/SQL 与 PostgreSQL 数据继续休眠保留，V1、Node Lab 和旧 benchmark 运行面仍保持删除。
@@ -20,6 +21,7 @@
 
 ## 下一步
 
+- 先确认结构重构与 F09 的 active 关系、兼容范围、目录策略、前后端契约生成方式、Backend 分层和 Ruff/Mypy 门禁策略；确认前不开始目录迁移。
 - 为 ShaderGraph 重新设计 typed layer patch replay、冻结 benchmark manifest、质量指标和人工门禁；不得直接复用旧 MinScene replay/12–32 draw 的发布含义。
 - 保留“模型 Initial 仍输给 fallback”的负面质量事实，继续用版本中立的固定小样例验证 Prompt/搜索，不通过放宽 Schema 掩盖问题。
 - 参数优化继续评估 rotation/成组参数、typed layer patch 局部成熟和更大搜索；任何预算变化必须使用 ShaderGraph 候选空间重新建立证据。
@@ -27,6 +29,7 @@
 
 ## 未解决缺口
 
+- 项目结构重构与当前唯一 `active` 功能 F09 的关系尚未确认；公共 import、Graph ID、HTTP/Artifact 契约和 Memory 语义也尚未形成重构期冻结清单。
 - 当前 ShaderGraph 产品没有 D074 等价的私有 typed layer patch replay；legacy bundle 不能恢复或证明当前产品候选过程。
 - 当前产品缺少 durable 冻结 benchmark 与独立人工偏好门禁；生产 Qwen 小样例链路可运行，但 Initial 仍常由 scorer 判定不如 fallback。
 - D072/D075 报告仅为 `partial` 且候选空间已被 D070 替换，不能用于 ShaderGraph 发布或直接把 patch maturity 从 1/12 调到 32 draw。
