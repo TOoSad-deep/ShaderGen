@@ -68,6 +68,11 @@ from shaderforge.dsl.document import (
     shape_node_ids,
     shape_primitive_count,
 )
+from shaderforge.dsl.migration import (
+    UNSUPPORTED_MIN_SCENE_FEATURES,
+    UnsupportedMinSceneFeatureError,
+    adapt_min_scene_to_shader_graph,
+)
 
 __all__ = [
     "CANVAS_BLOCK",
@@ -112,8 +117,11 @@ __all__ = [
     "SolidFill",
     "SubtractShape",
     "Transform",
+    "UNSUPPORTED_MIN_SCENE_FEATURES",
     "UnionShape",
+    "UnsupportedMinSceneFeatureError",
     "Vec2",
+    "adapt_min_scene_to_shader_graph",
     "canonical_json",
     "compile_dsl_shader",
     "document_sha256",

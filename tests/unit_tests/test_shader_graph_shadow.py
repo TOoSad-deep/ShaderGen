@@ -1,3 +1,4 @@
+import math
 from types import SimpleNamespace
 
 import pytest
@@ -6,9 +7,11 @@ from agent.app.nodes.png_to_shader_min.shader_graph_shadow import (
     ShaderGraphShadowRunner,
     adapt_min_scene_to_shader_graph,
 )
+from shaderforge.dsl import compile_dsl_shader
 from shaderforge.scene import (
     Canvas,
     Feature,
+    LinearColorField,
     MinScene,
     Primitive,
     RadialColorField,
@@ -74,6 +77,44 @@ def test_adapter_maps_supported_min_scene_to_one_layer_graph() -> None:
     assert layer.shape.kind == "ellipse"
     assert layer.fill.kind == "radial"
     assert [effect.kind for effect in layer.effects] == ["rim"]
+
+
+def test_adapter_clamps_legacy_positive_sizes_to_dsl_minimum() -> None:
+    scene = MinScene(
+        canvas=Canvas(width=64, height=64, background=(1.0, 1.0, 1.0)),
+        object=SceneObject(
+            primitive=Primitive(
+                type="ellipse",
+                center=(0.0, 0.0),
+                axes=(0.001, 0.002),
+            ),
+            color_field=LinearColorField(
+                model="linear",
+                start=(0.1, 0.2, 0.3),
+                end=(0.8, 0.7, 0.6),
+                direction=(1.0, 0.0),
+            ),
+            features=(
+                Feature(id="rim", type="rim", axes=(0.001, 0.002)),
+                Feature(id="glow", type="glow", axes=(0.001, 0.002)),
+            ),
+        ),
+    )
+
+    graph = adapt_min_scene_to_shader_graph(scene)
+    layer = graph.layers[-1]
+    assert layer.shape.kind == "ellipse"
+    assert min(layer.shape.radii) >= 0.01
+    assert layer.fill.kind == "linear"
+    assert math.dist(layer.fill.from_, layer.fill.to) >= 0.01
+    assert (
+        min(
+            effect.width if effect.kind == "rim" else effect.radius
+            for effect in layer.effects
+        )
+        >= 0.01
+    )
+    assert compile_dsl_shader(graph).fragment_source
 
 
 @pytest.mark.anyio

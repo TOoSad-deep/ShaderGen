@@ -28,4 +28,6 @@ typed layer patch、node-id 参数优化、CandidateSnapshot、Compiler、progra
   （加 `u_resolution` 不超过 15）；产物包含 fragment source、uniform values/schema、
   资源摘要与全部版本化哈希。
 
+- `migration.py`：旧 MinScene 可证明子集到 ShaderDocument 的确定性迁移映射（`adapt_min_scene_to_shader_graph`）；`polar_arc`、`edge_line`、`gaussian_lobe` 遇到即 fail closed。感知层与 legacy shadow runner 共用此映射。
+
 单元测试在 `tests/unit_tests/test_dsl_renderer.py`。运行 `make test` 可验证本包。

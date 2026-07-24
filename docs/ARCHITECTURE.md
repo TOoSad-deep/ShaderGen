@@ -26,7 +26,7 @@ Backend 只能通过 `agent.app.services.*` 调用 Agent。Agent 不持有数据
 
 `png_to_shader_min_graph.py` 继续用 12 个节点完成输入登记、确定性感知、严格 ShaderGraph Author、specialized Compiler、真实渲染、复合评分、canvas/node/layer 参数优化、可选 typed layer Refine 和 final Artifact。DSL node 是领域数据，不映射为 LangGraph node。
 
-- 模型 ShaderDocument 与由感知 MinScene 转换的 fallback 都必须真实编译、渲染后择优。
+- 模型 ShaderDocument 与感知直接产出的 fallback 都必须真实编译、渲染后择优。
 - Refine 只能从只读 `current_best.document` 派生一个绑定 `base_document_sha256` 的 typed layer patch。
 - 候选只有在 `min_scene_composite_v3` 严格改善时才能提交。
 - `current_best` 是绑定文档、Compiler、program key、Render、metric、父 hash 与 provenance 的不可变 CandidateSnapshot。

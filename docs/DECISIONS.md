@@ -35,6 +35,9 @@
 | D066 | updated | D067 | V1 可执行链路删除仍有效；历史本地产物保留策略由 D067 更新。 |
 | D067 | accepted | — | 按用户明确授权删除整个本地 `output/` 及陈旧缓存/打包产物。 |
 | D068 | accepted | — | Memory/checkpoint 实现与 PostgreSQL 数据休眠保留，不恢复旧 V1 接口。 |
+| D069 | updated | D070 | ShaderGraph 已从非权威 shadow 切换为 F09 默认产品真相源。 |
+| D070 | accepted | — | F09 保持 12 节点闭环，产品真相源使用有界 ShaderGraph。 |
+| D071 | accepted | — | 本分支先优化 Author/感知边界并完成最小验证，参数优化转为跨分支 TODO。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -544,3 +547,10 @@
 - 决策：保持 `png_to_shader_min` 的 12 个 LangGraph 节点、直接边、条件边和终止路径不变，默认组合根把领域表示从 MinScene/固定模板切换为 `ShaderDocument`。Initial Author 输出完整严格文档；Refine 每轮只输出一个绑定 `base_document_sha256` 的 typed layer patch。`current_best` 改为不可变 `ShaderGraphCandidateSnapshot`，绑定文档、Compiler 产物、program key、真实 Render、metric、父文档 hash 与 provenance；Prepared handle 只留在 run-scoped registry。参数优化按稳定 `node:<id>.*` / `layer:<id>.*` 地址和最多 12 个 block 做 current±step 小邻域，保持 strict total-loss 单调接受。`optimize_feature` 与 `feature_queue` 名称暂为兼容既有 Graph 路由保留，但不再表示旧 Feature。
 - 原因：D069 已证明 DSL、specialized Compiler、WebGL1 资源规划和多 program cache 可以独立运行；继续让 ShaderGraph 只做 finalize shadow 会形成两套表示、两次渲染和无法进入模型/优化器的架构死角。直接增加 DSL 对应 LangGraph 节点则会把领域 DAG 错当工作流并扩大递归与路由复杂度。沿用宏观闭环、只替换领域真相源，可以用最小改动贯通 Author、Compiler、Renderer、Optimizer、选择与 Artifact。
 - 影响：默认 final manifest 升级为 `png_to_shader_graph_manifest_v1`，权威文档写入 `shader_graph`，API 兼容字段 `min_pipeline.scene` 返回该文档，Renderer 路径为 `compiled_graph_program_cache_v1`；旧 shadow runner 仅供显式 legacy Builder 测试和兼容审计。结构 patch 首版只分配一次 raw draw，不沿用旧 MinScene 的 12-draw 局部成熟；数值优化跳过需要成对归一化的 rotation 标量，旋转表达能力仍可由 Author 使用。Graph 最坏路径按最多 12 个参数 block 重新推导，manual recursion limit 为 217，仍低于 256。当前只完成架构与链路 canary，不改变 scorer/目标，不引入 CMA-ES、正式大 benchmark、可视拖线编辑器、异步任务或人工 gate；F09 保持 `active`。
+
+## D071 - Author 与感知边界先收敛，参数优化留待跨分支整合
+
+- 日期：2026-07-24
+- 决策：当前分支不继续修改 rotation、成组参数、typed layer patch 局部成熟或更大搜索等参数优化能力，统一登记为跨分支 TODO，待另一分支成果可审查后再决定择入。当前增量只把 ShaderGraph Initial/Refine Prompt 升级为 v1_2，使模型从可靠 fallback 按 Layer 分解并按主导问题选择单个 typed op；`edge_line`、`gaussian_lobe`、`polar_arc` 分别优先用 segment、ellipse+radial Alpha、ellipse CSG 弯月近似表达，不新增专用节点。感知阶段同时产出 legacy MinScene 与产品 `fallback_shader_graph`，产品 Author 直接消费后者；共用迁移映射归入 ShaderForge typed 边界。
+- 原因：参数优化已在另一分支并行演进，在当前分支重复修改会扩大冲突且难以归因。三个旧 Feature 的通用表达尚未经过固定质量样例，立即扩展 Schema/Compiler 会把兼容问题升级为新语言设计；Prompt 规则与现有节点足以先验证链路和常见近似。感知转换继续放在 agent shadow 模块也会让默认产品依赖非权威兼容路径。
+- 影响：Graph 节点、边、路由、scorer、selection policy、参数 manifest 和优化器均不改变；legacy 迁移遇到三个旧 Feature 仍 fail closed，不宣称无损。满 8 Layer、translate/scale/rotate、三种 Boolean 和层序由一个真实 Chromium/WebGL1 集成用例验证。生产 Qwen v1_2 orb canary 一次生成合法文档但最终仍由 scorer 选择 perception fallback，因此只证明链路完整，不构成质量提升或发布证据；F09 保持 `active`，durable benchmark 与独立人工门禁仍是发布缺口。

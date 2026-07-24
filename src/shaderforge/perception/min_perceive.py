@@ -9,6 +9,7 @@ from typing import Any, Literal
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 
+from shaderforge.dsl import ShaderDocument, adapt_min_scene_to_shader_graph
 from shaderforge.scene import (
     Canvas,
     Feature,
@@ -25,13 +26,14 @@ MAX_WORK_SIDE = 256
 
 @dataclass(frozen=True)
 class MinPerception:
-    """可追踪的测量摘要、目标像素和确定性 scene。."""
+    """可追踪的测量摘要、目标像素、确定性 scene 与 ShaderGraph fallback 文档。."""
 
     width: int
     height: int
     target_rgb: np.ndarray
     summary: dict[str, Any]
     fallback_scene: MinScene
+    fallback_document: ShaderDocument
 
 
 def _color(values: np.ndarray) -> tuple[float, float, float]:
@@ -215,4 +217,7 @@ def perceive_min_target(image_bytes: bytes) -> MinPerception:
         "color_field_model": color_field.model,
         "color_field_fit_mae": fit_scores,
     }
-    return MinPerception(width, height, rgb, summary, scene)
+    # ShaderGraph 产品的确定性 fallback 在感知阶段直接产出，热路径不再
+    # 依赖 MinScene 中间表示；legacy Builder 仍可使用 fallback_scene。
+    document = adapt_min_scene_to_shader_graph(scene)
+    return MinPerception(width, height, rgb, summary, scene, document)

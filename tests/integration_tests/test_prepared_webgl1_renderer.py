@@ -11,6 +11,19 @@ from io import BytesIO
 import pytest
 from PIL import Image, ImageDraw
 
+from shaderforge.dsl import (
+    CircleShape,
+    DslCanvas,
+    EllipseShape,
+    IntersectShape,
+    Layer,
+    ShaderDocument,
+    SolidFill,
+    SubtractShape,
+    Transform,
+    UnionShape,
+    compile_dsl_shader,
+)
 from shaderforge.generation import bake_min_uniforms, materialize_min_shader
 from shaderforge.perception import perceive_min_target
 from shaderforge.rendering import PlaywrightWebGL1Renderer, RendererUnavailableError
@@ -301,3 +314,152 @@ async def test_all_six_feature_kinds_and_four_slots_have_live_pixel_semantics() 
         result.success and result.rgb_bytes is not None for result in slot_results
     )
     assert len({result.rgb_bytes for result in slot_results}) == len(slot_results)
+
+
+def _solid(color: tuple[float, float, float, float]) -> SolidFill:
+    return SolidFill(kind="solid", color=color)
+
+
+def _eight_layer_document(*, swap_top_two: bool = False) -> ShaderDocument:
+    """构造满 8 Layer 文档，覆盖 translate/scale/rotate，顶部两层明显交叠."""
+    marker_specs = (
+        ((-0.65, -0.6), (0.9, 0.4, 0.3, 1.0)),
+        ((0.0, -0.7), (0.3, 0.7, 0.4, 1.0)),
+        ((0.65, -0.6), (0.3, 0.5, 0.9, 1.0)),
+        ((-0.65, 0.6), (0.8, 0.6, 0.2, 1.0)),
+        ((0.0, 0.7), (0.6, 0.3, 0.8, 1.0)),
+    )
+    layers = [
+        Layer(
+            id=f"marker_{index}",
+            shape=EllipseShape(
+                id=f"marker_shape_{index}",
+                kind="ellipse",
+                transform=Transform(
+                    translate=position,
+                    scale=(0.8, 1.2),
+                    rotation=(0.70710678, 0.70710678),
+                ),
+                radii=(0.18, 0.1),
+            ),
+            fill=_solid(color),
+        )
+        for index, (position, color) in enumerate(marker_specs)
+    ]
+    layers.append(
+        Layer(
+            id="csg_marker",
+            shape=IntersectShape(
+                id="csg_intersect",
+                kind="intersect",
+                transform=Transform(translate=(0.65, 0.6)),
+                left=UnionShape(
+                    id="csg_union",
+                    kind="union",
+                    left=CircleShape(
+                        id="csg_union_left",
+                        kind="circle",
+                        transform=Transform(translate=(-0.06, 0.0)),
+                        radius=0.12,
+                    ),
+                    right=CircleShape(
+                        id="csg_union_right",
+                        kind="circle",
+                        transform=Transform(translate=(0.06, 0.0)),
+                        radius=0.12,
+                    ),
+                ),
+                right=SubtractShape(
+                    id="csg_subtract",
+                    kind="subtract",
+                    base=CircleShape(
+                        id="csg_subtract_base",
+                        kind="circle",
+                        radius=0.16,
+                    ),
+                    cut=CircleShape(
+                        id="csg_subtract_cut",
+                        kind="circle",
+                        transform=Transform(translate=(0.05, 0.0)),
+                        radius=0.12,
+                    ),
+                ),
+            ),
+            fill=_solid((0.2, 0.7, 0.8, 1.0)),
+        )
+    )
+    layers.extend(
+        [
+            Layer(
+                id="lower_center",
+                shape=CircleShape(
+                    id="lower_center_shape",
+                    kind="circle",
+                    radius=0.55,
+                ),
+                fill=_solid((1.0, 0.0, 0.0, 1.0)),
+            ),
+            Layer(
+                id="top_center",
+                shape=CircleShape(
+                    id="top_center_shape",
+                    kind="circle",
+                    radius=0.3,
+                ),
+                fill=_solid((0.0, 0.0, 1.0, 1.0)),
+            ),
+        ]
+    )
+    if swap_top_two:
+        layers[-2], layers[-1] = layers[-1], layers[-2]
+    return ShaderDocument(
+        canvas=DslCanvas(width=96, height=96, background=(1.0, 1.0, 1.0, 1.0)),
+        layers=tuple(layers),
+    )
+
+
+def _center_pixel(rgb: bytes, width: int, height: int) -> tuple[int, int, int]:
+    offset = ((height // 2) * width + width // 2) * 3
+    return (rgb[offset], rgb[offset + 1], rgb[offset + 2])
+
+
+@pytest.mark.anyio
+async def test_eight_layer_shader_graph_renders_with_observable_layer_order() -> None:
+    """满 8 Layer（含 translate/scale/rotate）真实渲染，层序产生可观测差异."""
+    width = height = 96
+    document = _eight_layer_document()
+    assert len(document.layers) == 8
+    compiled = compile_dsl_shader(document)
+    swapped = compile_dsl_shader(_eight_layer_document(swap_top_two=True))
+
+    async with PlaywrightWebGL1Renderer() as renderer:
+        prepared = await renderer.prepare(
+            compiled.fragment_source,
+            width,
+            height,
+            compiled.uniform_schema,
+        )
+        swapped_prepared = await renderer.prepare(
+            swapped.fragment_source,
+            width,
+            height,
+            swapped.uniform_schema,
+        )
+        result = await prepared.render_uniforms(
+            compiled.uniform_values, capture_png=False
+        )
+        swapped_result = await swapped_prepared.render_uniforms(
+            swapped.uniform_values, capture_png=False
+        )
+
+    assert result.success and result.rgb_bytes is not None
+    assert swapped_result.success and swapped_result.rgb_bytes is not None
+    assert len(result.rgb_bytes) == width * height * 3
+    # 像素非空且多色：8 层几何确实改变了画面，不是纯背景。
+    assert len(set(result.rgb_bytes)) > 8
+    # 层序可观测：最前层蓝色圆覆盖画布中心；交换顶部两层后中心变红。
+    center = _center_pixel(result.rgb_bytes, width, height)
+    assert center[2] > 200 and center[0] < 60
+    swapped_center = _center_pixel(swapped_result.rgb_bytes, width, height)
+    assert swapped_center[0] > 200 and swapped_center[2] < 60
+    assert result.rgb_bytes != swapped_result.rgb_bytes

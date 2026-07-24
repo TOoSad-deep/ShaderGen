@@ -59,7 +59,7 @@ flowchart TD
 | 同上 | 同上 | `author_refine` | `author_refine` | 参数 block queue 已空且仍可 Refine |
 | 同上 | 同上 | `finalize` | `finalize` | 已达标或预算耗尽 |
 
-- 黄色节点构成 `current_best` 安全边界。产品组合根中，模型 ShaderDocument、感知转换 fallback、node-id 参数候选和 typed layer patch 都必须经 specialized Compiler 与真实 WebGL1 渲染，并按 `min_scene_composite_v3` 严格改善后才能提交。
+- 黄色节点构成 `current_best` 安全边界。产品组合根中，模型 ShaderDocument、感知直接产出的 fallback、node-id 参数候选和 typed layer patch 都必须经 specialized Compiler 与真实 WebGL1 渲染，并按 `min_scene_composite_v3` 严格改善后才能提交。
 - `current_best` 是不可变 `ShaderGraphCandidateSnapshot`，绑定 document/compiler/program key/render/metric、父文档 hash 与 provenance；Prepared handle 只存在于 run-scoped registry，不进入 State 或 Artifact。
 - Refine 永远从只读 `current_best.document` 派生一个绑定 `base_document_sha256` 的 typed layer patch；非法、重复、Renderer 失败或 loss 未严格改善的分支整体丢弃。
 - Service 按 `9 + 2F + 6R` 推导 run 级 recursion limit，并增加 4 步余量；超过全局安全上限的配置在加载时拒绝。

@@ -42,9 +42,6 @@ from agent.app.nodes.png_to_shader_min.shader_graph_author import (
     shader_graph_author_patch_json_schema,
     shader_graph_document_json_schema,
 )
-from agent.app.nodes.png_to_shader_min.shader_graph_shadow import (
-    adapt_min_scene_to_shader_graph,
-)
 from agent.app.parsers.shader_graph_author import (
     parse_shader_graph_author_patch,
     parse_shader_graph_document,
@@ -62,7 +59,6 @@ from shaderforge.evaluation import (
     summarize_spatial_residual,
 )
 from shaderforge.optimization import dsl_parameter_specs, replace_dsl_parameter
-from shaderforge.public import MinScene
 from shaderforge.rendering import GraphProgramKey
 from shaderforge.store import LocalArtifactStore
 
@@ -308,10 +304,9 @@ def make_shader_graph_nodes(
     nodes = make_min_nodes(artifacts, registry, gateway, None)
 
     async def author_initial(state: dict[str, Any]) -> dict[str, Any]:
-        fallback_scene = MinScene.model_validate(
-            state.get("fallback_scene", state["scene"])
-        )
-        fallback = adapt_min_scene_to_shader_graph(fallback_scene)
+        # 产品热路径直接消费感知阶段产出的 ShaderDocument fallback，
+        # 不再经过 MinScene 中间表示；legacy Builder 仍使用 runtime.py。
+        fallback = ShaderDocument.model_validate(state["fallback_shader_graph"])
         remaining = remaining_llm_calls(state)
         if remaining <= 0:
             return {
@@ -323,7 +318,7 @@ def make_shader_graph_nodes(
                 "trace": _trace(
                     state,
                     "author_initial",
-                    "模型预算为 0，使用感知结果转换的 ShaderGraph fallback。",
+                    "模型预算为 0，使用感知直接产出的 ShaderGraph fallback。",
                     author_source="perception_fallback",
                 ),
             }

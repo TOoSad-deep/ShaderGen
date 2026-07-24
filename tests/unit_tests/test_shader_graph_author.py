@@ -399,6 +399,37 @@ def test_prompt_definitions_are_versioned() -> None:
     assert "base_document_sha256" in SHADER_GRAPH_AUTHOR_REFINE_PROMPT.prompt
 
 
+def test_initial_prompt_binds_fallback_and_layer_decomposition_contract() -> None:
+    prompt = SHADER_GRAPH_AUTHOR_INITIAL_PROMPT.prompt
+
+    assert "fallback_shader_graph" in prompt
+    assert "后到前" in prompt
+    # 细线、柔和高光/暗斑、弧形条带的保守表达路径。
+    for keyword in ("segment", "ellipse", "radial", "subtract"):
+        assert keyword in prompt
+    # 关键数值硬约束与虚构节点禁令。
+    assert "0.01" in prompt
+    assert "corner_radius" in prompt
+    assert "arc" in prompt
+
+
+def test_refine_prompt_binds_operation_choice_rules() -> None:
+    prompt = SHADER_GRAPH_AUTHOR_REFINE_PROMPT.prompt
+
+    for operation in (
+        "add_layer_bundle",
+        "remove_layer",
+        "replace_layer_bundle",
+        "reorder_layer",
+        "replace_canvas_background",
+    ):
+        assert operation in prompt
+    assert "recent_rejected_patch_summaries" in prompt
+    assert "spatial_residual_summary" in prompt
+    assert "segment" in prompt
+    assert "8" in prompt
+
+
 def test_json_schemas_are_bounded_and_readable() -> None:
     document_schema = shader_graph_document_json_schema()
     patch_schema = shader_graph_author_patch_json_schema()

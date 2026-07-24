@@ -498,6 +498,9 @@ def make_min_nodes(
             "target_rgb": perception.target_rgb,
             "metric_background": perception.fallback_scene.canvas.background,
             "fallback_scene": fallback_scene,
+            "fallback_shader_graph": perception.fallback_document.model_dump(
+                mode="json", by_alias=True
+            ),
             "scene": fallback_scene,
             "trace": _trace(
                 state,
