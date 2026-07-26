@@ -48,6 +48,7 @@
 | D079 | updated | D080 | kimi provider 注册保留；“复用 openai family”已由 D080 改为独立 kimi family。 |
 | D080 | accepted | — | Kimi Code 端点仅允许 temperature=1，kimi 独立 family 固定温度，生产默认模型切换为 `kimi:k3-256k`。 |
 | D081 | accepted | — | kimi family 经 `SHADER_GEN_KIMI_REASONING_EFFORT` 下发 `reasoning_effort`，默认 low。 |
+| D083 | accepted | — | LayerPlan + 直接 GLSL Author 仅以非权威 shadow 实验接入，第一阶段只交付修订版设计基线；晋升新 ADR 方可取代 D070 执行表示部分。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -646,3 +647,10 @@
 - 决策：将 `origin/codex/refactor-node-lab-generic@222ea96` 的 Pipeline 无关 `nodelab` 内核、独立 `nodelab_service`、受信任 Application factory 和 `/lab` 工作台向前移植到当前 `main`。独立服务默认创建空安全 Application，产品 Backend 不注册 `/api/lab/v1/*`。冲突中继续采用当前 `main` 对旧 PNG-to-Shader V1 Graph、Agent Adapter、benchmark manifest、脚本与专用测试的删除结果。
 - 原因：目标分支基于旧 V1 架构开发，直接接受全部 modify/delete 冲突会重新开放 D076 已退役且当前代码无法支撑的运行入口；完全采用 `main` 删除结果又会丢失已经完成的通用 Harness、独立部署边界和工作台。以受信任 factory 作为唯一领域注入点，可以保留通用能力而不让 transport 反向依赖 Agent 或 ShaderForge。
 - 影响：新增 `make dev-node-lab`、`NODELAB_*` 服务端配置、`VITE_NODE_LAB_API_BASE_URL` 和 `/lab` 页面；`nodelab`/`nodelab_service` 随 `shadergen` distribution 发布。若未来需要调试当前 `png_to_shader_min`，必须为 ShaderGraph 现契约另建 Provider/Executor factory，不得复活旧 V1 Adapter 或引用已删除的 benchmark 证据。F09 的产品 Graph、路由、`current_best`、质量门禁和历史 evidence registry 均不改变。
+
+## D083 - LayerPlan + 直接 GLSL Author 仅以非权威 shadow 实验接入，第一阶段只交付修订版设计基线
+
+- 日期：2026-07-26
+- 决策：按用户确认的语义建立四层真相层级：参考图是视觉真相，LayerPlan 是由独立受约束视觉分析 Author 直接读取参考图生成的非权威视觉分层参考（永久 advisory，不参与 scorer/acceptance），ShaderProgramSpec 是模型生成并经安全校验的执行真相，真实 Render/metric 是选择真相。本决策只授权 shadow 实验：第一阶段只交付修订版设计基线 `docs/superpowers/specs/2026-07-26-layerplan-glsl-shadow-design.md`，其中定义 LayerPlanV1、ShaderProgramSpecV1、ShaderCandidateSnapshotV2 契约、Author 角色与时序、校验安全边界、Artifact/API 兼容、shadow A/B 预算隔离与晋升门禁；不修改生产 Graph、代码、API、FEATURE 状态、scorer、预算或 `current_best` 安全边界，不删除或覆盖任何历史证据。被 Codex 审阅否决的首稿（旧 `docs/LAYERPLAN_SHADOW_DESIGN.md`）已随修订移除，不作为任何基线。
+- 原因：生产 `kimi:k3-256k` 的 Initial 仍常由 scorer 判定输给 perception fallback（D080/F09 缺口），视觉分层参考可能改善 Author 的结构起点，但尚未有任何证据。首稿把 ShaderProgramSpec 错误定义为 D070 编译产物的派生身份、保留 document/compiled 双真相、且未让 Author 直接读取参考图，审阅不予验收；修订稿按上述语义重写。D069 的经验表明，不经门禁就把第二表示接入产品会形成双真相和架构死角，因此候选选择仍只能由真实 Render 与 strict total-loss 决定。
+- 影响：shadow 期间 D070 生产路径完全不变：`png_to_shader_min` 继续是 12 节点闭环，ShaderDocument/specialized Compiler/Renderer/CandidateSnapshot 链路是默认执行真相；legacy ShaderDocument 路径在 shadow 实验中只能作为带显式 provenance 的 control/fallback，任何失败不得冒充 model-generated。只有第 10 节晋升门禁（含 durable、内容寻址、可跨环境复验证据；`local_ignored`/`partial` 只能 no-go）全部通过后的新 ADR，才可以取代 D070 的执行表示部分。LayerPlan 在任何阶段都不得直接决定候选接受；后续实现（shadow harness、A/B、晋升）必须另立决策并满足设计文档中的预算隔离与晋升门禁，晋升前 F09 的发布缺口不变。第一阶段只改文档，不改 `langgraph.json`、Builder ASCII、Graph Mermaid 或路由表；设计文档中的契约在对应实现决策落地前不构成交付承诺。

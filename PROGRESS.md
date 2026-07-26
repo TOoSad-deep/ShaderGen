@@ -17,6 +17,7 @@
 - acceptance 与 maturity 两份报告仍存在于来源 mvp worktree 的本地忽略目录，registry 为 `partial`；当前工作树未复制报告，不得把 registry 当作 durable 发布证据。
 - 已修复 run `362d2164-3438-4e53-b784-7104d7c269e7` 暴露的 ShaderGraph compile 预算错配：旧固定 16 无法覆盖 manual 30 轮 Refine，D077 改为按 run 推导（manual=45），意外耗尽也会收敛为稳定候选失败而非未分类 500。
 - 已修复 run `04b7b4af-2dd0-495d-9ac6-0b34f1eeca23` 暴露的 recursion 上界失真：无效 Refine 过去会重建参数队列，D078 改为复用 current best 的 no-op 过桥，high 连续失败 patch 不再重复优化或撞 85 步上限。
+- `codex/layerplan-glsl-shadow` 分支完成 LayerPlan 第一阶段修订版设计基线：首稿经审阅不予验收并已移除；D083 修订为只授权 shadow 实验，新基线为 `docs/superpowers/specs/2026-07-26-layerplan-glsl-shadow-design.md`——LayerPlanV1 由独立视觉分析 Author 直读参考图生成、永久 advisory；ShaderProgramSpecV1 是模型生成并经安全校验的执行真相；CandidateSnapshotV2 不保留 document/compiled 双真相；shadow A/B 两臂预算与状态完全隔离；晋升要求 durable 内容寻址证据。本阶段只改文档，生产 Graph、代码、API、FEATURE 状态均未变。
 
 ## 当前 active 功能
 
@@ -30,6 +31,7 @@
 - 保留“模型 Initial 仍输给 fallback”的负面质量事实，继续用版本中立的固定小样例验证 Prompt/搜索，不通过放宽 Schema 掩盖问题。
 - 参数优化继续评估 rotation/成组参数、typed layer patch 局部成熟和更大搜索；任何预算变化必须使用 ShaderGraph 候选空间重新建立证据。
 - 项目结构重构计划尚待确认，确认前不开始目录迁移；若未来启用 Memory，必须建立 scene_mvp 新契约、namespace 和迁移验收。
+- LayerPlan 第二阶段（shadow 实现）开工前需另立 ADR：三类 Author（VisualAnalysis/InitialGLSL/RefineGLSL）、Spec 校验器、私有证据写入与 A/B 隔离记账均只在 `docs/superpowers/specs/2026-07-26-layerplan-glsl-shadow-design.md` 中有设计基线，尚无实现授权。
 
 ## 未解决缺口
 
@@ -41,20 +43,22 @@
 - 服务端仍是阻塞式 API；浏览器停止等待不等于服务端取消。任务化/cancel、outbox/reaper 和多 worker 分布式锁属于后续可靠性设计。
 - 历史 V1/Node Lab real-model 完整报告与公开 review package 已按授权随旧 `output/` 删除；registry 对应条目为 `missing`，只能审计定位。
 - Node Lab 工作台已通过 TypeScript/生产构建和 HTTP/service 单测，但当前没有与新通用空服务匹配的浏览器 E2E；旧 V1 假 API/E2E 未恢复。
+- LayerPlan 只有修订版文档级设计基线（D083），没有实现、benchmark 或人工证据；晋升前不得影响候选选择、scorer、预算或 `current_best`。
 
 ## 当前验证基线
 
 - 合并通用 Node Lab 并恢复 kimi/ShaderGraph 本地改动后 `make check` 通过：385 个单元测试、docs-check、LangGraph validate（1 个 Graph）和前端生产构建全部成功。
 - `kimi:k3-256k` 真实连通性已验证：文本、JSON mode、`max_output_tokens` 路径均正常，family 固定 temperature=1 并按 D081 默认下发 `reasoning_effort=low`。
 - 全量集成测试为 17 passed、1 skipped；全仓 Ruff、`mypy --strict src backend`（123 个源文件）、`uv lock --check` 与 `git diff --check` 通过。scene_mvp 浏览器 E2E 未在本次合并后重跑。
+- LayerPlan 第一阶段只改文档（D083、设计文档、本文件），修订后 `make docs-check` 与 `git diff --check` 通过；未触碰代码与 Graph，单测/构建基线沿用上一行结论。
 
 ## 最近重要变更
 
+- 2026-07-26：按审阅意见修订 D083 与 LayerPlan 设计：移除不予验收的首稿，新增 `docs/superpowers/specs/2026-07-26-layerplan-glsl-shadow-design.md`；生产 Graph、代码、API 与 FEATURE 状态不变。
 - 2026-07-26：按 D082 向前移植 `refactor-node-lab-generic@222ea96`；恢复通用 Node Lab 内核、独立服务和新版工作台，同时保持旧 V1 Graph、专用 Adapter、manifest、benchmark 脚本与历史证据退役。
 - 2026-07-26：按 D081 为 kimi family 增加 `reasoning_effort` 支持（`SHADER_GEN_KIMI_REASONING_EFFORT`，low/high/max，默认 low），生产 k3-256k 已以 low 真实验证。
 - 2026-07-26：按 D080 新建 kimi 独立 model family（端点仅允许 temperature=1，family 固定温度），生产默认模型切换为 `kimi:k3-256k` 并通过真实调用验证文本/JSON mode/`max_output_tokens` 路径。
 - 2026-07-26：按 D079 新增 kimi 模型 provider（`KIMI_API_KEY`/`KIMI_BASE_URL`，默认 `https://api.kimi.com/coding/v1`）；`.env.example`、`.env` 与 README 清单同步。
-- 2026-07-24：按 D078 修复无效 ShaderGraph Refine 重建参数队列导致的 GraphRecursionError，并增加 high 完整失败路径回归。
 
 ## 历史索引
 
