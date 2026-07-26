@@ -56,7 +56,7 @@ ShaderProgramSpecV1 是**模型生成并经安全校验**的执行真相。它�
 - 防伪边界：模型输出中**不得**包含 `validation_attestation` 或任何哈希字段；出现即拒绝（fail-closed），防止模型自我签发校验结论或自指哈希。
 - 可信层字段（由可信解析/规范化层在模型输出之外组装或重算，不信任模型自报值）：
   - `source_sha256` / `binding_sha256` / `spec_sha256`：由可信层对规范化后的源码、uniform 绑定与整体语义字段重算；`spec_sha256` 明确**排除** `validation_attestation`，避免“哈希包含 attestation、attestation 又绑定哈希”的自哈希循环。
-  - `author_identity`：由可信层按实际调用元数据绑定 `reference_sha256`（必填）、可选 `plan_sha256`、instruction hash（用户意图内容哈希）、model ref、Prompt 版本、采样参数、角色（initial/refine/repair）与父 `spec_sha256`（Refine/repair 必填）。
+  - `author_identity`：由可信层按实际调用元数据绑定 `reference_sha256`（必填）、可选 `plan_sha256`、instruction hash、reference content type、角色输入上下文 hash、model ref、Prompt 版本、实际生效采样参数、角色（initial/refine/repair）与父 `spec_sha256`（Refine/repair 必填）；若发生结构修复，还必须绑定 repair Prompt、首轮输出/错误、Schema 以及首轮与第二次实际调用身份的 `repair_context_sha256`。
   - `validation_attestation`：只能由可信 Validator 在全量校验（含真实 compile/link/draw）通过后签发，绑定 `spec_sha256`、validator version、通过的检查项清单与 compile/link/draw 结果；模型或任何非 Validator 组件不得生成。
 - 可执行真相是“Spec + 匹配 attestation”的组合：无 attestation、attestation 的 `spec_sha256` 与内容重算不匹配、validator version 不受信任或检查项/执行结果缺失的组合，不得渲染为候选、不得进入快照。
 - 约束：不同 topology/源码产生新 `spec_sha256`；run 内 program 复用与 compile 上限沿用 run-scoped registry 语义，但以 `spec_sha256` 为 key。
@@ -110,7 +110,7 @@ uniform 数值优化：只沿 tunable_manifest 调 uniform_values ──> 重渲
 
 ## 6. Shadow A/B 预算与状态隔离
 
-- 冻结实验臂定义：Arm A 与 Arm B 使用**同一模型、同一 Prompt 主体、同一采样参数、同一预算和同一组 direct GLSL Author**（Initial/Refine/repair 角色相同）；唯一实验变量是 LayerPlan——Arm A 不提供 LayerPlan，Arm B 仅在其 Author 输入中增加同一份 LayerPlanV1，除此之外两臂输入与流程保持一致。
+- 冻结实验臂定义：Arm A 与 Arm B 尽量使用**同一模型、同一 Prompt 主体、同一请求采样参数、同一预算和同一组 direct GLSL Author**（Initial/Refine/repair 角色相同）；预期控制差异只有 LayerPlan——Arm A 不提供，Arm B 增加同一份 LayerPlanV1。无 seed 的模型采样、执行顺序和服务端漂移仍是混杂因素，单次运行只作探索；必须多轮重复并做 AB/BA 交叉平衡后才能评价关联，不能声称唯一因果变量。
 - legacy ShaderDocument 路径**不属于**这两个实验臂：它只是产品安全 fallback 与额外 control reference（见第 7 节），不得与任一臂共享 `current_best`、program cache 或预算；其运行与结果单独记账、单独 provenance。
 - 两臂各自独立记账与隔离状态：LayerPlan 生成、Initial、Refine、repair 的模型调用与 token、compile 次数、draw 次数、wall-clock、program cache 与 `current_best` 演进完全分离，互不消耗、互不豁免对方预算，也不占用产品 run 的既有硬预算。
 - 执行顺序与臂身份入证据：每条候选/指标记录携带 `arm_id`（`A|B`）、配置指纹与执行序号；两臂执行顺序（固定或交错）在查看结果前冻结并写入报告，不得事后调整。

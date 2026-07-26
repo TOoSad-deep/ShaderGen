@@ -18,7 +18,7 @@ Frontend React
 - `frontend/`：上传、配置、运行进度、服务端/客户端 Render 和 GLSL 展示。
 - `backend/`：HTTP 边界、进度注册、过程账本、生命周期和用例编排。
 - `src/agent/`：LangGraph、LLM Gateway、Prompt、Parser、State 和公共 Service。
-- `src/shaderforge/`：确定性 Scene、Shader 物化、WebGL1 渲染、复合评分、优化和 Artifact。
+- `src/shaderforge/`：确定性 Scene、Shader 物化、ProgramSpec、安全校验、WebGL1 渲染、复合评分、优化和 Artifact。
 - `src/nodelab/`：Pipeline 无关的节点 Harness，不依赖 Agent、Backend 或 ShaderForge。
 - `src/nodelab_service/`：独立 FastAPI transport，通过受信任 factory 注入 Pipeline Provider。
 
@@ -42,6 +42,22 @@ Node Lab 默认以空安全 Application 启动在端口 8090。产品 Backend �
 - `finalize` 直接固化权威 `shader-graph.json`、specialized WebGL1 GLSL 和 Render，不再为默认产品重复执行 MinScene shadow。
 - Graph recursion limit 按合法最坏路径推导；未知递归错误 fail-closed。
 - 完整拓扑、条件边和安全边界见 `src/agent/app/graphs/ARCHITECTURE.md`。
+
+## LayerPlan/direct GLSL shadow
+
+D084 新增独立离线 harness，用于比较“不提供 LayerPlan”与“只增加 advisory LayerPlan”的 direct GLSL Author。它不注册 LangGraph，不接 Backend/API、产品 `current_best`、公开 Artifact 或 evidence registry：
+
+```text
+参考图
+  ├─> Arm A: Initial/Refine GLSL Author ───────────────┐
+  └─> VisualAnalysis Author ─> advisory LayerPlan ─> Arm B
+                                                       │
+canonical ShaderProgramSpec ─> 安全校验 ─> WebGL1 prepare/draw
+                                                       │
+                              真实 Render/metric ─> arm-local current_best
+```
+
+LayerPlan 只帮助模型理解视觉分层，不能参与校验、评分或候选接受。`shaderforge.program_spec` 是唯一 ProgramSpec/LayerPlan 类型、规范化、哈希和 attestation 真相；模型只能返回语义字段，可信层绑定参考图、指令、模型、Prompt、实际生效采样身份（Gateway `effective_identity`，kimi 实际 temperature=1，缺有效身份 fail-closed）、角色、父 Spec、content_type、角色输入上下文（Refine 含 current_render 与评估上下文哈希）及结构修复 provenance。候选只有在 ProgramSpec 静态安全校验和真实 WebGL1 draw 后，才能由 Renderer 私有 signer 签发绑定具体 Spec/RGB/PNG/runtime 的 receipt；Runner 只有 verify-only capability。详细产物只写显式指定的本地私有目录（staging + 原子 rename、0700/0600、规范相对路径与 symlink 拒绝、`verify_shadow_run` 复验），当前不构成 durable 或质量晋升证据；无 seed 的温度 1 单次 A/B 只具探索性，结论需多轮重复与 AB/BA 交叉平衡。生产 `png_to_shader_min` 的 12 节点拓扑与 ShaderDocument/Compiler 路径保持不变。
 
 ## HTTP 与进度
 

@@ -9,6 +9,7 @@ from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage
 
 from agent.app.contracts.llm import (
+    EffectiveCallIdentity,
     LLMCallOptions,
     LLMConfigurationError,
     LLMInvocationError,
@@ -20,6 +21,7 @@ from agent.app.contracts.llm import (
 from agent.app.llms.client_factory import (
     ChatModelBinding,
     create_chat_model_binding,
+    resolve_effective_sampling,
     resolved_model_reference,
 )
 from agent.app.llms.provider_config import PROVIDER_NAMES
@@ -86,6 +88,13 @@ class LangChainLLMGateway:
             usage=_token_usage(message),
             requested_model_ref=options.model_ref,
             model_identity_source=identity_source,
+            effective_identity=EffectiveCallIdentity(
+                provider=binding.resolved_provider,
+                model_ref=model_ref,
+                model_identity_source=identity_source,
+                sampling=binding.effective_sampling
+                or resolve_effective_sampling(options),
+            ),
         )
 
 
@@ -111,6 +120,7 @@ def _normalize_binding(
         requested_model_ref=options.model_ref,
         resolved_provider=provider,
         configured_model_name=model_name,
+        effective_sampling=resolve_effective_sampling(options),
     )
 
 

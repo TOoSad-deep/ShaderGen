@@ -4,13 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
+from hashlib import sha256
 from typing import TypeVar
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from agent.app.config.model_config import SHADER_GEN_MODEL_NAME
 from agent.app.config.png_to_shader_min import MIN_PIPELINE_CONFIG
-from agent.app.contracts.llm import LLMCallOptions, LLMGateway, LLMResponse
+from agent.app.contracts.llm import (
+    EffectiveCallIdentity,
+    LLMCallOptions,
+    LLMGateway,
+    LLMResponse,
+)
 from agent.app.messages.structured_multimodal import canonical_json
 from agent.app.prompts.prompt_loader import PromptDefinition, load_prompt_definition
 
@@ -35,6 +41,8 @@ class MinAuthorCallResult:
     repaired: bool = False
     latency_ms: int = 0
     total_tokens: int | None = None
+    effective_identity: EffectiveCallIdentity | None = None
+    repair_context_sha256: str | None = None
 
 
 def _response_total_tokens(response: LLMResponse) -> int | None:
@@ -96,6 +104,35 @@ def _repair_messages(
     ]
 
 
+def _repair_context_sha256(
+    *,
+    source_prompt: PromptDefinition,
+    schema: dict[str, object],
+    error: ValueError,
+    original_output: str,
+    original_identity: EffectiveCallIdentity | None,
+    repaired_identity: EffectiveCallIdentity | None,
+) -> str:
+    """绑定修复 Prompt、首轮输出/错误、Schema 与第二次真实调用身份."""
+    payload = {
+        "repair_prompt_version": MIN_AUTHOR_REPAIR_PROMPT.version,
+        "source_prompt_version": source_prompt.version,
+        "original_output_sha256": sha256(original_output.encode("utf-8")).hexdigest(),
+        "validation_error_code": getattr(error, "code", "invalid_structured_output"),
+        "validation_error_details": getattr(error, "details", ()),
+        "schema_sha256": sha256(canonical_json(schema).encode("utf-8")).hexdigest(),
+        "original_effective_identity": (
+            original_identity.to_dict()
+            if original_identity is not None
+            else None
+        ),
+        "repair_effective_identity": (
+            repaired_identity.to_dict() if repaired_identity is not None else None
+        ),
+    }
+    return sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
 async def invoke_min_author(
     *,
     gateway: LLMGateway,
@@ -143,6 +180,7 @@ async def invoke_min_author(
                 first_error_code,
                 latency_ms=latency_ms,
                 total_tokens=total_tokens,
+                effective_identity=response.effective_identity,
             )
         calls += 1
         repair_options = replace(options, max_output_tokens=max_output_tokens)
@@ -164,6 +202,7 @@ async def invoke_min_author(
                 f"llm_repair_failed:{type(exc).__name__}",
                 latency_ms=latency_ms,
                 total_tokens=total_tokens,
+                effective_identity=response.effective_identity,
             )
         latency_ms += max(0, int(repaired.latency_ms))
         repaired_tokens = _response_total_tokens(repaired)
@@ -179,15 +218,25 @@ async def invoke_min_author(
                 getattr(second_error, "code", "invalid_structured_output"),
                 latency_ms=latency_ms,
                 total_tokens=total_tokens,
+                effective_identity=repaired.effective_identity,
             )
         return MinAuthorCallResult(
             value,
             calls,
             repaired.model_ref,
             None,
-            True,
-            latency_ms,
-            total_tokens,
+            repaired=True,
+            latency_ms=latency_ms,
+            total_tokens=total_tokens,
+            effective_identity=repaired.effective_identity,
+            repair_context_sha256=_repair_context_sha256(
+                source_prompt=prompt,
+                schema=schema,
+                error=first_error,
+                original_output=response.text,
+                original_identity=response.effective_identity,
+                repaired_identity=repaired.effective_identity,
+            ),
         )
     return MinAuthorCallResult(
         value,
@@ -196,6 +245,7 @@ async def invoke_min_author(
         None,
         latency_ms=latency_ms,
         total_tokens=total_tokens,
+        effective_identity=response.effective_identity,
     )
 
 

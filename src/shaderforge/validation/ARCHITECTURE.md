@@ -6,7 +6,7 @@
 
 - 必需 precision、varying、uniform、`main` 和 `gl_FragColor`；
 - 禁止参考图采样、WebGL2 输入输出、`#version`、扩展和 `mainImage`；
-- Shader 长度和明显无界循环；
+- Shader 长度和循环静态有界性（`program_spec_safety` 只允许可静态证明、方向正确的规范整数 for 循环：`for (int i = 常量; i </<=/>/>= 常量; i++|i--|i+=K|i-=K)`，K 为正整数常量；迭代上界由 `ProgramSpecSafetyLimits.max_loop_iterations`（默认 1024）限制，十亿上界、错误方向、零步长与非规范步进一律拒绝；同时拒绝 `#define/#undef/#include/#pragma/#line/#error`，避免宏别名绕过循环扫描）；
 - 除零、零向量 normalize、常量反向 smoothstep 等数值问题；
 - 大坐标平方等 `mediump` 风险 warning。
 - `repair_constant_reversed_smoothsteps()` 只修复常量严格倒序的完整调用；相等边界和注释不改写，修复不是语义等价证明，调用方必须重新执行 Validator 和 Renderer。

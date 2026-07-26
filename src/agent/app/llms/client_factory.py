@@ -4,7 +4,11 @@ from dataclasses import dataclass
 
 from langchain_core.language_models.chat_models import BaseChatModel
 
-from agent.app.contracts.llm import LLMCallOptions
+from agent.app.contracts.llm import (
+    EffectiveSamplingParams,
+    LLMCallOptions,
+    normalize_thinking_mode,
+)
 from agent.app.llms.families import deepseek, glm, kimi, openai, qwen
 from agent.app.llms.provider_config import PROVIDER_NAMES
 
@@ -26,6 +30,40 @@ class ChatModelBinding:
     requested_model_ref: str
     resolved_provider: str
     configured_model_name: str
+    effective_sampling: EffectiveSamplingParams | None = None
+
+
+def resolve_effective_sampling(options: LLMCallOptions) -> EffectiveSamplingParams:
+    """按 family 行为返回实际下发的采样参数事实，不回写请求假值.
+
+    kimi 端点强制 ``temperature=1`` 且 thinking 语义由 ``reasoning_effort``
+    承载；qwen 记录规范化后的 thinking 语义；其余 family 不下发 thinking。
+    """
+    provider, model_name = _split_model_reference(options.model_ref)
+    family = _model_family(provider, model_name)
+    if family == "kimi":
+        return EffectiveSamplingParams(
+            temperature=kimi.KIMI_REQUIRED_TEMPERATURE,
+            thinking=None,
+            reasoning_effort=kimi.SHADER_GEN_KIMI_REASONING_EFFORT,
+            response_format=options.response_format,
+            max_output_tokens=options.max_output_tokens,
+        )
+    if family == "qwen":
+        return EffectiveSamplingParams(
+            temperature=options.temperature,
+            thinking=normalize_thinking_mode(options.thinking),
+            reasoning_effort=None,
+            response_format=options.response_format,
+            max_output_tokens=options.max_output_tokens,
+        )
+    return EffectiveSamplingParams(
+        temperature=options.temperature,
+        thinking=None,
+        reasoning_effort=None,
+        response_format=options.response_format,
+        max_output_tokens=options.max_output_tokens,
+    )
 
 
 def create_chat_model(options: LLMCallOptions) -> BaseChatModel:
@@ -130,6 +168,7 @@ def create_chat_model_binding(options: LLMCallOptions) -> ChatModelBinding:
         requested_model_ref=options.model_ref,
         resolved_provider=resolved_provider,
         configured_model_name=model_name,
+        effective_sampling=resolve_effective_sampling(options),
     )
 
 
