@@ -1,6 +1,6 @@
 # ShaderGen 架构
 
-当前实现以 `scene_mvp` 最小骨架为唯一在线路径。历史 V1、Node Lab 和 V2-V5 方案不再是当前架构事实；其审计记录保留在 `docs/DECISIONS.md`、进度归档和 evidence registry。
+当前产品实现以 `scene_mvp` 最小骨架为唯一在线路径。通用 Node Lab 是独立开发工具，不属于产品请求链路；历史 V1 和 V2-V5 方案仍只在决策、进度归档与 evidence registry 中追溯。
 
 ## 分层
 
@@ -19,8 +19,16 @@ Frontend React
 - `backend/`：HTTP 边界、进度注册、过程账本、生命周期和用例编排。
 - `src/agent/`：LangGraph、LLM Gateway、Prompt、Parser、State 和公共 Service。
 - `src/shaderforge/`：确定性 Scene、Shader 物化、WebGL1 渲染、复合评分、优化和 Artifact。
+- `src/nodelab/`：Pipeline 无关的节点 Harness，不依赖 Agent、Backend 或 ShaderForge。
+- `src/nodelab_service/`：独立 FastAPI transport，通过受信任 factory 注入 Pipeline Provider。
 
 Backend 只能通过 `agent.app.services.*` 调用 Agent。Agent 不持有数据库连接池；ShaderForge 不依赖 FastAPI、LangChain 或 React。
+
+## Node Lab
+
+Node Lab 默认以空安全 Application 启动在端口 8090。产品 Backend 不注册 `/api/lab/v1/*`；前端 `/lab` 通过 `VITE_NODE_LAB_API_BASE_URL` 连接独立服务。节点、Fixture、capability、suite、资源与副作用门禁只能由进程启动时的 `NODELAB_APPLICATION_FACTORY=module:callable` 注入，HTTP 客户端不能提交 import path 或 manifest path。
+
+当前合并只恢复通用 `nodelab`、`nodelab_service` 和工作台，不恢复已退役的 PNG-to-Shader V1 Graph、专用 Adapter、benchmark manifest 或运行脚本。详细边界见 `src/nodelab/ARCHITECTURE.md`、`src/nodelab_service/ARCHITECTURE.md` 和 `docs/NODE_LAB_GUIDE.md`。
 
 ## scene_mvp Graph
 

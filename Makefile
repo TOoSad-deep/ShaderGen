@@ -1,4 +1,4 @@
-.PHONY: all setup setup-memory-postgres dev dev-agent dev-backend dev-frontend check docs-check format lint test tests test_watch integration_tests test-memory-postgres test-scene-mvp-ui docker_tests help extended_tests
+.PHONY: all setup setup-memory-postgres dev dev-agent dev-backend dev-node-lab dev-frontend check docs-check format lint test tests test_watch integration_tests test-memory-postgres test-scene-mvp-ui docker_tests help extended_tests
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -15,13 +15,16 @@ setup-memory-postgres:
 	uv run python scripts/setup_memory_postgres.py
 
 dev:
-	@echo 'Run one service per terminal: make dev-agent | make dev-backend | make dev-frontend'
+	@echo 'Run one service per terminal: make dev-agent | make dev-backend | make dev-node-lab | make dev-frontend'
 
 dev-agent:
 	uv run langgraph dev
 
 dev-backend:
 	uv run uvicorn backend.app.main:app --reload --port 8088
+
+dev-node-lab:
+	uv run uvicorn nodelab_service.main:create_app --factory --reload --port 8090
 
 dev-frontend:
 	npm --prefix frontend run dev
@@ -99,6 +102,7 @@ help:
 	@echo 'setup-memory-postgres        - initialize LangGraph PostgreSQL persistence tables'
 	@echo 'dev-agent                    - run LangGraph dev server'
 	@echo 'dev-backend                  - run FastAPI backend on port 8088'
+	@echo 'dev-node-lab                 - run standalone Node Lab on port 8090'
 	@echo 'dev-frontend                 - run Vite frontend'
 	@echo 'check                        - run unit tests, LangGraph validation, frontend build'
 	@echo 'docs-check                   - verify harness docs and architecture boundaries'

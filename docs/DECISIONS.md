@@ -599,3 +599,10 @@
 - 决策：用户确认后续分支已经针对 Feature 处理逻辑和架构做出调整，因此停止在当前 `png_to_shader_min_scene_v3` Feature 契约上继续运行真实模型 independent experiment、D074 真实 Patch 12/32 重放、旧 Initial/Refine Prompt 优化、固定 7 例真实模型 benchmark 与匿名盲评。D063、D072–D075 的报告、失败事实和机制验证继续只增不改保留，但只能解释旧 Feature Schema、模板、typed Patch 和候选空间，不得外推为后续方案的质量或预算结论。正式 benchmark 不是永久取消；切换后续分支后先完成 Feature Schema、模板、Patch、Prompt、scorer、Graph、预算与证据版本的差异审计，再为稳定的新方案重新冻结 manifest 和质量门禁。
 - 原因：旧 Feature 表达能力、Patch 空间和 Prompt 决定模型可提出的结构以及局部搜索可到达的候选；这些核心契约变化后，继续为旧方案购买真实模型调用或扩大 draw 只能生成缺乏外部有效性的过期证据。把旧结果直接迁移到新架构还会混淆版本身份，并可能基于不再存在的候选空间作出 maturity 预算决策。
 - 影响：当前分支的生产 runtime、`MAX_PATCH_CANDIDATE_DRAWS=12`、scorer、Prompt、Graph、YAML、high=`640/9/9`、manual=`1000/32/30`、`current_best` 和可运行性均不改变，也不调用真实模型。D074 的私有证据边界、配置身份门禁、draw 记账和 fail-closed 工具可以在新分支审计后选择性迁移，D075 的 `budget32_supported` 不再授权追加旧架构实验或修改新架构预算。合并后的当前产品即 D070 ShaderGraph，必须重新建立对应 benchmark 与独立人工门禁；通过前 F09 继续 `active/no-go`。
+
+## D077 - 通用 Node Lab 向前移植为独立开发工具，不恢复旧 V1 插件
+
+- 日期：2026-07-26
+- 决策：将 `origin/codex/refactor-node-lab-generic@222ea96` 的 Pipeline 无关 `nodelab` 内核、独立 `nodelab_service`、受信任 Application factory 和 `/lab` 工作台向前移植到当前 `main`。独立服务默认创建空安全 Application，产品 Backend 不注册 `/api/lab/v1/*`。冲突中继续采用当前 `main` 对旧 PNG-to-Shader V1 Graph、Agent Adapter、benchmark manifest、脚本与专用测试的删除结果。
+- 原因：目标分支基于旧 V1 架构开发，直接接受全部 modify/delete 冲突会重新开放 D076 已退役且当前代码无法支撑的运行入口；完全采用 `main` 删除结果又会丢失已经完成的通用 Harness、独立部署边界和工作台。以受信任 factory 作为唯一领域注入点，可以保留通用能力而不让 transport 反向依赖 Agent 或 ShaderForge。
+- 影响：新增 `make dev-node-lab`、`NODELAB_*` 服务端配置、`VITE_NODE_LAB_API_BASE_URL` 和 `/lab` 页面；`nodelab`/`nodelab_service` 随 `shadergen` distribution 发布。若未来需要调试当前 `png_to_shader_min`，必须为 ShaderGraph 现契约另建 Provider/Executor factory，不得复活旧 V1 Adapter 或引用已删除的 benchmark 证据。F09 的产品 Graph、路由、`current_best`、质量门禁和历史 evidence registry 均不改变。

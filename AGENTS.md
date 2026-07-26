@@ -10,6 +10,7 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 - 初始化 Memory PostgreSQL：`make setup-memory-postgres`
 - LangGraph：`make dev-agent`
 - 后端：`make dev-backend`
+- Node Lab：`make dev-node-lab`
 - 前端：`make dev-frontend`
 - 单元测试：`make test`
 - Memory PostgreSQL 验收：`make test-memory-postgres`
@@ -46,6 +47,8 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 
 - `src/agent/`：LangGraph 智能体核心，内部采用 `src/agent/app/` 规范结构。Prompt 只放 `src/agent/app/prompts/*.yaml`。
 - `src/shaderforge/`：后续领域核心流水线。只有功能需要真实代码时才创建对应子包。
+- `src/nodelab/`：Pipeline 无关的 Node 调试、证据与 benchmark Harness 内核。
+- `src/nodelab_service/`：独立 Node Lab FastAPI transport；不得由产品 Backend 隐式注册。
 - `backend/`：FastAPI 后端。Route 放 `backend/app/api/routes/`，编排逻辑放 `backend/app/services/`，手写 SQL 放 `backend/sql/`。
 - `frontend/`：Vite/React 前端。源码在 `frontend/src/`。
 - `tests/`：Python 测试。单元测试放 `tests/unit_tests/`，集成测试放 `tests/integration_tests/`。

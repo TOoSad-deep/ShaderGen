@@ -268,6 +268,7 @@ export function App() {
             <p>上传参考图，由 scene_mvp 最小管线生成无贴图 fragment shader。</p>
           </div>
           <div className="topbar-actions">
+            <a href="/lab">Node Lab</a>
             <span className={`status ${loading ? "is-loading" : ""}`}>{statusText}</span>
             {loading ? (
               <button type="button" className="stop-button" onClick={handleStopWaiting}>

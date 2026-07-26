@@ -1,15 +1,16 @@
 # 进度
 
-最后更新：2026-07-24
+最后更新：2026-07-26
 
 > 本文件是有界的当前交接页，不是逐会话追加日志。功能状态以 `docs/FEATURES.md` 为准，长期取舍以 `docs/DECISIONS.md` 为准，完整旧记录见 `docs/progress/archive/`。
 
 ## 当前状态
 
 - 已完成项目结构只读审阅，并形成尚未纳入 Git 的 `docs/PROJECT_STRUCTURE_REFACTOR_PLAN.md`；当前只记录候选阶段与决策门，尚未移动代码或改变任何运行契约。
+- `origin/codex/refactor-node-lab-generic@222ea96` 已向前移植到当前 `main`：保留通用 `nodelab`、独立 `nodelab_service`、受信任 Application factory 和 `/lab` 工作台；产品 Backend 仍不注册 Lab route，默认服务为空安全 Application。
 - 当前 `main` 已先快进吸收 `TOoSad-deep/feature-improve@4768aa5`，再合并 `origin/mvp@6d4aac6`；代码、Graph 文档、ADR、进度和证据冲突已按当前 ShaderGraph 产品事实收口。
 - 产品仍只有 `scene_mvp`，`langgraph.json` 只注册 `png_to_shader_min`。默认组合根使用 `shader_graph_v1`：Initial/Refine Author、specialized Compiler、真实 WebGL1、多 program cache、CandidateSnapshot、node/layer 参数 block、Backend/API/UI 已贯通，12 节点拓扑未改变。
-- 感知阶段同时保留 legacy MinScene 测量与产品 `fallback_shader_graph`；默认产品使用 ShaderDocument。Memory/checkpoint Python/SQL 与 PostgreSQL 数据继续休眠保留，V1、Node Lab 和旧 benchmark 运行面仍保持删除。
+- 感知阶段同时保留 legacy MinScene 测量与产品 `fallback_shader_graph`；默认产品使用 ShaderDocument。Memory/checkpoint Python/SQL 与 PostgreSQL 数据继续休眠保留；旧 V1 产品、Adapter、manifest 与 benchmark 入口仍保持删除，通用 Node Lab 不改变该边界。
 - mvp 的 acceptance live A/B、strict total-loss 防漂移 helper、私有 MinScene Patch replay 和 12/32 maturity fixture 已合入。由于两分支复用了 `D064–D068`，本次把 mvp 五项决策顺延为 D072–D076，保留现有清理/Memory 决策编号不变。
 - D072/D073 证明旧 MinScene 诊断候选空间内 strict total-loss 优于 geometry-first，并纠正生产原本即为 strict total-loss 的事实；当前 ShaderGraph 同样执行 strict total-loss，但旧实验不能外推为 ShaderGraph 质量结论。
 - D074 的 replay 契约、legacy `make_min_nodes` 实现和聚焦测试已保留；默认 `make_shader_graph_nodes` 尚未迁移 typed layer patch replay，当前产品 manifest 不包含 `private_replay_bundle`。D075 的 `budget32_supported` 只适用于两个旧 Feature 合成 fixture，D076 明确不授权当前产品预算变化。
@@ -22,6 +23,7 @@
 ## 下一步
 
 - 先确认结构重构与 F09 的 active 关系、兼容范围、目录策略、前后端契约生成方式、Backend 分层和 Ruff/Mypy 门禁策略；确认前不开始目录迁移。
+- 若要让 Node Lab 执行当前 `png_to_shader_min` 节点，需要为当前 ShaderGraph 契约新增独立 Provider/Executor factory；不得恢复已退役的 V1 Adapter。
 - 为 ShaderGraph 重新设计 typed layer patch replay、冻结 benchmark manifest、质量指标和人工门禁；不得直接复用旧 MinScene replay/12–32 draw 的发布含义。
 - 保留“模型 Initial 仍输给 fallback”的负面质量事实，继续用版本中立的固定小样例验证 Prompt/搜索，不通过放宽 Schema 掩盖问题。
 - 参数优化继续评估 rotation/成组参数、typed layer patch 局部成熟和更大搜索；任何预算变化必须使用 ShaderGraph 候选空间重新建立证据。
@@ -36,19 +38,20 @@
 - `scene_mvp` 仍没有 CMA-ES、2000 draw 生产预算、优化中断/恢复和对应质量证据。
 - 服务端仍是阻塞式 API；浏览器停止等待不等于服务端取消。任务化/cancel、outbox/reaper 和多 worker 分布式锁属于后续可靠性设计。
 - 历史 V1/Node Lab real-model 完整报告与公开 review package 已按授权随旧 `output/` 删除；registry 对应条目为 `missing`，只能审计定位。
+- Node Lab 工作台已通过 TypeScript/生产构建和 HTTP/service 单测，但当前没有与新通用空服务匹配的浏览器 E2E；旧 V1 假 API/E2E 未恢复。
 
 ## 当前验证基线
 
-- 两分支合并后 `make check` 通过：362 个单元测试、docs-check、LangGraph validate（1 个 Graph）和前端生产构建全部成功。
-- 全量集成测试为 15 passed、1 skipped，scene_mvp 浏览器 E2E 通过；全仓 Ruff、`mypy --strict src backend`（102 个源文件）与 `git diff --check` 通过。
+- 2026-07-26 合并后 `make check` 通过：380 个单元测试、docs-check、LangGraph validate（1 个 Graph）和前端生产构建全部成功。
+- 全量集成测试为 15 passed、1 skipped；Node Lab 聚焦测试为 18 passed，`uv lock --check` 与 `git diff --check` 通过。scene_mvp 浏览器 E2E、全仓 Ruff 与 Mypy 未在本次合并后重跑。
 
 ## 最近重要变更
 
+- 2026-07-26：向前移植 `refactor-node-lab-generic@222ea96`；恢复通用 Node Lab 内核、独立服务和新版工作台，同时保持旧 V1 Graph、专用 Adapter、manifest、benchmark 脚本与历史证据退役。
 - 2026-07-24：完成 `feature-improve@4768aa5` 与 `mvp@6d4aac6` 合并；保留 ShaderGraph 产品链路和旧 MinScene 诊断/replay 审计实现，并将冲突的 mvp ADR 编号顺延为 D072–D076。
 - 2026-07-24：ShaderGraph Author Prompt 升级 v1_2，感知阶段直接提供产品 `fallback_shader_graph`，迁移映射归入 ShaderForge typed 边界；参数优化转为跨分支 TODO。
 - 2026-07-24：按 D070 把默认产品真相源切换到有界 ShaderGraph，保持 12 节点拓扑不变，贯通 Author、typed layer patch、CandidateSnapshot、多 program cache、Backend/UI 和 final Artifact。
 - 2026-07-24：生产 `dashscope:qwen3.7-plus` 直连三个小样例与一次 Refine 成功；三例 Initial 均输给 fallback，而 Refine 高光层小幅改善。
-- 2026-07-24：按 D069 落地最小 Shader DSL/Compiler、有界多 program registry 和 finalize-only shadow 纵向切片，随后由 D070 升级为产品真相源。
 
 ## 历史索引
 

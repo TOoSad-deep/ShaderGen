@@ -2,6 +2,8 @@
 
 Backend 负责 FastAPI HTTP 边界、应用生命周期、过程账本和 `scene_mvp` 用例编排。
 
+通用 Node Lab 由 `src/nodelab_service/` 独立启动；Backend 不导入该包，也不注册 `/api/lab/v1/*`。
+
 ## 当前契约
 
 - `POST /api/shader/generate` 接收图片、可选 `project_id/run_id`、`quality_preset` 和 `instruction`；不再接收 `generation_mode`。
