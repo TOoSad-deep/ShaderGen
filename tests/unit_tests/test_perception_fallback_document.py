@@ -10,12 +10,16 @@ from agent.app.nodes.png_to_shader_min import (
     MinRendererRegistry,
     make_shader_graph_nodes,
 )
+from agent.app.nodes.png_to_shader_min.shader_graph_runtime import (
+    evaluate_shader_graph,
+)
 from shaderforge.dsl import (
     ShaderDocument,
     adapt_min_scene_to_shader_graph,
     compile_dsl_shader,
 )
 from shaderforge.perception import perceive_min_target
+from shaderforge.rendering import GraphProgramBudgetError
 from shaderforge.store import LocalArtifactStore
 
 
@@ -57,6 +61,11 @@ class _FakeRenderer:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class _BudgetExhaustedRegistry:
+    async def prepare_graph(self, *_args, **_kwargs):
+        raise GraphProgramBudgetError("synthetic compile budget exhausted")
 
 
 def _product_state(image: bytes, *, llm_budget: int) -> dict[str, object]:
@@ -153,3 +162,26 @@ async def test_product_author_initial_model_failure_falls_back_to_document(
 
     assert update["scene"] == state["fallback_shader_graph"]
     assert update["trace"][-1]["author_source"] == "perception_fallback"
+
+
+@pytest.mark.anyio
+async def test_shader_graph_compile_budget_exhaustion_becomes_candidate_failure() -> None:
+    perception = perceive_min_target(_pink_orb_png())
+
+    outcome = await evaluate_shader_graph(
+        {
+            "project_id": "budget-project",
+            "run_id": "budget-run",
+            "target_rgb": perception.target_rgb,
+            "render_count": 16,
+            "render_budget": 1000,
+            "llm_budget": 32,
+            "refine_budget": 30,
+        },
+        perception.fallback_document,
+        _BudgetExhaustedRegistry(),  # type: ignore[arg-type]
+    )
+
+    assert outcome["success"] is False
+    assert outcome["error"] == "graph_program_budget_exhausted"
+    assert outcome["render_count"] == 16

@@ -13,6 +13,7 @@ from agent.app.config.png_to_shader_min import (
     derive_min_graph_recursion_limit,
     load_min_pipeline_config,
     required_min_graph_steps,
+    required_shader_graph_program_compiles,
 )
 from agent.app.contracts.llm import LLMCallOptions
 from agent.app.llms import client_factory
@@ -72,6 +73,7 @@ def test_scene_mvp_runtime_policy_loads_packaged_yaml() -> None:
     assert manual.refine_budget == 30
     assert required_min_graph_steps(32, 30) == 213
     assert manual.recursion_limit == 217
+    assert required_shader_graph_program_compiles(32, 30) == 45
     assert MIN_PIPELINE_CONFIG.max_llm_budget == 32
     assert MIN_PIPELINE_CONFIG.max_refine_budget == 30
     assert MIN_PIPELINE_CONFIG.max_recursion_limit == 217
@@ -255,6 +257,18 @@ def test_scene_mvp_runtime_policy_derives_feature_aware_graph_bound() -> None:
         derive_min_graph_recursion_limit(100, 99)
 
 
+def test_shader_graph_compile_budget_covers_initial_blocks_and_refines() -> None:
+    assert required_shader_graph_program_compiles(0, 30) == 14
+    assert required_shader_graph_program_compiles(2, 1) == 16
+    assert required_shader_graph_program_compiles(4, 2) == 17
+    assert required_shader_graph_program_compiles(9, 9) == 23
+    assert required_shader_graph_program_compiles(32, 30) == 45
+    assert required_shader_graph_program_compiles(6, 3, max_features=4) == 10
+
+    with pytest.raises(ValueError, match="参数队列上限"):
+        required_shader_graph_program_compiles(2, 1, max_features=13)
+
+
 @pytest.mark.parametrize(
     "yaml_text",
     (
@@ -368,11 +382,13 @@ def test_provider_model_factories_are_split_from_llm_factory() -> None:
     glm_model = model_family_module("glm")
     deepseek_model = model_family_module("deepseek")
     openai_model = model_family_module("openai")
+    kimi_model = model_family_module("kimi")
 
     assert callable(qwen_model.get_qwen_model)
     assert callable(glm_model.get_glm_model)
     assert callable(deepseek_model.get_deepseek_model)
     assert callable(openai_model.get_openai_model)
+    assert callable(kimi_model.get_kimi_model)
     assert callable(client_factory.create_chat_model)
     assert not hasattr(client_factory, "get_model")
     assert not hasattr(client_factory, "get_qwen_model")
@@ -605,6 +621,71 @@ def test_llm_factory_routes_by_provider_and_model_family(monkeypatch) -> None:
         "openai",
         "gpt-4.1",
         0.4,
+    )
+
+
+def test_kimi_family_uses_kimi_env_and_forces_required_temperature(monkeypatch) -> None:
+    kimi_model = model_family_module("kimi")
+
+    monkeypatch.setenv("KIMI_API_KEY", "kimi-key")
+    monkeypatch.delenv("KIMI_BASE_URL", raising=False)
+    monkeypatch.setattr(kimi_model, "SHADER_GEN_KIMI_REASONING_EFFORT", "low")
+
+    model = kimi_model.get_kimi_model("k3-256k", temperature=0)
+
+    assert model.model_name == "k3-256k"
+    assert model.openai_api_base == "https://api.kimi.com/coding/v1"
+    assert model.temperature == 1.0
+    assert model.reasoning_effort == "low"
+
+
+def test_kimi_family_reasoning_effort_override_and_validation(monkeypatch) -> None:
+    kimi_model = model_family_module("kimi")
+
+    monkeypatch.setenv("KIMI_API_KEY", "kimi-key")
+    monkeypatch.setattr(kimi_model, "SHADER_GEN_KIMI_REASONING_EFFORT", "max")
+
+    assert kimi_model.get_kimi_model("k3-256k").reasoning_effort == "max"
+    assert (
+        kimi_model.get_kimi_model("k3-256k", reasoning_effort="High").reasoning_effort
+        == "high"
+    )
+    with pytest.raises(ValueError, match="low/high/max"):
+        kimi_model.get_kimi_model("k3-256k", reasoning_effort="banana")
+    monkeypatch.setenv("SHADER_GEN_KIMI_REASONING_EFFORT", "banana")
+    with pytest.raises(ValueError, match="low/high/max"):
+        kimi_model._reasoning_effort_env()
+
+
+def test_llm_factory_routes_kimi_models_to_kimi_family(monkeypatch) -> None:
+    kimi_model = model_family_module("kimi")
+
+    monkeypatch.setattr(
+        kimi_model,
+        "get_kimi_model",
+        lambda model, provider=None, temperature=0, response_format="text": (
+            "kimi",
+            provider,
+            model,
+            temperature,
+        ),
+    )
+
+    assert client_factory.create_chat_model(
+        LLMCallOptions(model_ref="kimi:k3-256k", temperature=0.2)
+    ) == (
+        "kimi",
+        "kimi",
+        "k3-256k",
+        0.2,
+    )
+    assert client_factory.create_chat_model(
+        LLMCallOptions(model_ref="k3", temperature=0)
+    ) == (
+        "kimi",
+        None,
+        "k3",
+        0,
     )
 
 

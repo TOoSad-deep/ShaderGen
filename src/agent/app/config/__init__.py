@@ -10,6 +10,7 @@ from agent.app.config.png_to_shader_min import (
     load_min_pipeline_config,
     max_min_refine_iterations,
     required_min_graph_steps,
+    required_shader_graph_program_compiles,
 )
 
 __all__ = [
@@ -22,4 +23,5 @@ __all__ = [
     "load_min_pipeline_config",
     "max_min_refine_iterations",
     "required_min_graph_steps",
+    "required_shader_graph_program_compiles",
 ]

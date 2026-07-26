@@ -134,6 +134,11 @@ class GraphProgramRegistry:
         """返回当前存活的 prepared program 数."""
         return len(self._programs)
 
+    @property
+    def max_compiles(self) -> int:
+        """返回本 run 创建时冻结的 compile 硬上限."""
+        return self._max_compiles
+
     def summary(self) -> dict[str, int]:
         """返回只含计数的安全摘要，不含 GLSL 或 uniform 值."""
         return {

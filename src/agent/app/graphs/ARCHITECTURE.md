@@ -62,8 +62,9 @@ flowchart TD
 - 黄色节点构成 `current_best` 安全边界。产品组合根中，模型 ShaderDocument、感知直接产出的 fallback、node-id 参数候选和 typed layer patch 都必须经 specialized Compiler 与真实 WebGL1 渲染，并按 `min_scene_composite_v3` 严格改善后才能提交。
 - `current_best` 是不可变 `ShaderGraphCandidateSnapshot`，绑定 document/compiler/program key/render/metric、父文档 hash 与 provenance；Prepared handle 只存在于 run-scoped registry，不进入 State 或 Artifact。
 - Refine 永远从只读 `current_best.document` 派生一个绑定 `base_document_sha256` 的 typed layer patch；非法、重复、Renderer 失败或 loss 未严格改善的分支整体丢弃。
+- Refine 未产生可渲染候选（模型/解析/apply 失败或近期重复）时必须设置 `refine_branch_resolved`，`render_and_evaluate` 只保留 `current_best` 并清空参数队列，随后经现有 no-op base 过桥；不得把 current best 误当 Initial 重建全部参数 block，否则 `9 + 2F + 6R` recursion 上界失真。
 - Service 按 `9 + 2F + 6R` 推导 run 级 recursion limit，并增加 4 步余量；超过全局安全上限的配置在加载时拒绝。
 - 公式中的 `F` 在产品 ShaderGraph 组合根表示最多 12 个有界参数 block，不再表示 MinScene Feature；当前 YAML 的上限仍在全局 256 防御线内。
-- 同一 topology/active block 通过 `compiled_graph_program_cache_v1` 复用 packed uniform program；结构变化产生新 key，compile/cache 均有硬上限。`finalize` 和 Service `finally` 幂等关闭资源。
+- 同一 topology/active block 通过 `compiled_graph_program_cache_v1` 复用 packed uniform program；结构变化产生新 key，compile/cache 均有硬上限。compile 上限按 `I + 1 + F + R` 从本 run 的 LLM/Refine 预算推导，manual 最大为 45；存活 cache 容量仍为 4。理论上不可达的 compile 耗尽会转换为稳定 `graph_program_budget_exhausted` 候选失败并沿既有失败/终止路径收敛，不再以未分类异常冒泡成 HTTP 500。`finalize` 和 Service `finally` 幂等关闭资源。
 - 当前 ShaderGraph 产品和 legacy MinScene Builder 都只允许 `total_loss` 严格改善时提交；geometry-first 只存在于旧诊断实验。D072/D073 的 A/B 与事实纠正保留审计价值，但其候选空间不能外推为 ShaderGraph 质量结论。
 - D074 私有 replay 契约与 legacy `make_min_nodes` 实现继续保留，完整 typed MinScene Patch、候选和渲染只写 `private/replay/`；默认 `make_shader_graph_nodes` 尚未迁移 typed layer patch replay，当前产品 manifest 不得宣称存在该 bundle。

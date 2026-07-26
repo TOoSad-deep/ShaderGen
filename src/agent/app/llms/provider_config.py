@@ -51,6 +51,11 @@ PROVIDER_ENVS = {
         base_url_env="DEEPSEEK_BASE_URL",
         default_base_url="https://api.deepseek.com",
     ),
+    "kimi": ProviderEnv(
+        api_key_env="KIMI_API_KEY",
+        base_url_env="KIMI_BASE_URL",
+        default_base_url="https://api.kimi.com/coding/v1",
+    ),
     "openai": ProviderEnv(
         api_key_env="OPENAI_API_KEY",
         base_url_env="OPENAI_BASE_URL",

@@ -39,6 +39,7 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 - 当前进度：`PROGRESS.md`
 - 验收证据：`docs/evidence/registry.json`（先看 `durability_status`，`partial` 不等于跨环境可复验）
 - 历史审计：`docs/progress/archive/`（只在追溯时读取，不作为当前事实来源）
+- 运行分析：`docs/analysis/`（单次 run 的全链路分析报告，按 run_id + 日期命名）
 - 前端细则：`frontend/README.md`
 - 后端细则：`backend/README.md`
 - Graph 与路由开发：`src/agent/app/graphs/ARCHITECTURE.md`（涉及 Graph、routing 或节点跳转语义时必须先读）

@@ -11,7 +11,10 @@ from typing import Any, cast
 
 from langchain_core.messages import SystemMessage
 
-from agent.app.config.png_to_shader_min import MAX_MIN_OPTIMIZATION_ITEMS
+from agent.app.config.png_to_shader_min import (
+    MAX_MIN_OPTIMIZATION_ITEMS,
+    required_shader_graph_program_compiles,
+)
 from agent.app.contracts.llm import LLMGateway
 from agent.app.contracts.shader_graph_author import (
     ShaderGraphAuthorPatch,
@@ -59,7 +62,7 @@ from shaderforge.evaluation import (
     summarize_spatial_residual,
 )
 from shaderforge.optimization import dsl_parameter_specs, replace_dsl_parameter
-from shaderforge.rendering import GraphProgramKey
+from shaderforge.rendering import GraphProgramBudgetError, GraphProgramKey
 from shaderforge.store import LocalArtifactStore
 
 SHADER_GRAPH_RENDERER_PATH = "compiled_graph_program_cache_v1"
@@ -129,13 +132,27 @@ async def evaluate_shader_graph(
         raise RuntimeError("render_budget_exhausted")
     compiled = compile_dsl_shader(document, active_block=active_block)
     key = _program_key(document, compiled)
-    prepared = await registry.prepare_graph(
-        str(state["project_id"]),
-        str(state["run_id"]),
-        key,
-        compiled.fragment_source,
-        compiled.uniform_schema,
+    max_compiles = required_shader_graph_program_compiles(
+        int(state.get("llm_budget", 0)),
+        int(state.get("refine_budget", 0)),
     )
+    try:
+        prepared = await registry.prepare_graph(
+            str(state["project_id"]),
+            str(state["run_id"]),
+            key,
+            compiled.fragment_source,
+            compiled.uniform_schema,
+            max_compiles=max_compiles,
+        )
+    except GraphProgramBudgetError:
+        return {
+            "success": False,
+            "render_count": render_count,
+            "compiled": compiled,
+            "program_key": key,
+            "error": "graph_program_budget_exhausted",
+        }
     result = await prepared.render_uniforms(
         compiled.uniform_values,
         capture_png=capture_png,
@@ -401,6 +418,31 @@ def make_shader_graph_nodes(
         document = ShaderDocument.model_validate(state["scene"])
         pending = state.get("pending_patch_summary")
         previous = state.get("current_best")
+        if (
+            isinstance(previous, ShaderGraphCandidateSnapshot)
+            and pending is None
+            and bool(state.get("refine_branch_resolved"))
+        ):
+            return {
+                "phase": "render",
+                "scene": previous.public_document(),
+                "current_best": previous,
+                "current_glsl": previous.compiled.fragment_source,
+                "current_render": previous.render,
+                "current_mae": previous.mae,
+                "current_best_mae": previous.mae,
+                "current_best_loss": previous.loss,
+                "residual_summary": previous.residual_summary,
+                "render_count": int(state.get("render_count", 0)),
+                "feature_queue": (),
+                "error": None,
+                "trace": _trace(
+                    state,
+                    "render_and_evaluate",
+                    "Refine 未产生可渲染候选，保留 current_best 且不重建参数队列。",
+                    candidate_status="no_op",
+                ),
+            }
         if isinstance(previous, ShaderGraphCandidateSnapshot) and isinstance(
             pending, dict
         ):
@@ -656,6 +698,7 @@ def make_shader_graph_nodes(
                 "phase": "refine",
                 "scene": best.public_document(),
                 "refine_count": refine_count,
+                "refine_branch_resolved": True,
                 "trace": _trace(
                     state,
                     "author_refine",
@@ -724,6 +767,7 @@ def make_shader_graph_nodes(
                 "author_model": result.model_ref,
                 "author_error": "duplicate_recent_patch",
                 "pending_patch_summary": None,
+                "refine_branch_resolved": True,
                 "trace": _trace(
                     state,
                     "author_refine",
@@ -747,6 +791,7 @@ def make_shader_graph_nodes(
                 "author_model": result.model_ref,
                 "author_error": error_code,
                 "pending_patch_summary": None,
+                "refine_branch_resolved": True,
                 "trace": _trace(
                     state,
                     "author_refine",
@@ -763,6 +808,7 @@ def make_shader_graph_nodes(
             "author_model": result.model_ref,
             "author_error": None,
             "pending_patch_summary": {**(summary or {}), "status": "pending"},
+            "refine_branch_resolved": False,
             "trace": _trace(
                 state,
                 "author_refine",

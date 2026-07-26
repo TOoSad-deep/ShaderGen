@@ -76,6 +76,7 @@ from shaderforge.rendering import (
     PREPARED_RENDERER_PATH,
     GraphProgramKey,
     GraphProgramRegistry,
+    GraphProgramRegistryError,
     PlaywrightWebGL1Renderer,
     PreparedWebGL1Renderer,
 )
@@ -178,6 +179,8 @@ class MinRendererRegistry:
         key: GraphProgramKey,
         fragment_source: str,
         uniform_schema: dict[str, Any],
+        *,
+        max_compiles: int,
     ) -> PreparedWebGL1Renderer:
         """在同一 run 内按 program key 编译或复用 ShaderGraph program."""
         run_key = (project_id, run_id)
@@ -186,9 +189,13 @@ class MinRendererRegistry:
             programs = GraphProgramRegistry(
                 self.get(project_id, run_id),
                 max_programs=4,
-                max_compiles=16,
+                max_compiles=max_compiles,
             )
             self._graph_programs[run_key] = programs
+        elif programs.max_compiles != max_compiles:
+            raise GraphProgramRegistryError(
+                "同一 run 的 ShaderGraph compile 预算发生变化。"
+            )
         prepared = cast(
             PreparedWebGL1Renderer,
             await programs.get_or_prepare(
@@ -222,7 +229,7 @@ class MinRendererRegistry:
                 "cache_hit_count": 0,
                 "cache_size": 0,
                 "max_programs": 4,
-                "max_compiles": 16,
+                "max_compiles": 0,
                 "prepare_duration_ms": 0.0,
                 "uniform_render_count": 0,
                 "uniform_render_p95_ms": 0.0,

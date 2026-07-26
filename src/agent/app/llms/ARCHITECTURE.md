@@ -9,10 +9,11 @@
 - `provider_config.py`：维护 provider 的 API key、base URL、默认地址，并把中立输出格式映射为 OpenAI-compatible `response_format`。
 - `families/qwen.py`：处理 Qwen thinking 和 `reasoning_content`。
 - `families/glm.py`、`deepseek.py`、`openai.py`：创建对应 model-family 客户端。
+- `families/kimi.py`：Kimi Code 端点仅允许 temperature=1，family 层忽略调用方温度并固定为 1；thinking effort 通过 `SHADER_GEN_KIMI_REASONING_EFFORT`（low/high/max，默认 low）下发 `reasoning_effort`。
 
 ## 边界规则
 
-- provider 只表示凭据和 base URL 来源；Qwen、GLM、DeepSeek、OpenAI 表示 model family。
+- provider 只表示凭据和 base URL 来源；Qwen、GLM、DeepSeek、OpenAI、Kimi 表示 model family。
 - LLMs 实现 `agent.app.contracts.llm`，不依赖业务 State、Prompt、Node、Graph 或后端。
 - Gateway 优先从响应 `model_name` / `model` 元数据构造 `LLMResponse.model_ref`；供应商未返回时才使用解析后的 provider 和配置模型名，并以 `model_identity_source` 区分 `response_metadata` 与 `configured_fallback`。
 - `LLMResponse.requested_model_ref` 保留调用方请求值，不能替代实际 `model_ref`；Node 的业务状态和 Candidate provenance 以实际值为准，同时保留请求值供审计。

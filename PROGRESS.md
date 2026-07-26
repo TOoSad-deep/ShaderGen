@@ -15,6 +15,8 @@
 - D072/D073 证明旧 MinScene 诊断候选空间内 strict total-loss 优于 geometry-first，并纠正生产原本即为 strict total-loss 的事实；当前 ShaderGraph 同样执行 strict total-loss，但旧实验不能外推为 ShaderGraph 质量结论。
 - D074 的 replay 契约、legacy `make_min_nodes` 实现和聚焦测试已保留；默认 `make_shader_graph_nodes` 尚未迁移 typed layer patch replay，当前产品 manifest 不包含 `private_replay_bundle`。D075 的 `budget32_supported` 只适用于两个旧 Feature 合成 fixture，D076 明确不授权当前产品预算变化。
 - acceptance 与 maturity 两份报告仍存在于来源 mvp worktree 的本地忽略目录，registry 为 `partial`；当前工作树未复制报告，不得把 registry 当作 durable 发布证据。
+- 已修复 run `362d2164-3438-4e53-b784-7104d7c269e7` 暴露的 ShaderGraph compile 预算错配：旧固定 16 无法覆盖 manual 30 轮 Refine，D077 改为按 run 推导（manual=45），意外耗尽也会收敛为稳定候选失败而非未分类 500。
+- 已修复 run `04b7b4af-2dd0-495d-9ac6-0b34f1eeca23` 暴露的 recursion 上界失真：无效 Refine 过去会重建参数队列，D078 改为复用 current best 的 no-op 过桥，high 连续失败 patch 不再重复优化或撞 85 步上限。
 
 ## 当前 active 功能
 
@@ -33,7 +35,7 @@
 
 - 项目结构重构与当前唯一 `active` 功能 F09 的关系尚未确认；公共 import、Graph ID、HTTP/Artifact 契约和 Memory 语义也尚未形成重构期冻结清单。
 - 当前 ShaderGraph 产品没有 D074 等价的私有 typed layer patch replay；legacy bundle 不能恢复或证明当前产品候选过程。
-- 当前产品缺少 durable 冻结 benchmark 与独立人工偏好门禁；生产 Qwen 小样例链路可运行，但 Initial 仍常由 scorer 判定不如 fallback。
+- 当前产品缺少 durable 冻结 benchmark 与独立人工偏好门禁；生产模型已切换为 `kimi:k3-256k`（D080），旧 Qwen 证据不外推，且 Initial 仍常由 scorer 判定不如 fallback。
 - D072/D075 报告仅为 `partial` 且候选空间已被 D070 替换，不能用于 ShaderGraph 发布或直接把 patch maturity 从 1/12 调到 32 draw。
 - `scene_mvp` 仍没有 CMA-ES、2000 draw 生产预算、优化中断/恢复和对应质量证据。
 - 服务端仍是阻塞式 API；浏览器停止等待不等于服务端取消。任务化/cancel、outbox/reaper 和多 worker 分布式锁属于后续可靠性设计。
@@ -42,16 +44,17 @@
 
 ## 当前验证基线
 
-- 2026-07-26 合并后 `make check` 通过：380 个单元测试、docs-check、LangGraph validate（1 个 Graph）和前端生产构建全部成功。
-- 全量集成测试为 15 passed、1 skipped；Node Lab 聚焦测试为 18 passed，`uv lock --check` 与 `git diff --check` 通过。scene_mvp 浏览器 E2E、全仓 Ruff 与 Mypy 未在本次合并后重跑。
+- 合并通用 Node Lab 并恢复 kimi/ShaderGraph 本地改动后 `make check` 通过：385 个单元测试、docs-check、LangGraph validate（1 个 Graph）和前端生产构建全部成功。
+- `kimi:k3-256k` 真实连通性已验证：文本、JSON mode、`max_output_tokens` 路径均正常，family 固定 temperature=1 并按 D081 默认下发 `reasoning_effort=low`。
+- 全量集成测试为 17 passed、1 skipped；全仓 Ruff、`mypy --strict src backend`（123 个源文件）、`uv lock --check` 与 `git diff --check` 通过。scene_mvp 浏览器 E2E 未在本次合并后重跑。
 
 ## 最近重要变更
 
-- 2026-07-26：向前移植 `refactor-node-lab-generic@222ea96`；恢复通用 Node Lab 内核、独立服务和新版工作台，同时保持旧 V1 Graph、专用 Adapter、manifest、benchmark 脚本与历史证据退役。
-- 2026-07-24：完成 `feature-improve@4768aa5` 与 `mvp@6d4aac6` 合并；保留 ShaderGraph 产品链路和旧 MinScene 诊断/replay 审计实现，并将冲突的 mvp ADR 编号顺延为 D072–D076。
-- 2026-07-24：ShaderGraph Author Prompt 升级 v1_2，感知阶段直接提供产品 `fallback_shader_graph`，迁移映射归入 ShaderForge typed 边界；参数优化转为跨分支 TODO。
-- 2026-07-24：按 D070 把默认产品真相源切换到有界 ShaderGraph，保持 12 节点拓扑不变，贯通 Author、typed layer patch、CandidateSnapshot、多 program cache、Backend/UI 和 final Artifact。
-- 2026-07-24：生产 `dashscope:qwen3.7-plus` 直连三个小样例与一次 Refine 成功；三例 Initial 均输给 fallback，而 Refine 高光层小幅改善。
+- 2026-07-26：按 D082 向前移植 `refactor-node-lab-generic@222ea96`；恢复通用 Node Lab 内核、独立服务和新版工作台，同时保持旧 V1 Graph、专用 Adapter、manifest、benchmark 脚本与历史证据退役。
+- 2026-07-26：按 D081 为 kimi family 增加 `reasoning_effort` 支持（`SHADER_GEN_KIMI_REASONING_EFFORT`，low/high/max，默认 low），生产 k3-256k 已以 low 真实验证。
+- 2026-07-26：按 D080 新建 kimi 独立 model family（端点仅允许 temperature=1，family 固定温度），生产默认模型切换为 `kimi:k3-256k` 并通过真实调用验证文本/JSON mode/`max_output_tokens` 路径。
+- 2026-07-26：按 D079 新增 kimi 模型 provider（`KIMI_API_KEY`/`KIMI_BASE_URL`，默认 `https://api.kimi.com/coding/v1`）；`.env.example`、`.env` 与 README 清单同步。
+- 2026-07-24：按 D078 修复无效 ShaderGraph Refine 重建参数队列导致的 GraphRecursionError，并增加 high 完整失败路径回归。
 
 ## 历史索引
 

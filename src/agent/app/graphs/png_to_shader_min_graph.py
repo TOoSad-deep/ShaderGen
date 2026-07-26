@@ -62,8 +62,8 @@ PNG_TO_SHADER_MIN_RECURSION_LIMIT = MIN_PIPELINE_CONFIG.max_recursion_limit
 # metric 的不可变 CandidateSnapshot，只在复合 loss 严格改善后替换；失败、非法或
 # 未改善的 typed layer patch 不能覆盖锚点。optimize_feature 节点名为兼容现有
 # 路由保留，内部按稳定 layer/node parameter block 优化，不代表旧 Feature。
-# 每个 run 的 recursion limit 按 LLM/Refine 预算与最多四个 feature 的合法最坏路径
-# 推导并留出框架余量；它只防御意外路由循环，不能作为正常预算停止条件。
+# 每个 run 的 recursion limit 按 LLM/Refine 预算与最多 12 个参数 block 的合法
+# 最坏路径推导并留出框架余量；它只防御意外路由循环，不能作为正常预算停止条件。
 # Renderer 正常由 finalize 关闭，Graph 外异常由 Agent Service finally 使用同一
 # registry 幂等兜底。finalize 在产品 best 冻结后可额外执行非权威 ShaderGraph
 # shadow；它不参与 scorer、render_count、current_best 或任何路由。

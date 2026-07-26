@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from langchain_core.language_models.chat_models import BaseChatModel
 
 from agent.app.contracts.llm import LLMCallOptions
-from agent.app.llms.families import deepseek, glm, openai, qwen
+from agent.app.llms.families import deepseek, glm, kimi, openai, qwen
 from agent.app.llms.provider_config import PROVIDER_NAMES
 
 MODEL_FAMILY_PREFIXES = ("qwen:", "glm:", "deepseek:", "openai:")
@@ -14,6 +14,7 @@ DEFAULT_PROVIDER_BY_FAMILY = {
     "glm": "glm",
     "deepseek": "deepseek",
     "openai": "openai",
+    "kimi": "kimi",
 }
 
 
@@ -106,6 +107,22 @@ def create_chat_model_binding(options: LLMCallOptions) -> ChatModelBinding:
                 options.response_format,
                 options.max_output_tokens,
             )
+    elif family == "kimi":
+        if options.max_output_tokens is None:
+            client = kimi.get_kimi_model(
+                model_name,
+                provider,
+                options.temperature,
+                options.response_format,
+            )
+        else:
+            client = kimi.get_kimi_model(
+                model_name,
+                provider,
+                options.temperature,
+                options.response_format,
+                options.max_output_tokens,
+            )
     else:  # pragma: no cover - _model_family 已封闭分支
         raise ValueError(f"无法识别模型系列：{model_name}。")
     return ChatModelBinding(
@@ -144,7 +161,9 @@ def _model_family(provider: str | None, model_name: str) -> str:
         return "deepseek"
     if normalized.startswith(("gpt", "o1", "o3", "o4")):
         return "openai"
-    if provider in {"glm", "deepseek", "openai"}:
+    if normalized.startswith(("k3", "kimi")):
+        return "kimi"
+    if provider in {"glm", "deepseek", "openai", "kimi"}:
         return provider
     if provider is None:
         return "openai"

@@ -45,7 +45,7 @@ uv run python scripts/run_scene_mvp_run_diagnostics.py --run-dir <run-dir> --out
 
 服务端从根目录 `.env` 读取模型、数据库、日志和 CORS 配置；前端只读取 `frontend/.env.local`。任何密钥都不得进入 `VITE_*`。
 
-`scene_mvp` 的目标和 `fast|balanced|high|manual` 预算位于 `src/agent/app/config/png_to_shader_min.yaml`。模型失败会安全回退到确定性感知 Scene；Graph recursion limit 按合法最坏路径推导。
+`scene_mvp` 的目标和 `fast|balanced|high|manual` 预算位于 `src/agent/app/config/png_to_shader_min.yaml`。模型失败会安全回退到确定性感知 Scene；Graph recursion limit 与 ShaderGraph program compile 上限均按合法最坏路径推导。
 
 服务端环境变量清单：
 
@@ -62,6 +62,9 @@ GLM_API_KEY=
 GLM_BASE_URL=
 DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=
+KIMI_API_KEY=
+KIMI_BASE_URL=
+SHADER_GEN_KIMI_REASONING_EFFORT=
 OPENAI_API_KEY=
 OPENAI_BASE_URL=
 DATABASE_URL=

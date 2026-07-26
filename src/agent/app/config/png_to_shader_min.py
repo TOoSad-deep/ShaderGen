@@ -41,6 +41,31 @@ def max_min_refine_iterations(llm_budget: int, refine_budget: int) -> int:
     return min(refine, max(0, llm - 1))
 
 
+def required_shader_graph_program_compiles(
+    llm_budget: int,
+    refine_budget: int,
+    *,
+    max_features: int = MAX_MIN_OPTIMIZATION_ITEMS,
+) -> int:
+    """推导 ShaderGraph 合法 run 的 program compile 最坏上限.
+
+    Initial 在启用模型时最多编译模型文档和感知 fallback 两个 program；
+    数值优化最多为 canvas 与每个参数 block 各编译一个 active program；
+    每轮 Refine 最多再编译一个结构候选。该上限约束编译次数而非存活
+    cache 容量，LRU 淘汰不会补充 compile 预算。
+    """
+    llm = _non_negative_int(llm_budget, "llm_budget")
+    features = _non_negative_int(max_features, "max_features")
+    if features > MAX_MIN_OPTIMIZATION_ITEMS:
+        raise ValueError(
+            f"max_features 不得超过产品参数队列上限 {MAX_MIN_OPTIMIZATION_ITEMS}。"
+        )
+    initial_programs = 2 if llm > 0 else 1
+    parameter_programs = 1 + features
+    refinements = max_min_refine_iterations(llm, refine_budget)
+    return initial_programs + parameter_programs + refinements
+
+
 def required_min_graph_steps(
     llm_budget: int,
     refine_budget: int,
@@ -278,4 +303,5 @@ __all__ = [
     "load_min_pipeline_config",
     "max_min_refine_iterations",
     "required_min_graph_steps",
+    "required_shader_graph_program_compiles",
 ]

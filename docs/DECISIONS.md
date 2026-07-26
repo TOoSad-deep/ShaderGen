@@ -43,6 +43,11 @@
 | D074 | updated | D070、D076 | 私有 replay 的安全边界保留在 legacy MinScene Builder；当前 ShaderGraph 产品尚未迁移该机制。 |
 | D075 | superseded | D076 | 12/32 maturity 只适用于旧 Feature 候选空间，不授权当前产品预算变更。 |
 | D076 | accepted | — | 停止旧 Feature 架构质量实验，并在 ShaderGraph 上重新冻结 benchmark。 |
+| D077 | accepted | — | ShaderGraph compile 上限按 run 预算推导，预算耗尽收敛为候选失败。 |
+| D078 | accepted | — | 无效 ShaderGraph Refine 走 no-op 过桥，不得重建参数队列。 |
+| D079 | updated | D080 | kimi provider 注册保留；“复用 openai family”已由 D080 改为独立 kimi family。 |
+| D080 | accepted | — | Kimi Code 端点仅允许 temperature=1，kimi 独立 family 固定温度，生产默认模型切换为 `kimi:k3-256k`。 |
+| D081 | accepted | — | kimi family 经 `SHADER_GEN_KIMI_REASONING_EFFORT` 下发 `reasoning_effort`，默认 low。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -600,7 +605,42 @@
 - 原因：旧 Feature 表达能力、Patch 空间和 Prompt 决定模型可提出的结构以及局部搜索可到达的候选；这些核心契约变化后，继续为旧方案购买真实模型调用或扩大 draw 只能生成缺乏外部有效性的过期证据。把旧结果直接迁移到新架构还会混淆版本身份，并可能基于不再存在的候选空间作出 maturity 预算决策。
 - 影响：当前分支的生产 runtime、`MAX_PATCH_CANDIDATE_DRAWS=12`、scorer、Prompt、Graph、YAML、high=`640/9/9`、manual=`1000/32/30`、`current_best` 和可运行性均不改变，也不调用真实模型。D074 的私有证据边界、配置身份门禁、draw 记账和 fail-closed 工具可以在新分支审计后选择性迁移，D075 的 `budget32_supported` 不再授权追加旧架构实验或修改新架构预算。合并后的当前产品即 D070 ShaderGraph，必须重新建立对应 benchmark 与独立人工门禁；通过前 F09 继续 `active/no-go`。
 
-## D077 - 通用 Node Lab 向前移植为独立开发工具，不恢复旧 V1 插件
+## D077 - ShaderGraph program compile 上限必须与 run 预算一致
+
+- 日期：2026-07-24
+- 决策：`GraphProgramRegistry` 的存活 cache 容量继续固定为 4，但 compile 硬上限不再固定为 16。产品按当前 run 的合法最坏候选路径推导 `I + 1 + F + R`：启用 Initial 模型时 `I=2`，否则 `I=1`；canvas 与最多 12 个参数 block 占 `1+F`；`R=min(refine_budget,max(llm_budget-1,0))` 表示每轮最多一个结构候选。该值在 run 首次 prepare 时注入并冻结，同一 run 发生预算漂移时 fail-closed。manual `1000/32/30` 的 compile 上限因此为 45。若实现缺陷仍使上限意外耗尽，ShaderGraph 节点把底层 `GraphProgramBudgetError` 转为稳定 `graph_program_budget_exhausted` 候选失败，沿现有失败/终止路径收敛，不再把未分类异常直接冒泡为 HTTP 500。
+- 原因：合并后的产品仍沿用 D069 最小纵向切片的固定 16 次 compile 上限，但 D070 已把参数队列扩大到最多 12 个 block，D062 的 manual 又允许 30 轮 Refine。合法路径最多需要 45 次 compile；实际 run `362d2164-3438-4e53-b784-7104d7c269e7` 在约 23.6 秒后于第 17 个新 program 前抛出 `GraphProgramBudgetError`，Backend 只能记录 `internal_pipeline_error` 并返回 500。固定上限与公开质量档位相互矛盾，不能靠提高全局常量或减少用户预算掩盖。
+- 影响：Graph 的 12 个节点、直接边、条件边、路由结果、终止路径和 `current_best` 严格改善边界均不改变；render/LLM/Refine 预算、scorer、Prompt、YAML 与 cache 存活容量也不改变。新增纯函数测试锁定 fast/balanced/high/manual 推导值，新增 30 轮 ShaderGraph typed Refine 集成回归，实际 compile 次数超过旧上限 16 后仍以 `bounded_mvp_complete` 正常固化 Artifact；另有聚焦测试锁定意外耗尽的稳定失败码。
+
+## D078 - 无效 ShaderGraph Refine 不得重新建立参数队列
+
+- 日期：2026-07-24
+- 决策：`author_refine` 在模型预算耗尽、typed patch 近期重复、解析失败或 apply 失败而没有可渲染候选时，显式设置 `refine_branch_resolved=true`。随后固定边 `author_refine -> materialize_shader -> render_and_evaluate` 保持不变，但 render 节点执行 no-op：复用不可变 `current_best`、不增加 render count、清空 `feature_queue`，再由既有 `decide_after_render -> optimize_base` 路径完成 no-op base 过桥。只有首次 Initial 仲裁后可以建立完整参数 block 队列；合法 Refine 候选仍真实编译渲染并严格选择。
+- 原因：原 ShaderGraph 分支只在“合法 patch 已完成真实选择”时设置 `refine_branch_resolved`。模型返回 base hash 不匹配等无效 patch 时，工作 scene 被恢复为 current best，但 pending patch 为空；render 节点因此误入 Initial 仲裁分支并再次填充全部参数 block。真实 high run `04b7b4af-2dd0-495d-9ac6-0b34f1eeca23` 在连续失败 Refine 后重复参数优化，实际节点步数超过配置公式 `9 + 2F + 6R`，最终在 85 步触发 `GraphRecursionError` 和 HTTP 500。
+- 影响：Graph 节点、直接边、条件边、路由结果、终止路径、recursion 公式、render/LLM/Refine 预算和 `current_best` 安全边界均不改变；无效 patch 仍消费已发生的模型调用和 Refine 次数，但不消费 render 或参数搜索预算。新增 high 档连续 base-mismatch patch 的完整 Graph 回归，要求模型调用达到档位上限、运行以 `bounded_mvp_complete` 结束、总节点数低于 recursion limit，且 `optimize_feature` 只执行首次参数队列的最多 12 次。
+
+## D079 - 新增 kimi 模型 provider 并复用 openai model family
+
+- 日期：2026-07-26
+- 决策：在 `src/agent/app/llms/provider_config.py` 注册 `kimi` provider，凭据和地址使用 `KIMI_API_KEY`/`KIMI_BASE_URL`，默认 base URL 为 `https://api.kimi.com/coding/v1`。`client_factory.py` 的模型系列路由把 `kimi` provider 映射到既有 openai family，不新建独立的 kimi family 模块。
+- 原因：按 D013 的 provider/model-family 分层，新增供应商只需扩展 provider 层；Kimi Code API 兼容 OpenAI chat completions 协议，且 kimi 模型不需要 Qwen/GLM 那样的 thinking 参数或特殊响应字段处理，复用 openai family 即可，新建 family 模块属于无差异重复。默认 base URL 采用用户指定的 Kimi Code 订阅端点。
+- 影响：`SHADER_GEN_MODEL_NAME` 可写为 `kimi:<model>`；`.env.example`、根 `.env` 和 `README.md` 服务端环境变量清单同步新增 `KIMI_API_KEY`/`KIMI_BASE_URL`；新增 2 个单元测试锁定 kimi env 默认值读取和 `kimi:` ref 到 openai family 的路由。Graph 拓扑、Prompt、预算、scorer 与质量门禁均不改变；默认模型仍为 `dashscope:qwen3.7-plus`，本次未执行带密钥的真实模型调用。
+
+## D080 - kimi 独立 model family 固定 temperature=1，生产默认模型切换到 k3-256k
+
+- 日期：2026-07-26
+- 决策：新增 `src/agent/app/llms/families/kimi.py` 独立 model family，取代 D079 的“复用 openai family”。Kimi Code 端点（`https://api.kimi.com/coding/v1`）对 `k3`/`k3-256k` 只允许 temperature=1，family 层忽略调用方温度并固定下发 1；模型名 `k3*`/`kimi*` 前缀和 `kimi` provider 均路由到该 family，family 默认 provider 为 `kimi`。用户已在根 `.env` 把 `SHADER_GEN_MODEL_NAME` 切换为 `kimi:k3-256k` 并填入真实 `KIMI_API_KEY`。
+- 原因：D079 基于“无差异兼容”的判断只经离线推导；首次真实连通性验证证明 `k3-256k` 对 temperature=0 返回 400（`only 1 is allowed for this model`），而生产结构化角色按既有决策统一使用 temperature=0，复用 openai family 会使所有生产调用失败。按 D013 的 provider/model-family 分层，端点级参数限制属于 family 兼容差异，应建独立 family 而不是在 openai family 内加 provider 分支。同一验证确认该端点接受 `response_format=json_object` 和 `max_completion_tokens`，JSON mode 与 `max_output_tokens` 路径无需额外适配。
+- 影响：生产模型从 `dashscope:qwen3.7-plus` 切换为 `kimi:k3-256k`；结构化角色失去 temperature=0 的确定性语义（端点强制 1），这是切换的固有代价，不通过伪造参数掩盖。Graph 拓扑、Prompt、预算、scorer 与质量门禁均不改变；`.env.example` 默认模型仍为 `dashscope:qwen3.7-plus`。既有 Qwen 质量证据不得外推到 k3-256k，按 D076 需在新模型上重新建立 benchmark 证据。单元测试锁定 family 温度固定、env 默认值和 `kimi:`/裸模型名两条路由；已通过真实调用验证文本、JSON mode 和 `max_output_tokens` 路径。
+
+## D081 - kimi thinking effort 经环境变量下发，默认 low
+
+- 日期：2026-07-26
+- 决策：`families/kimi.py` 新增 `reasoning_effort` 支持，取值 `low/high/max`，由 `SHADER_GEN_KIMI_REASONING_EFFORT` 环境变量控制，默认 `low`；非法值在客户端侧 fail-fast。`.env.example`、根 `.env` 和 `README.md` 清单同步新增该变量。
+- 原因：真实行为实验证明 Kimi Code 端点接受并执行 OpenAI 兼容的 `reasoning_effort` 参数（同一问题 reasoning tokens：缺省 70、low 56、max 221），但端点对非法值静默忽略，所以必须在 family 层校验。用户要求先把生产 thinking 固定为 low；中立 `thinking` 契约只有 default/on/off 三态，装不下 low/high/max，暂不经 `LLMCallOptions` 暴露，保持 env 单点控制。
+- 影响：生产 `kimi:k3-256k` 调用默认以 `reasoning_effort=low` 运行；Graph 拓扑、Prompt、预算、scorer 与质量门禁均不改变，D080 的温度固定不变。单元测试锁定默认 low、env/参数覆盖和非法值校验；已通过生产路径真实调用确认 effort 随客户端下发。未来如需 node 级 effort 控制，须先扩展中立 thinking 契约再接入 family。
+
+## D082 - 通用 Node Lab 向前移植为独立开发工具，不恢复旧 V1 插件
 
 - 日期：2026-07-26
 - 决策：将 `origin/codex/refactor-node-lab-generic@222ea96` 的 Pipeline 无关 `nodelab` 内核、独立 `nodelab_service`、受信任 Application factory 和 `/lab` 工作台向前移植到当前 `main`。独立服务默认创建空安全 Application，产品 Backend 不注册 `/api/lab/v1/*`。冲突中继续采用当前 `main` 对旧 PNG-to-Shader V1 Graph、Agent Adapter、benchmark manifest、脚本与专用测试的删除结果。
