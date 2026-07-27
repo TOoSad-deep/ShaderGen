@@ -131,13 +131,19 @@ export function MinRunLivePanel({
           {vm.failure.stopReasonLabel ? `（${vm.failure.stopReasonLabel}）` : ""}
         </p>
       ) : null}
-      {vm.initialAuthorSourceLabel ? (
+      {vm.initialAuthorSourceLabel || vm.initialSelectionSourceLabel ? (
         <p className="min-live-basis">
-          Initial Author 输出来源：{vm.initialAuthorSourceLabel}
+          {vm.initialAuthorSourceLabel
+            ? `Initial Author 输出来源：${vm.initialAuthorSourceLabel}`
+            : ""}
+          {vm.initialAuthorSourceLabel && vm.initialSelectionSourceLabel ? "；" : ""}
+          {vm.initialSelectionSourceLabel
+            ? `首轮 current_best 选择：${vm.initialSelectionSourceLabel}`
+            : ""}
           {vm.refineCount ? `；本 run 记录 ${vm.refineCount} 次模型修订` : ""}
-          。该字段不代表最终 current_best provenance；候选基于参考图约束生成并经真实
-          渲染/评分选择，最终 GLSL 与 Render 来自冻结 current_best 的 typed
-          ShaderGraph 编译产物。
+          。以上字段只证明 Initial 阶段，不代表最终 current_best provenance；后续候选
+          仍须经真实渲染与评分严格改善，最终 GLSL 与 Render 来自冻结 current_best 的
+          typed ShaderGraph 编译产物。
         </p>
       ) : null}
 
@@ -158,6 +164,7 @@ export function MinRunLivePanel({
                 <span className="node-meta">
                   {stage.state === "completed" ? (
                     <>
+                      <span className="visually-hidden">已完成，</span>
                       {formatMs(stage.lastDurationMs)}
                       {stage.lastElapsedMs !== null ? (
                         <span className="node-cumulative">

@@ -176,6 +176,7 @@ frontend/vite.config.d.ts
 output/benchmarks/
 output/node-lab/
 output/png-to-shader/
+output/png-to-shader-shadow/
 output/playwright/*.log
 output/playwright/*.snapshot.txt
 

@@ -14,7 +14,13 @@ import {
   type ShaderApiFailure,
   type ShaderResponse,
 } from "./api/shader";
-import { isTerminalRunStatus, nextPollDelayMs } from "./runStages";
+import {
+  isAuthoritativeRunFailure,
+  isTerminalRunStatus,
+  mergeProgressEvents,
+  nextPollDelayMs,
+  PROGRESS_REQUEST_TIMEOUT_MS,
+} from "./runStages";
 import { FailureDetails } from "./components/FailureDetails";
 import { MinRunLivePanel } from "./components/MinRunLivePanel";
 import { SceneMvpSummary } from "./components/SceneMvpSummary";
@@ -49,7 +55,6 @@ interface RunObserver {
   request: AbortController | null;
 }
 
-const PROGRESS_REQUEST_TIMEOUT_MS = 10_000;
 const PROGRESS_OBSERVATION_GRACE_MS = 5 * 60 * 1000;
 
 const DEFAULT_REQUEST_TIMEOUT_MS: Record<QualityPreset, number> = {
@@ -192,14 +197,9 @@ export function App() {
       lastSeq = Math.max(lastSeq, data.latest_seq ?? 0);
       setLiveRun((current) => {
         const base = current?.runId === runId ? current.events : [];
-        const seen = new Set(base.map((event) => event.seq));
-        const mergedEvents = [
-          ...base,
-          ...data.events.filter((event) => !seen.has(event.seq)),
-        ].sort((left, right) => left.seq - right.seq);
         return {
           runId,
-          events: mergedEvents,
+          events: mergeProgressEvents(base, data.events),
           snapshot: data.snapshot ?? current?.snapshot ?? null,
           status: data.status,
           startedAt: data.started_at ?? current?.startedAt ?? null,
@@ -278,16 +278,17 @@ export function App() {
       } else if (active.stopKind !== "unmount") {
         if (reason instanceof ShaderApiError) {
           setApiFailure(reason.failure);
-          // 只有明确且不可重试的 4xx 请求拒绝才视为确定失败；
-          // 代理 5xx/超时仍可能对应一个正在服务端执行的 run。
-          definitiveFailure =
-            reason.failure.status >= 400 &&
-            reason.failure.status < 500 &&
-            ![408, 425, 429].includes(reason.failure.status) &&
-            reason.failure.retryable !== true;
+          // 只有匹配本次 run_id 且带稳定 code/stage 的应用错误才是权威失败；
+          // 代理 4xx/5xx 或超时仍可能对应一个正在服务端执行的 run。
+          definitiveFailure = isAuthoritativeRunFailure(reason.failure, runId);
           if (!definitiveFailure) {
             setProgressNotice(
               "生成响应失败，但服务端运行状态尚未确认；下方进度会继续观察。",
+            );
+          } else {
+            setProgressNotice("");
+            setLiveRun((current) =>
+              current?.runId === runId ? { ...current, status: "failed" } : current,
             );
           }
         }

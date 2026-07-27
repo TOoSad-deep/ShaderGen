@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import asdict, dataclass, is_dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal, Protocol, cast
 from uuid import UUID
 
 from backend.app.schemas.shader import (
@@ -44,6 +44,21 @@ class ShaderGenerationCommand:
     started_at: float
 
 
+class ProductionShadowSubmitter(Protocol):
+    """生成用例依赖的最小非阻塞 shadow 提交边界."""
+
+    def submit(
+        self,
+        *,
+        project_id: str,
+        parent_run_id: UUID | str,
+        image: bytes,
+        content_type: str,
+        instruction: str,
+    ) -> dict[str, Any]:
+        """提交一次非权威 shadow；实现不得等待队列容量."""
+
+
 @dataclass(frozen=True)
 class ShaderGenerationDependencies:
     """由 Backend 应用生命周期注入的生成用例依赖."""
@@ -52,6 +67,7 @@ class ShaderGenerationDependencies:
     min_service: Any | None
     locks: ProjectLockRegistry
     progress: RunProgressRegistry | None = None
+    production_shadow: ProductionShadowSubmitter | None = None
 
 
 class ShaderGenerationUseCaseError(RuntimeError):
@@ -459,6 +475,37 @@ async def execute_shader_generation(
             retryable=False,
             stop_reason=str(getattr(result, "stop_reason", "unknown")),
         ) from exc
+
+    # 只有权威 shader_graph_v1 已成功且公开响应契约已完整构造后才允许排队。
+    # submit 是同步 put_nowait；此处已离开 project lock，shadow 永不阻塞产品路径。
+    if dependencies.production_shadow is not None:
+        try:
+            shadow_submission = dependencies.production_shadow.submit(
+                project_id=str(project_id),
+                parent_run_id=run_id,
+                image=command.image,
+                content_type=command.content_type,
+                instruction=command.instruction,
+            )
+            if isinstance(shadow_submission, dict):
+                logger.info(
+                    "shader.shadow.submission parent_run_id=%s project_id=%s "
+                    "status=%s reason=%s attempt_id=%s bucket=%s",
+                    run_id,
+                    project_id,
+                    shadow_submission.get("status"),
+                    shadow_submission.get("reason"),
+                    shadow_submission.get("attempt_id"),
+                    shadow_submission.get("bucket"),
+                )
+        except Exception as exc:
+            logger.error(
+                "shader.shadow.submission_failed parent_run_id=%s project_id=%s "
+                "error_type=%s",
+                run_id,
+                project_id,
+                type(exc).__name__,
+            )
 
     result_summary = {
         "generation_mode": GENERATION_MODE,

@@ -89,6 +89,7 @@ ARM_IDS: tuple[ArmId, ArmId] = (ARM_A, ARM_B)
 
 def _safe_compile_diagnostics(compile_result: Any) -> dict[str, object]:
     """把 Renderer 诊断收敛为不含原始日志/message/GLSL 的摘要."""
+
     def log_hash(value: str) -> str | None:
         return sha256(value.encode("utf-8")).hexdigest() if value else None
 
@@ -106,6 +107,8 @@ def _safe_compile_diagnostics(compile_result: Any) -> dict[str, object]:
             if item.severity == "error"
         ][:12],
     }
+
+
 MAX_WORK_SIDE = 256
 MAX_CANVAS_SIDE = WEBGL1_STATIC_NO_TEXTURE_V1.max_long_side
 
@@ -537,29 +540,30 @@ class LayerPlanGlslShadowRunner:
         for arm_id in config.arm_order:
             arm = arms[arm_id]
             if arm_id == ARM_B:
-                layer_plan = await self._ensure_layer_plan(
+                layer_plan = await self.execute_layerplan_direct_arm(
                     arm,
-                    sequence=next(sequence_counter),
+                    next_sequence=lambda: next(sequence_counter),
                     reference_image=reference_image,
                     content_type=content_type,
                     instruction=instruction,
+                    canvas_width=canvas_width,
+                    canvas_height=canvas_height,
+                    target_rgb=target_rgb,
+                    background=background,
                 )
-                if layer_plan is None:
-                    arm.inconclusive_code = "layer_plan_generation_failed"
-                    continue
-                arm.layer_plan_sha256 = layer_plan.plan_sha256
-            await self._run_arm(
-                arm,
-                next_sequence=lambda: next(sequence_counter),
-                layer_plan=layer_plan if arm_id == ARM_B else None,
-                reference_image=reference_image,
-                content_type=content_type,
-                instruction=instruction,
-                canvas_width=canvas_width,
-                canvas_height=canvas_height,
-                target_rgb=target_rgb,
-                background=background,
-            )
+            else:
+                await self._run_arm(
+                    arm,
+                    next_sequence=lambda: next(sequence_counter),
+                    layer_plan=None,
+                    reference_image=reference_image,
+                    content_type=content_type,
+                    instruction=instruction,
+                    canvas_width=canvas_width,
+                    canvas_height=canvas_height,
+                    target_rgb=target_rgb,
+                    background=background,
+                )
 
         by_id = {arm.arm_id: arm for arm in arms.values()}
         status: Literal["ok", "inconclusive"] = (
@@ -583,6 +587,51 @@ class LayerPlanGlslShadowRunner:
             status=status,
             background=background,
         )
+
+    async def execute_layerplan_direct_arm(
+        self,
+        arm: ArmResult,
+        *,
+        next_sequence: Callable[[], int],
+        reference_image: bytes,
+        content_type: str,
+        instruction: str,
+        canvas_width: int,
+        canvas_height: int,
+        target_rgb: np.ndarray,
+        background: tuple[float, float, float],
+    ) -> LayerPlanV1 | None:
+        """执行共享的 LayerPlan + direct Initial/Refine 单引擎内核.
+
+        shadow Arm B 与生产 direct attempt runner 必须共同经过此入口，避免
+        safety、receipt、metric、预算、program cache 或 incumbent 选择语义
+        形成两份实现。调用者必须为每个 attempt 提供全新的 ``ArmResult``，
+        从而隔离 ledger、cache 与 ``current_best``。
+        """
+        layer_plan = await self._ensure_layer_plan(
+            arm,
+            sequence=next_sequence(),
+            reference_image=reference_image,
+            content_type=content_type,
+            instruction=instruction,
+        )
+        if layer_plan is None:
+            arm.inconclusive_code = "layer_plan_generation_failed"
+            return None
+        arm.layer_plan_sha256 = layer_plan.plan_sha256
+        await self._run_arm(
+            arm,
+            next_sequence=next_sequence,
+            layer_plan=layer_plan,
+            reference_image=reference_image,
+            content_type=content_type,
+            instruction=instruction,
+            canvas_width=canvas_width,
+            canvas_height=canvas_height,
+            target_rgb=target_rgb,
+            background=background,
+        )
+        return layer_plan
 
     async def _ensure_layer_plan(
         self,

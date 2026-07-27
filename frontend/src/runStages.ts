@@ -7,6 +7,7 @@
 import type {
   MinRunProgressEvent,
   MinRunProgressSnapshot,
+  ShaderApiFailure,
 } from "./api/shader";
 
 // 与 src/agent/app/graphs/png_to_shader_min_graph.py 的 12 个节点一一对应。
@@ -57,21 +58,35 @@ export function stopReasonLabel(reason: string | null | undefined): string | nul
   return STOP_REASON_LABELS[reason] ?? reason;
 }
 
-// trace 白名单 author_source 只说明结构化候选的来源，不是 GLSL 生成依据。
-const CANDIDATE_SOURCE_LABELS: Record<string, string> = {
+// trace 白名单 author_source 只说明 Initial ShaderDocument 的来源，不是最终
+// current_best provenance；render_and_evaluate 的 selected_source 也只证明首轮选择。
+const AUTHOR_SOURCE_LABELS: Record<string, string> = {
   model: "模型生成",
   perception_fallback: "感知兜底 ShaderGraph",
 };
 
 export function initialAuthorSourceLabel(source: string | null | undefined): string | null {
   if (!source) return null;
-  return CANDIDATE_SOURCE_LABELS[source] ?? source;
+  return AUTHOR_SOURCE_LABELS[source] ?? source;
+}
+
+const INITIAL_SELECTION_SOURCE_LABELS: Record<string, string> = {
+  model_or_fallback: "Author 输出候选",
+  perception_fallback: "感知兜底候选",
+};
+
+export function initialSelectionSourceLabel(
+  source: string | null | undefined,
+): string | null {
+  if (!source) return null;
+  return INITIAL_SELECTION_SOURCE_LABELS[source] ?? source;
 }
 
 // 进度轮询策略：失败后 capped backoff 重连，不永久停止；
 // 停止条件包括终态、服务端明确失败、新 run 或页面卸载（见 App.tsx）。
 export const POLL_BASE_DELAY_MS = 1200;
 export const POLL_MAX_DELAY_MS = 10_000;
+export const PROGRESS_REQUEST_TIMEOUT_MS = 10_000;
 
 export function nextPollDelayMs(consecutiveFailures: number): number {
   if (consecutiveFailures <= 0) return POLL_BASE_DELAY_MS;
@@ -81,6 +96,42 @@ export function nextPollDelayMs(consecutiveFailures: number): number {
 
 export function isTerminalRunStatus(status: string): boolean {
   return status === "succeeded" || status === "failed";
+}
+
+/** 只有带匹配 run_id 的稳定应用错误才证明本次 run 已明确失败。 */
+export function isAuthoritativeRunFailure(
+  failure: ShaderApiFailure,
+  expectedRunId: string,
+): boolean {
+  const stableApplicationFailure =
+    typeof failure.code === "string" &&
+    failure.code.length > 0 &&
+    typeof failure.stage === "string" &&
+    failure.stage.length > 0;
+  // FastAPI 在 multipart/form 本身校验失败时无法可靠回显客户端 form run_id，
+  // 但稳定的 request_validation/client_validation 明确发生在 run 创建之前。
+  const definitivePreRunValidation =
+    failure.status === 422 &&
+    failure.retryable === false &&
+    failure.code === "client_validation" &&
+    failure.stage === "request_validation";
+  return (
+    stableApplicationFailure &&
+    (failure.runId === expectedRunId || definitivePreRunValidation)
+  );
+}
+
+/** 增量轮询在重试或兼容响应中可能重复事件；按 seq 去重并稳定排序。 */
+export function mergeProgressEvents(
+  current: MinRunProgressEvent[],
+  incoming: MinRunProgressEvent[],
+): MinRunProgressEvent[] {
+  const bySeq = new Map<number, MinRunProgressEvent>();
+  for (const event of current) bySeq.set(event.seq, event);
+  for (const event of incoming) {
+    if (!bySeq.has(event.seq)) bySeq.set(event.seq, event);
+  }
+  return [...bySeq.values()].sort((left, right) => left.seq - right.seq);
 }
 
 export interface StageView {
@@ -154,6 +205,9 @@ export interface RunViewModel {
   /** Initial Author 输出来源；不代表最终 current_best provenance。 */
   initialAuthorSource: string | null;
   initialAuthorSourceLabel: string | null;
+  /** 首轮真实 render/evaluate 的 selected_source；不代表后续最终 provenance。 */
+  initialSelectionSource: string | null;
+  initialSelectionSourceLabel: string | null;
   refineCount: number | null;
   quality: RunQualityView;
   budgets: BudgetView[];
@@ -262,6 +316,7 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
   const byId = new Map(stages.map((stage) => [stage.id, stage]));
 
   let initialAuthorSource: string | null = null;
+  let initialSelectionSource: string | null = null;
   let failure: RunFailureView | null = null;
   let unknownEventCount = 0;
 
@@ -308,6 +363,18 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
         }
       }
     }
+    if (
+      event.node === "render_and_evaluate" &&
+      !initialSelectionSource &&
+      Array.isArray(event.trace)
+    ) {
+      for (const item of event.trace) {
+        if (typeof item.selected_source === "string" && item.selected_source) {
+          initialSelectionSource = item.selected_source;
+          break;
+        }
+      }
+    }
     if (event.status === "failed") {
       failure = {
         stageId: stage.id,
@@ -342,7 +409,7 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
   if (terminal) {
     // 只有真实 elapsed_ms 才能称为 Graph 事件累计；缺失时保持未知。
     frozen = true;
-    elapsedLabel = "Graph 事件累计";
+    elapsedLabel = lastElapsedMs !== null ? "Graph 事件累计" : "终态耗时未知";
     elapsedSeconds = lastElapsedMs !== null ? lastElapsedMs / 1000 : null;
   } else if (startedAtSeconds !== null) {
     frozen = false;
@@ -398,6 +465,8 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
     failure,
     initialAuthorSource,
     initialAuthorSourceLabel: initialAuthorSourceLabel(initialAuthorSource),
+    initialSelectionSource,
+    initialSelectionSourceLabel: initialSelectionSourceLabel(initialSelectionSource),
     refineCount: typeof counters?.refine_count === "number" ? counters.refine_count : null,
     quality: {
       bestLoss,

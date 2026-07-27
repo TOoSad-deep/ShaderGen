@@ -6,7 +6,10 @@ import {
   formatClock,
   formatTraceDetails,
   initialAuthorSourceLabel,
+  initialSelectionSourceLabel,
+  isAuthoritativeRunFailure,
   isTerminalRunStatus,
+  mergeProgressEvents,
   MIN_GRAPH_NODES,
   nextPollDelayMs,
   nodeLabel,
@@ -61,6 +64,7 @@ describe("buildRunViewModel 空数据与状态映射", () => {
     expect(vm.nextStageLabel).toBeNull();
     expect(vm.failure).toBeNull();
     expect(vm.initialAuthorSource).toBeNull();
+    expect(vm.initialSelectionSource).toBeNull();
     expect(vm.quality.targetReached).toBeNull();
     expect(vm.renderSeq).toBeNull();
     expect(vm.timing.frozen).toBe(false);
@@ -83,7 +87,7 @@ describe("buildRunViewModel 空数据与状态映射", () => {
     expect(vm.statusHint).toContain("没有失败节点");
     // 终态即使无事件也必须冻结，不能继续走字。
     expect(vm.timing.frozen).toBe(true);
-    expect(vm.timing.elapsedLabel).toBe("Graph 事件累计");
+    expect(vm.timing.elapsedLabel).toBe("终态耗时未知");
     expect(vm.timing.elapsedSeconds).toBeNull();
   });
 });
@@ -279,6 +283,32 @@ describe("buildRunViewModel Initial Author 输出来源与 current_best", () => 
     expect(refineOnly.initialAuthorSource).toBeNull();
   });
 
+  it("区分 Initial Author 输出与首轮 current_best 选择，不冒充最终 provenance", () => {
+    const vm = build({
+      events: [
+        event({
+          seq: 1,
+          node: "author_initial",
+          trace: [{ author_source: "model", status: "completed" }],
+        }),
+        event({
+          seq: 2,
+          node: "render_and_evaluate",
+          trace: [
+            {
+              selected_source: "perception_fallback",
+              status: "completed",
+              message: "selected=perception_fallback",
+            },
+          ],
+        }),
+      ],
+    });
+    expect(vm.initialAuthorSourceLabel).toBe("模型生成");
+    expect(vm.initialSelectionSource).toBe("perception_fallback");
+    expect(vm.initialSelectionSourceLabel).toBe("感知兜底候选");
+  });
+
   it("质量进度只由真实 best/target 推导，缺 target 不给结论", () => {
     const reached = build({
       snapshot: snapshot({
@@ -356,6 +386,8 @@ describe("标签与格式化辅助", () => {
     expect(stopReasonLabel(null)).toBeNull();
     expect(initialAuthorSourceLabel("model")).toBe("模型生成");
     expect(initialAuthorSourceLabel(undefined)).toBeNull();
+    expect(initialSelectionSourceLabel("model_or_fallback")).toBe("Author 输出候选");
+    expect(initialSelectionSourceLabel(undefined)).toBeNull();
   });
 
   it("formatClock 与 formatTraceDetails 稳定输出", () => {
@@ -389,5 +421,54 @@ describe("轮询策略", () => {
     expect(isTerminalRunStatus("running")).toBe(false);
     expect(isTerminalRunStatus("pending")).toBe(false);
     expect(isTerminalRunStatus("canceled")).toBe(false);
+  });
+
+  it("只有匹配 run_id 且带稳定 code/stage 的应用错误才停止观察", () => {
+    expect(
+      isAuthoritativeRunFailure(
+        {
+          status: 409,
+          runId: "run-1",
+          code: "project_busy",
+          stage: "project_lock",
+          retryable: true,
+        },
+        "run-1",
+      ),
+    ).toBe(true);
+    expect(
+      isAuthoritativeRunFailure({ status: 502 }, "run-1"),
+    ).toBe(false);
+    expect(
+      isAuthoritativeRunFailure(
+        { status: 400, runId: "other", code: "client_validation", stage: "request" },
+        "run-1",
+      ),
+    ).toBe(false);
+    expect(
+      isAuthoritativeRunFailure(
+        {
+          status: 422,
+          runId: "server-validation-id",
+          code: "client_validation",
+          stage: "request_validation",
+          retryable: false,
+        },
+        "run-1",
+      ),
+    ).toBe(true);
+  });
+
+  it("重复或乱序增量事件按 seq 去重排序", () => {
+    const merged = mergeProgressEvents(
+      [event({ seq: 3, node: "author_initial" })],
+      [
+        event({ seq: 2, node: "perceive_target" }),
+        event({ seq: 3, node: "author_initial", status: "failed" }),
+        event({ seq: 1, node: "initialize_run" }),
+      ],
+    );
+    expect(merged.map((item) => item.seq)).toEqual([1, 2, 3]);
+    expect(merged[2].status).toBe("completed");
   });
 });

@@ -160,6 +160,11 @@ async def generate_shader(
         min_service=service,
         locks=locks,
         progress=_progress_registry(request),
+        production_shadow=getattr(
+            request.app.state,
+            "production_shadow_coordinator",
+            None,
+        ),
     )
     try:
         return await execute_shader_generation(command, dependencies)

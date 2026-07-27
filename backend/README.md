@@ -12,6 +12,20 @@ Backend 负责 FastAPI HTTP 边界、应用生命周期、过程账本和 `scene
 - `GET /api/shader/runs/{run_id}/artifacts/{artifact_name}` 只允许 `final-render`、`metrics`、`manifest`。
 - Generate 响应的 `min_pipeline.scene` 当前返回权威 `shader_graph_v1` 文档，`renderer_path=compiled_graph_program_cache_v1`；`shader_graph_shadow` 仅保留为旧 run/显式 legacy Builder 的可选兼容摘要。
 - 旧 V1 Artifact fallback 和 `DELETE /projects/{project_id}/memory` 已删除。
+- Backend 启动时从 `SHADERGEN_ENGINE_POLICY_PATH` 严格解析并冻结
+  `ShaderEnginePolicyV1`；未配置时保持 `disabled`/`shader_graph_v1`。
+  `SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 对新请求具有最高优先级。该配置当前只建立
+  server-side 灰度边界，HTTP、header、query、instruction 与前端均不能选择 engine。
+  `production_shadow` 命中稳定 project 桶后，只有在权威 ShaderGraph 响应契约完成且
+  已离开项目锁时才以 `put_nowait` 提交独立 direct child attempt；有界 queue、固定
+  worker、attempt timeout 与 shutdown drain/cancel 均不能拖慢或改变产品响应。
+  详细 LayerPlan/ProgramSpec/render/metric 只原子写入
+  `output/png-to-shader-shadow/<parent_run_id>/<attempt_id>/` 的 0700/0600 私有
+  write-once 目录，递归 verifier 拒绝 symlink、额外文件、改名与篡改；该目录不注册
+  到公开 Artifact API。默认 `disabled` 不启动 worker、不构造模型/Renderer、不落目录。
+  当前没有接入 canary/direct-default authority。当前 policy schema 要求
+  `direct_default` 的 `canary_percent` 及其授权上限均为 `100`；保留桶需要未来版本
+  另行定义和实现，不能由现有字段暗示。
 
 ## 分层
 

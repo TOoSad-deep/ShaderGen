@@ -20,6 +20,10 @@ from backend.app.core.settings import BackendSettings
 from backend.app.database.session import close_database_pool, open_database_pool
 from backend.app.middleware.request_logging import build_request_logging_middleware
 from backend.app.schemas.shader import ShaderGenerationErrorDetail
+from backend.app.services.production_shadow import (
+    ProductionShadowConfig,
+    ProductionShadowCoordinator,
+)
 from backend.app.services.run_progress import RunProgressRegistry
 from backend.app.services.shader import (
     ProjectLockRegistry,
@@ -35,6 +39,7 @@ def _clear_runtime_state(app: FastAPI) -> None:
     app.state.png_to_shader_min_service = None
     app.state.project_locks = None
     app.state.run_progress = None
+    app.state.production_shadow_coordinator = None
 
 
 def build_lifespan(settings: BackendSettings) -> Lifespan[FastAPI]:
@@ -46,6 +51,7 @@ def build_lifespan(settings: BackendSettings) -> Lifespan[FastAPI]:
         app.state.project_locks = ProjectLockRegistry()
         app.state.run_progress = RunProgressRegistry()
         app.state.png_to_shader_min_service = None
+        app.state.production_shadow_coordinator = None
         app.state.db_pool = None
         try:
             async with AsyncExitStack() as cleanup:
@@ -61,6 +67,28 @@ def build_lifespan(settings: BackendSettings) -> Lifespan[FastAPI]:
                     close_png_to_shader_min_service,
                     app.state.png_to_shader_min_service,
                 )
+
+                shadow = ProductionShadowCoordinator(
+                    policy=settings.engine_policy,
+                    resolution=settings.engine_policy_resolution,
+                    config=ProductionShadowConfig(
+                        output_root=settings.production_shadow_artifact_root,
+                        queue_capacity=settings.production_shadow_queue_capacity,
+                        worker_count=settings.production_shadow_worker_count,
+                        attempt_timeout_seconds=(
+                            settings.production_shadow_attempt_timeout_seconds
+                        ),
+                        close_timeout_seconds=(
+                            settings.production_shadow_close_timeout_seconds
+                        ),
+                        resource_close_timeout_seconds=(
+                            settings.production_shadow_resource_close_timeout_seconds
+                        ),
+                    ),
+                )
+                app.state.production_shadow_coordinator = shadow
+                cleanup.push_async_callback(shadow.close)
+                await shadow.start()
                 yield
         finally:
             logger.info("backend.shutdown")
