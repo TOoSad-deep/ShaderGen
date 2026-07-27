@@ -52,4 +52,5 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 - `src/nodelab_service/`：独立 Node Lab FastAPI transport；不得由产品 Backend 隐式注册。
 - `backend/`：FastAPI 后端。Route 放 `backend/app/api/routes/`，编排逻辑放 `backend/app/services/`，手写 SQL 放 `backend/sql/`。
 - `frontend/`：Vite/React 前端。源码在 `frontend/src/`。
+- `benchmarks/`：版本化 benchmark/shadow 协议与固定样本；输入、instruction、预算和 gate 必须以内容 hash 冻结，运行产物不得写入此目录。
 - `tests/`：Python 测试。单元测试放 `tests/unit_tests/`，集成测试放 `tests/integration_tests/`。

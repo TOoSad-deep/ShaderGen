@@ -1,0 +1,27 @@
+# LayerPlan/direct GLSL shadow A/B 预声明 gate（D086）。
+# 本文件必须在查看任何真实模型结果前冻结；suite 报告还必须锚定本文件 SHA。
+schema_version: layerplan_glsl_shadow_gate_v1
+experiment_id: layerplan_glsl_shadow_ab_v1
+run_classification: independent_experiment
+report_schema_version: layerplan_glsl_shadow_ab_report_v1
+metric_version: min_scene_composite_v3
+frozen_at: 2026-07-27
+manifest_sha256: 419e29e49b806bb3bae6a67a1dbd20c78a58faa2bf19d30e0a63b3ac0ac1a16a
+config_fingerprints:
+  AB: 38c58d2bbfa5b8c059d888674a0e177d88d64e5f188d9d6b0da399882d98886c
+  BA: 0dc02fdd8c5adf9d781f0c67fbf8f9bea6fa6936846a0860af95d1a592708d51
+primary_endpoint:
+  metric: current_best_loss
+  comparison: paired_per_sample_per_round
+  improvement_margin: 0.005
+  min_improved_sample_ratio: 0.75
+order_effect:
+  rule: consistent_direction_required
+inconclusive_policy:
+  counting: inconclusive_counts_against_arm_b
+  max_inconclusive_sample_ratio: 0.25
+human_review:
+  required: true
+  min_arm_b_preference_rate: 0.5
+  tie_policy: ties_not_counted_as_b_win
+durability_requirement: durable_required_for_promotion

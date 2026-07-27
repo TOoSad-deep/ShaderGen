@@ -19,6 +19,7 @@
 - 已修复 run `362d2164-3438-4e53-b784-7104d7c269e7` 暴露的 ShaderGraph compile 预算错配：旧固定 16 无法覆盖 manual 30 轮 Refine，D077 改为按 run 推导（manual=45），意外耗尽也会收敛为稳定候选失败而非未分类 500。
 - 已修复 run `04b7b4af-2dd0-495d-9ac6-0b34f1eeca23` 暴露的 recursion 上界失真：无效 Refine 过去会重建参数队列，D078 改为复用 current best 的 no-op 过桥，high 连续失败 patch 不再重复优化或撞 85 步上限。
 - `codex/layerplan-glsl-shadow` 分支已按 D084 实现独立离线 LayerPlan/direct GLSL shadow A/B harness：`shaderforge.program_spec` 是唯一 canonical LayerPlan/ProgramSpec/哈希/attestation 真相，三类 Author 直读参考图，LayerPlan 永久 advisory；VisualAnalysis 使用独立 `plan_llm_budget/plan_ledger`，不挤占两臂相同的 direct Author 预算；候选必须通过 canonical 安全校验与真实 WebGL1 prepare/draw，才能按真实 metric 更新 arm-local `current_best`。详细证据只写显式本地私有目录（同根 staging + 原子 rename、0700/0600、`verify_shadow_run` 可复验），不进入生产 Artifact/evidence registry；生产 Graph、API、ShaderDocument/Compiler 和 FEATURE 状态均未变。Codex 复审后身份已改为事实制：`author_identity` 只记录 Gateway effective 采样身份（kimi 实际 temperature=1），缺有效身份 fail-closed；Initial/Refine/LayerPlan 哈希绑定 content_type，Refine 另绑定 current_render 与 canonical 评估上下文；显式画布在 resize 前受 Renderer 上限约束，可信装配错误收敛为安全结果，token usage 缺失保持 `null`，证据目录名必须匹配报告内容 run id。无 seed 的温度 1 A/B 只具探索性，结论必须多轮重复并做 AB/BA 交叉平衡。
+- 已按 D086 冻结并实现 LayerPlan shadow suite：新 manifest 绑定四张版本中立参考图、统一 instruction、两轮 AB/BA 顺序和共享预算；预声明 gate 绑定 manifest SHA、两种臂序的完整配置指纹、metric、配对改善阈值、顺序效应、inconclusive、人工偏好与 durable 晋升要求。suite 会顺序运行全部样本，递归复验每个单 run 与冻结输入，再按配对 `B-A`/样本中位数/顺序效应/inconclusive 计负聚合并原子写私有报告；自动通过仍保持 pending human + durable no-go。fake LLM + 真实 Chromium 的 2×2 全链已通过，当前尚未运行真实模型。
 
 ## 当前 active 功能
 
@@ -32,7 +33,7 @@
 - 保留“模型 Initial 仍输给 fallback”的负面质量事实，继续用版本中立的固定小样例验证 Prompt/搜索，不通过放宽 Schema 掩盖问题。
 - 参数优化继续评估 rotation/成组参数、typed layer patch 局部成熟和更大搜索；任何预算变化必须使用 ShaderGraph 候选空间重新建立证据。
 - 项目结构重构计划尚待确认，确认前不开始目录迁移；若未来启用 Memory，必须建立 scene_mvp 新契约、namespace 和迁移验收。
-- 用固定样例和真实模型执行 LayerPlan shadow A/B，冻结样本、顺序与预算，产出可比较但仍为私有的首轮实验报告；在获得 durable、跨环境复验与人工偏好证据前，不修改生产路径。
+- 显式执行 D086 四样本 × 两轮真实模型 A/B 并复验私有 suite 报告；在获得 durable、跨环境复验与人工偏好证据前，不修改生产路径。
 
 ## 未解决缺口
 
@@ -45,22 +46,22 @@
 - 进度注册表是单进程内存态、重启即失且无历史 run 查询：终态后前端只能展示本次会话已缓存事件，无法回放历史 run 阶段视图；后端也不提供节点开始/进行中百分比、完整 run 时长或最终 current_best provenance，前端按 D085 只展示事件级真实事实。
 - 历史 V1/Node Lab real-model 完整报告与公开 review package 已按授权随旧 `output/` 删除；registry 对应条目为 `missing`，只能审计定位。
 - Node Lab 工作台已通过 TypeScript/生产构建和 HTTP/service 单测，但当前没有与新通用空服务匹配的浏览器 E2E；旧 V1 假 API/E2E 未恢复。
-- LayerPlan shadow harness 已实现，但尚无真实模型 A/B、冻结 benchmark、durable 跨环境证据或人工偏好结论；当前只能证明契约与执行链可运行，晋升前不得影响生产候选选择、scorer、预算或 `current_best`。
+- LayerPlan shadow harness、冻结 manifest/gate、suite 调度/聚合和递归复验已实现，但尚无真实模型 A/B、durable 跨环境证据或人工偏好结论；当前只能证明契约与执行链可运行，晋升前不得影响生产候选选择、scorer、预算或 `current_best`。
 
 ## 当前验证基线
 
-- 2026-07-27 前端可观测性改动后：`make check` 全绿（535 个 Python 单测、docs-check、LangGraph validate（1 个 Graph）、21 个前端 vitest 单测、前端生产构建）；`make test-scene-mvp-ui` 在证据语义收口代码上通过（含“预计下一节点/已观察/Graph 事件累计/Initial Author 输出来源”新断言）。
+- 2026-07-27 D086 suite 实现后：`make check` 全绿（552 个 Python 单测、docs-check、LangGraph validate（1 个 Graph）、21 个前端 vitest 单测、前端生产构建）；新增 17 个 suite 单测与 1 个 fake LLM + 真实 Chromium 2×2 集成测试通过；前端可观测性 `make test-scene-mvp-ui` 基线继续通过。
 - `kimi:k3-256k` 真实连通性已验证：文本、JSON mode、`max_output_tokens` 路径均正常，family 固定 temperature=1 并按 D081 默认下发 `reasoning_effort=low`。
 - 全量集成测试为 17 passed、1 skipped；全仓 Ruff、`mypy --strict src backend`（123 个源文件）、`uv lock --check` 与 `git diff --check` 通过。
 - LayerPlan shadow 聚焦门禁：canonical ProgramSpec、三类 Author、A/B runner、receipt/timeout 共 161 个单测通过；真实 Chromium WebGL1 集成验收 3 个通过（契约形状 prepare/draw + 固定 fake LLM 全 runner 链 ×2）。审查修复后已重跑：`make check` 全绿（535 个单测、docs-check、1 个 LangGraph validate、前端生产构建），全量集成 20 passed/1 skipped，全仓 Ruff、`mypy --strict src backend`（134 个源文件）、`uv lock --check` 与 `git diff --check` 全部通过。
 
 ## 最近重要变更
 
+- 2026-07-27：按 D086 冻结并实现 LayerPlan shadow suite：四张版本中立参考图以新 manifest/hash 链进入新候选空间，两轮按 AB/BA 交叉平衡；预声明 gate 绑定 manifest、完整 config fingerprint、metric、自动阈值、人工偏好和 durable 要求。新增 fail-closed 加载器、顺序调度、配对聚合、私有递归复验、无模型单测和 fake LLM + 真实 Chromium 2×2 集成验收，生产 Graph/API/current_best 不变。
 - 2026-07-27：按 D085 完成前端运行可观测性并经多轮审计收口证据语义：新增 `frontend/src/runStages.ts` 单一可测试阶段视图模型与 vitest 单测，覆盖五态运行状态、阶段摘要、失败定位与真实计时；阶段不再标“执行中”（改为“预计下一节点（未确认开始）”），12 节点标签按产品事实更新（生成 ShaderDocument/编译 ShaderGraph/node/layer 参数块优化），`author_source` 只称“Initial Author 输出来源”且不代表最终 current_best provenance，`render_seq` 为实时帧刷新序号，缺失预算/Graph 耗时显示“—”。轮询保持 single-flight，对失败/连续 pending capped backoff，并在结算后有界观察；`make check` 接入前端单测，E2E 断言同步，生产 Graph/API/事件契约不变。
 - 2026-07-27：按 Codex 审查关闭安全与证据缺口：spec hash 绑定完整 author/repair 身份；receipt 拆成 Renderer 私有 signer 与公共 verify-only verifier，并强制绑定具体 Spec/PNG/runtime；ProgramSpec 拒绝宏循环绕过且 for 循环上限为 1024；renderer prepare/draw/legacy render 有界超时并安全重置；显式画布在 resize 前受限，可信装配异常收敛为安全 Author 结果，未知 token usage 不再伪装为 0，私有 evidence 拒绝路径穿越、任意 symlink 与 run 目录改名。生产 Graph/API/current_best 不变。
 - 2026-07-27：按 D084 实现独立 LayerPlan/direct GLSL shadow A/B harness；修复真实 renderer 兼容声明契约与 VisualAnalysis 预算污染；并按 Codex 独立审查收口身份/证据高风险项（effective 调用身份 fail-closed、content_type/current_render/评估上下文输入绑定、私有证据原子写入与 `verify_shadow_run`、探索性措辞冻结）。生产 Graph/API/current_best 保持不变。
 - 2026-07-26：按审阅意见修订 D083 与 LayerPlan 设计：移除不予验收的首稿，新增 `docs/superpowers/specs/2026-07-26-layerplan-glsl-shadow-design.md`；生产 Graph、代码、API 与 FEATURE 状态不变。
-- 2026-07-26：按 D082 向前移植 `refactor-node-lab-generic@222ea96`；恢复通用 Node Lab 内核、独立服务和新版工作台，同时保持旧 V1 Graph、专用 Adapter、manifest、benchmark 脚本与历史证据退役。
 
 ## 历史索引
 

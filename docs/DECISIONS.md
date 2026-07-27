@@ -50,6 +50,8 @@
 | D081 | accepted | — | kimi family 经 `SHADER_GEN_KIMI_REASONING_EFFORT` 下发 `reasoning_effort`，默认 low。 |
 | D083 | accepted | — | LayerPlan + 直接 GLSL Author 仅以非权威 shadow 实验接入，第一阶段只交付修订版设计基线；晋升新 ADR 方可取代 D070 执行表示部分。 |
 | D084 | accepted | — | 实现隔离的 LayerPlan/direct GLSL shadow A/B harness；不接入生产 Graph、API 或 `current_best`。 |
+| D085 | accepted | — | 前端运行可观测性只展示后端可证明的阶段事实，不伪造 active node、完整时长或最终 provenance。 |
+| D086 | accepted | — | 冻结 LayerPlan shadow suite 的四样本、AB/BA 调度、预算指纹与预声明 gate；真实运行前 fail-closed 复验。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -671,3 +673,11 @@
 - 决策：scene_mvp 运行面板的状态推导收敛到 `frontend/src/runStages.ts` 的纯函数 `buildRunViewModel`。它把 `/api/shader/runs/{run_id}/progress` 的白名单事件与快照映射为 pending/running/succeeded/failed/unknown 运行状态、12 节点的已完成/失败/待执行事实、预计下一节点、Graph 事件累计、trace 摘要、路由与停止原因、失败定位、预算和 current_best 质量进度。事件只在节点完成时发出，因此 `next_action` 或数组顺序只能展示为“预计下一节点（未确认开始）”，不得标成执行中或以 `snapshot.current_node` 冒充活动节点。`author_initial` trace 的 `author_source` 只说明 Initial Author 输出来源，不代表最终 current_best provenance；候选基于参考图约束生成并经真实渲染/评分选择 current_best，最终 GLSL/Render 来自冻结 current_best 的 typed ShaderGraph 编译产物。`render_seq` 只作为实时帧刷新序号；预算 used 缺失保持未知；只有真实 `elapsed_ms` 才显示 Graph 事件累计，缺失时保持未知，不推算完整 run 结束时间。
 - 原因：旧实现把阶段、计时和标签推导散落在组件内，无法单测，还会把推测的下一节点误报为正在执行。后端不提供节点开始事件或精确百分比，前端不得制造这些事实；结构化文档的命名和 `author_source` 也不能替代参考图、真实渲染、评分与 current_best 选择链。
 - 影响：只改前端与 `make check` 接线（新增 `npm run test`，vitest）；进度轮询保持 single-flight，对失败和连续 pending 使用 capped backoff，每次 GET 有独立超时。POST 结算（含停止等待/超时）后继续有界观察，直到服务端终态、明确请求拒绝、新 run、页面卸载或观察上限。产品 Graph、Backend/API、进度事件契约、Artifact 白名单和 `current_best` 均不变。后端仍是阻塞式 API、单进程内存注册表（重启即失、无历史 run 查询），也没有节点开始事件、完整 run 时长、最终候选 provenance 或 cancel；这些缺口由文档明确保留。
+
+## D086 - 冻结 LayerPlan shadow suite 协议后才运行真实 A/B
+
+- 日期：2026-07-27
+- 决策：为 D084 的单样本 runner 新建独立 suite 协议。`benchmarks/layerplan_glsl_shadow/manifest_v1.yaml` 冻结 `solid_circle`、`ellipse_gradient`、`rimmed_disk`、`pink_gel` 四个版本中立参考像素、统一 instruction、两轮 `AB/BA` 交叉顺序与两臂共享预算；`gate_v1.yaml` 在查看结果前绑定 manifest 文件 SHA-256、两种臂序的完整 `ShadowABConfig` 指纹、`min_scene_composite_v3`、配对改善阈值、顺序效应、inconclusive 计负、人工偏好与 durable 晋升要求。加载器对未知字段、路径、instruction/reference hash、臂序、配置指纹和 gate/manifest 绑定全部 fail-closed。
+- 原因：单次无 seed、temperature=1 的 A/B 只能证明 harness 可运行，不能隔离顺序或服务端漂移；如果在看到结果后再选样本、预算、顺序或阈值，结论不可审计。旧 V1 benchmark 已退役，但其参考 PNG 是与候选表示无关的固定视觉输入；本决策只把四张像素以新路径和新 hash 链纳入 LayerPlan/direct GLSL 新候选空间，不恢复旧 manifest、runner、golden、Feature/DSL 结论或产品入口。
+- 影响：本步只交付冻结 manifest/gate、四张固定样本、严格加载器和无模型单测；真实模型调度、跨 run 聚合、suite 报告、人工盲评包与 evidence registry 登记在后续小步实现。生产 Graph、API、scorer、预算、ShaderDocument/Compiler、`current_best` 和 F09 状态不变；即使自动 gate 通过，没有人工偏好和 durable 跨环境证据也只能保持 no-go。
+- 实现更新（2026-07-27）：同一协议冻结后新增 `run_layerplan_glsl_shadow_suite.py` 与 suite service，按 manifest 顺序执行全部样本/轮次；每个 run 必须先通过原 D084 verifier 且与 sample/reference/instruction/config/order 精确绑定，随后才按配对 `B-A`、样本中位数、AB/BA 方向一致性和 inconclusive 计负聚合。suite 报告采用私有 staging + 原子 rename、0600/0700、内容寻址目录，并可递归复验全部引用 run；自动结论只可能是 `no_go_automatic_gate_failed` 或 `no_go_pending_human_and_durable`。人工盲评包、durable registry 与生产晋升仍未实现。
