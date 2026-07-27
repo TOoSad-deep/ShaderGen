@@ -85,6 +85,27 @@ AuthorRole = Literal["initial", "refine"]
 ARM_A: ArmId = "A"
 ARM_B: ArmId = "B"
 ARM_IDS: tuple[ArmId, ArmId] = (ARM_A, ARM_B)
+
+
+def _safe_compile_diagnostics(compile_result: Any) -> dict[str, object]:
+    """把 Renderer 诊断收敛为不含原始日志/message/GLSL 的摘要."""
+    def log_hash(value: str) -> str | None:
+        return sha256(value.encode("utf-8")).hexdigest() if value else None
+
+    return {
+        "success": bool(compile_result.success),
+        "vertex_log_present": bool(compile_result.vertex_log),
+        "fragment_log_present": bool(compile_result.fragment_log),
+        "link_log_present": bool(compile_result.link_log),
+        "vertex_log_sha256": log_hash(compile_result.vertex_log),
+        "fragment_log_sha256": log_hash(compile_result.fragment_log),
+        "link_log_sha256": log_hash(compile_result.link_log),
+        "static_violation_categories": [
+            {"code": item.code, "line": item.line}
+            for item in compile_result.static_validation.violations
+            if item.severity == "error"
+        ][:12],
+    }
 MAX_WORK_SIDE = 256
 MAX_CANVAS_SIDE = WEBGL1_STATIC_NO_TEXTURE_V1.max_long_side
 
@@ -808,7 +829,7 @@ class LayerPlanGlslShadowRunner:
                 ledger.wall_clock_ms += (self._clock() - started) * 1000.0
                 reject(
                     "compile_or_link_failed",
-                    diagnostics=exc.compile_result.to_dict(),
+                    diagnostics=_safe_compile_diagnostics(exc.compile_result),
                 )
                 return None
             except (RendererUnavailableError, ValueError, OSError) as exc:

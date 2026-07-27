@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
 from typing import TypeVar
@@ -99,6 +99,8 @@ def _repair_messages(
     schema: dict[str, object],
     error: ValueError,
     original_output: str,
+    repair_prompt: PromptDefinition,
+    repair_hints: Mapping[str, object] | None,
 ) -> list[BaseMessage]:
     error_code = getattr(error, "code", "invalid_structured_output")
     payload = {
@@ -108,8 +110,10 @@ def _repair_messages(
         "expected_json_schema": schema,
         "untrusted_original_output": original_output,
     }
+    if repair_hints is not None:
+        payload["safe_repair_hints"] = dict(repair_hints)
     return [
-        SystemMessage(content=MIN_AUTHOR_REPAIR_PROMPT.prompt),
+        SystemMessage(content=repair_prompt.prompt),
         HumanMessage(content=canonical_json(payload)),
     ]
 
@@ -122,10 +126,12 @@ def _repair_context_sha256(
     original_output: str,
     original_identity: EffectiveCallIdentity | None,
     repaired_identity: EffectiveCallIdentity | None,
+    repair_prompt: PromptDefinition,
+    repair_hints: Mapping[str, object] | None,
 ) -> str:
     """绑定修复 Prompt、首轮输出/错误、Schema 与第二次真实调用身份."""
     payload = {
-        "repair_prompt_version": MIN_AUTHOR_REPAIR_PROMPT.version,
+        "repair_prompt_version": repair_prompt.version,
         "source_prompt_version": source_prompt.version,
         "original_output_sha256": sha256(original_output.encode("utf-8")).hexdigest(),
         "validation_error_code": getattr(error, "code", "invalid_structured_output"),
@@ -140,6 +146,8 @@ def _repair_context_sha256(
             repaired_identity.to_dict() if repaired_identity is not None else None
         ),
     }
+    if repair_hints is not None:
+        payload["safe_repair_hints"] = dict(repair_hints)
     return sha256(canonical_json(payload).encode("utf-8")).hexdigest()
 
 
@@ -152,9 +160,14 @@ async def invoke_min_author(
     parser: Callable[[str], _ValueT],
     remaining_calls: int,
     max_output_tokens: int,
+    repair_prompt: PromptDefinition | None = None,
+    repair_hints_builder: (
+        Callable[[ValueError], Mapping[str, object] | None] | None
+    ) = None,
 ) -> MinAuthorCallResult:
     """最多语义调用一次、结构修复一次，并把异常收敛为安全结果。."""
     allowed = min(MAX_STRUCTURED_ATTEMPTS, max(0, remaining_calls))
+    effective_repair_prompt = repair_prompt or MIN_AUTHOR_REPAIR_PROMPT
     if allowed == 0:
         return MinAuthorCallResult(None, 0, None, "llm_budget_exhausted")
 
@@ -181,6 +194,11 @@ async def invoke_min_author(
     try:
         value = parser(response.text)
     except ValueError as first_error:
+        repair_hints = (
+            repair_hints_builder(first_error)
+            if repair_hints_builder is not None
+            else None
+        )
         first_error_code = getattr(first_error, "code", "invalid_structured_output")
         if allowed < 2:
             return MinAuthorCallResult(
@@ -201,6 +219,8 @@ async def invoke_min_author(
                     schema=schema,
                     error=first_error,
                     original_output=response.text,
+                    repair_prompt=effective_repair_prompt,
+                    repair_hints=repair_hints,
                 ),
                 repair_options,
             )
@@ -245,6 +265,8 @@ async def invoke_min_author(
                 original_output=response.text,
                 original_identity=response.effective_identity,
                 repaired_identity=repaired.effective_identity,
+                repair_prompt=effective_repair_prompt,
+                repair_hints=repair_hints,
             ),
         )
     return MinAuthorCallResult(

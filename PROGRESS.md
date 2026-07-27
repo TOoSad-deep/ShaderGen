@@ -20,6 +20,7 @@
 - 已修复 run `04b7b4af-2dd0-495d-9ac6-0b34f1eeca23` 暴露的 recursion 上界失真：无效 Refine 过去会重建参数队列，D078 改为复用 current best 的 no-op 过桥，high 连续失败 patch 不再重复优化或撞 85 步上限。
 - `codex/layerplan-glsl-shadow` 分支已按 D084 实现独立离线 LayerPlan/direct GLSL shadow A/B harness：`shaderforge.program_spec` 是唯一 canonical LayerPlan/ProgramSpec/哈希/attestation 真相，三类 Author 直读参考图，LayerPlan 永久 advisory；VisualAnalysis 使用独立 `plan_llm_budget/plan_ledger`，不挤占两臂相同的 direct Author 预算；候选必须通过 canonical 安全校验与真实 WebGL1 prepare/draw，才能按真实 metric 更新 arm-local `current_best`。详细证据只写显式本地私有目录（同根 staging + 原子 rename、0700/0600、`verify_shadow_run` 可复验），不进入生产 Artifact/evidence registry；生产 Graph、API、ShaderDocument/Compiler 和 FEATURE 状态均未变。Codex 复审后身份已改为事实制：`author_identity` 只记录 Gateway effective 采样身份（kimi 实际 temperature=1），缺有效身份 fail-closed；Initial/Refine/LayerPlan 哈希绑定 content_type，Refine 另绑定 current_render 与 canonical 评估上下文；显式画布在 resize 前受 Renderer 上限约束，可信装配错误收敛为安全结果，token usage 缺失保持 `null`，证据目录名必须匹配报告内容 run id。无 seed 的温度 1 A/B 只具探索性，结论必须多轮重复并做 AB/BA 交叉平衡。
 - 已按 D086 完成冻结 LayerPlan shadow suite，并按 D087 完成首轮有效真实模型运行。正式 suite `shadow-suite-43a0748fa395` 与 8 个单 run 递归复验通过：Arm B 成功 `7/8`、Arm A `5/8`，5 个可比较 run 中 B 4 胜 1 负，AB/BA 子集方向均有利于 B；但 3/4 样本至少一轮因 `glsl_renderer_contract_violation` 无法配对，inconclusive ratio=`0.75`，只有 `rimmed_disk` 两轮可比较，improved sample ratio=`0.25`，自动 gate=`not_supported`，生产结论明确 no-go。报告 SHA-256 为 `43a0748fa39525b0c44106b2ffc323557e29fc1cb553300cb60408af39ee1075`，仍为 `local_private_not_registered`。首次配置失败 suite `4cd3b45d7644` 继续保留不覆盖。
+- 已按 D088 完成 direct GLSL 契约稳定性 v2：shadow Initial/Refine 改用独立 v2 Prompt 与 GLSL repair v2，生产 scene_mvp 和 VisualAnalysis 继续默认 repair v1。Author Parser 复用完整 `validate_program_spec_safety`，把安全违规收敛为最多 12 条 `code + line`，repair 上下文哈希绑定实际 repair Prompt 和安全 hints；不放宽 Validator、不静默改写 GLSL。shadow 编译失败事件不再保存原始 compiler log 或 Validator message，只记录存在性、日志哈希及安全类别。
 
 ## 当前 active 功能
 
@@ -33,7 +34,7 @@
 - 保留“模型 Initial 仍输给 fallback”的负面质量事实，继续用版本中立的固定小样例验证 Prompt/搜索，不通过放宽 Schema 掩盖问题。
 - 参数优化继续评估 rotation/成组参数、typed layer patch 局部成熟和更大搜索；任何预算变化必须使用 ShaderGraph 候选空间重新建立证据。
 - 项目结构重构计划尚待确认，确认前不开始目录迁移；若未来启用 Memory，必须建立 scene_mvp 新契约、namespace 和迁移验收。
-- 为 direct GLSL Initial/Refine/repair 新增版本化的 Renderer contract 遵循改进，重点消除 `glsl_renderer_contract_violation`；不得放宽 Validator 或静默修补越权 GLSL。改动完成后重新冻结 manifest/gate/实现身份并运行新 suite，不覆盖 v1 证据；只有新自动 gate 通过才进入人工盲评与 durable evidence。
+- 为已完成的 direct GLSL v2 新建并冻结 manifest/gate/实现身份，随后运行新 suite；不得覆盖 v1 协议或证据，只有新自动 gate 通过才进入人工盲评与 durable evidence。
 
 ## 未解决缺口
 
@@ -50,6 +51,7 @@
 
 ## 当前验证基线
 
+- 2026-07-27 D088 direct GLSL v2：`make check` 全绿（555 个 Python 单测、docs-check、1 个 LangGraph validate、21 个前端 vitest、前端生产构建）；v2 聚焦 97 个单测与 4 个改动源文件 `mypy --strict` 通过。
 - 2026-07-27 D086 suite 实现后：`make check` 全绿（552 个 Python 单测、docs-check、LangGraph validate（1 个 Graph）、21 个前端 vitest 单测、前端生产构建）；新增 17 个 suite 单测与 1 个 fake LLM + 真实 Chromium 2×2 集成测试通过；前端可观测性 `make test-scene-mvp-ui` 基线继续通过。
 - `kimi:k3-256k` 真实连通性已验证：文本、JSON mode、`max_output_tokens` 路径均正常，family 固定 temperature=1 并按 D081 默认下发 `reasoning_effort=low`。
 - 全量集成测试为 17 passed、1 skipped；全仓 Ruff、`mypy --strict src backend`（123 个源文件）、`uv lock --check` 与 `git diff --check` 通过。

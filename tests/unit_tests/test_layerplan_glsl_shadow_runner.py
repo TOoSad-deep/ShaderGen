@@ -36,9 +36,42 @@ from agent.app.services.layerplan_glsl_shadow import (
 from shaderforge.program_spec import is_executable
 from shaderforge.program_spec.hashing import canonical_json
 from shaderforge.program_spec.receipt import _test_receipt_capabilities
-from shaderforge.rendering.models import PreparedRenderResult
+from shaderforge.rendering.models import CompileResult, PreparedRenderResult
+from shaderforge.validation import ValidationResult, ValidationViolation
 
 CANVAS = 64
+
+
+def test_compile_diagnostics_never_expose_raw_logs_or_validator_messages() -> None:
+    diagnostics = shadow_service._safe_compile_diagnostics(
+        CompileResult(
+            success=False,
+            vertex_log="secret vertex log",
+            fragment_log="secret fragment log",
+            link_log="secret link log",
+            draw_error=None,
+            static_validation=ValidationResult(
+                valid=False,
+                violations=(
+                    ValidationViolation(
+                        code="texture_sampling",
+                        message="secret validator message",
+                        severity="error",
+                        line=9,
+                    ),
+                ),
+                source_chars=20,
+                contract_id="webgl1_static_no_texture_v1",
+            ),
+        )
+    )
+
+    encoded = json.dumps(diagnostics)
+    assert "secret" not in encoded
+    assert diagnostics["fragment_log_present"] is True
+    assert diagnostics["static_violation_categories"] == [
+        {"code": "texture_sampling", "line": 9}
+    ]
 
 
 def _reference_png(gray: int = 128) -> bytes:
@@ -461,7 +494,7 @@ async def test_invalid_spec_never_prepared_or_drawn() -> None:
     assert renderer.draw_calls == []
     for arm in result.arms:
         assert arm.status == "inconclusive"
-        assert arm.inconclusive_code == "static_validation_failed"
+        assert arm.inconclusive_code == "author_output_invalid"
         assert arm.current_best is None
         assert arm.candidates == []
     assert result.status == "inconclusive"

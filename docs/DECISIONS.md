@@ -53,6 +53,7 @@
 | D085 | accepted | — | 前端运行可观测性只展示后端可证明的阶段事实，不伪造 active node、完整时长或最终 provenance。 |
 | D086 | accepted | — | 冻结 LayerPlan shadow suite 的四样本、AB/BA 调度、预算指纹与预声明 gate；真实运行前 fail-closed 复验。 |
 | D087 | accepted | — | 首轮真实 LayerPlan suite 自动 gate 失败，保持生产 no-go；先修复 direct GLSL 契约遵循稳定性再重新冻结实验。 |
+| D088 | accepted | — | direct GLSL v2 只提高 shadow 两臂共用契约稳定性；生产路径保持不变，重跑前必须重新冻结实现身份。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -689,3 +690,10 @@
 - 决策：接受 D086 冻结 suite `shadow-suite-43a0748fa395` 的自动结论 `not_supported`，生产决策为 `no_go_automatic_gate_failed`。本轮不生成晋升用人工盲评、不登记为 durable 证据、不修改 D070 ShaderDocument/Compiler、Graph、scorer、预算或 `current_best`。下一实验增量先提高 Arm A/B 共用 direct GLSL Initial/Refine/repair 对 `webgl1_static_no_texture_v1` 的遵循稳定性；不得放宽 Validator、静默修补越权 GLSL或把 LayerPlan 直接接入接受谓词。Prompt/repair/实现变化后必须升级版本并重新冻结 manifest/gate/实现身份，不得覆盖 v1 run。
 - 原因：报告与 8 个单 run 已递归复验，suite SHA-256 为 `43a0748fa39525b0c44106b2ffc323557e29fc1cb553300cb60408af39ee1075`。Arm B 在 5 个可比较 run 中 4 胜 1 负，成功率 `7/8` 高于 Arm A 的 `5/8`，AB/BA 可比较子集方向均有利于 B；但 `solid_circle`、`ellipse_gradient`、`pink_gel` 各至少一轮因 `glsl_renderer_contract_violation` 无法配对，inconclusive ratio=`0.75` 超过 `0.25`，只有 `rimmed_disk` 两轮可比较，改善样本比例=`0.25` 低于 `0.75`。该信号值得后续验证，但不能越过预声明 gate，也不能在无 seed、temperature=1 下宣称 LayerPlan 是唯一因果变量。
 - 影响：完整安全摘要写入 `docs/analysis/layerplan-shadow-suite-43a0748fa395-2026-07-27.md`；详细 Spec/GLSL/render 继续只留本地私有目录，durability 为 `local_private_not_registered`，不能支撑跨环境晋升。自动 gate 未通过，人工偏好阶段当前无晋升价值；先完成版本化契约稳定性改造和新冻结实验，再决定是否进入盲评与 durable evidence。
+
+## D088 - direct GLSL v2 先提高两臂共用契约稳定性
+
+- 日期：2026-07-27
+- 决策：新增 `direct_glsl_initial_v2_1`、`direct_glsl_refine_v2_1` 与 `min_author_repair_v2_1`，只供 LayerPlan shadow 的 direct Initial/Refine 使用；生产 scene_mvp 与 VisualAnalysis Author 继续默认使用原 repair v1。Parser 保留可信层生成的 probe Spec 并复用完整 `validate_program_spec_safety`，在结构 repair 前覆盖预处理指令、规范循环/1024 上限、资源上限与既有 WebGL1 规则；顶层错误码保持 `glsl_renderer_contract_violation`，次级诊断仅为去重保序、最多 12 条的固定 `code + line|null`。repair v2 只接收固定 required declarations、按错误码映射的指令和安全类别，修复上下文哈希绑定实际 repair Prompt、hints、Schema、原输出哈希和两次有效调用身份。
+- 原因：D087 的 3/4 inconclusive 主要来自两臂共用 direct GLSL 契约遵循不稳定；若只改 LayerPlan 臂或放宽 Validator，会污染 A/B 控制变量并掩盖模型失败。把 runner 已执行的 canonical safety 前移到 Author Parser，才能让同一次有界 repair 处理真实阻塞规则，同时不引入确定性 GLSL 静默改写。
+- 影响：生产 Graph、API、ShaderDocument/Compiler、scorer、预算和 `current_best` 不变；两臂仍使用相同 direct Prompt/repair/调用参数，唯一预期差异仍是 LayerPlan advisory 输入。shadow 编译失败事件同步移除原始 compiler/link log 与 Validator message，只保留日志存在性、SHA-256 和安全违规类别。v1 Prompt、suite 和真实证据继续保留；下一步必须另行冻结绑定 v2 实现身份的 manifest/gate，验证前不得声称质量改善或晋升生产。

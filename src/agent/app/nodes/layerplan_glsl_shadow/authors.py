@@ -35,6 +35,7 @@ from agent.app.contracts.layerplan_glsl_shadow import (
     ValidatedIncumbent,
     assemble_layer_plan,
     assemble_program_spec,
+    build_glsl_repair_hints,
     initial_input_context_sha256,
     layer_plan_json_schema,
     parse_layer_plan_semantics,
@@ -63,8 +64,9 @@ from shaderforge.program_spec import (
 )
 
 VISUAL_ANALYSIS_PROMPT = load_prompt_definition("layerplan_visual_analysis_v1")
-DIRECT_GLSL_INITIAL_PROMPT = load_prompt_definition("direct_glsl_initial_v1")
-DIRECT_GLSL_REFINE_PROMPT = load_prompt_definition("direct_glsl_refine_v1")
+DIRECT_GLSL_INITIAL_PROMPT = load_prompt_definition("direct_glsl_initial_v2")
+DIRECT_GLSL_REFINE_PROMPT = load_prompt_definition("direct_glsl_refine_v2")
+DIRECT_GLSL_REPAIR_PROMPT = load_prompt_definition("min_author_repair_v2")
 
 DEFAULT_PLAN_MAX_OUTPUT_TOKENS = 2048
 DEFAULT_SPEC_MAX_OUTPUT_TOKENS = 4096
@@ -276,6 +278,8 @@ async def run_initial_glsl_author(
         ),
         remaining_calls=remaining_calls,
         max_output_tokens=max_output_tokens,
+        repair_prompt=DIRECT_GLSL_REPAIR_PROMPT,
+        repair_hints_builder=build_glsl_repair_hints,
     )
     spec: ShaderProgramSpecV1 | None = None
     error_code = result.error_code
@@ -387,6 +391,8 @@ async def run_refine_glsl_author(
         ),
         remaining_calls=remaining_calls,
         max_output_tokens=max_output_tokens,
+        repair_prompt=DIRECT_GLSL_REPAIR_PROMPT,
+        repair_hints_builder=build_glsl_repair_hints,
     )
     spec: ShaderProgramSpecV1 | None = None
     error_code = result.error_code
@@ -448,6 +454,7 @@ __all__ = [
     "AUTHOR_IDENTITY_UNAVAILABLE",
     "DIRECT_GLSL_INITIAL_PROMPT",
     "DIRECT_GLSL_REFINE_PROMPT",
+    "DIRECT_GLSL_REPAIR_PROMPT",
     "VISUAL_ANALYSIS_PROMPT",
     "InitialGLSLAuthorResult",
     "RefineGLSLAuthorResult",

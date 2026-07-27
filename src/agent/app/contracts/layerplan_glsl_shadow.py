@@ -46,7 +46,7 @@ from shaderforge.program_spec import (
     canonical_json,
     sha256_hex_text,
 )
-from shaderforge.validation import validate_shader
+from shaderforge.validation import validate_program_spec_safety
 
 LAYER_PLAN_SCHEMA_VERSION = LAYER_PLAN_V1_SCHEMA_VERSION
 PROGRAM_SPEC_SCHEMA_VERSION = SHADER_PROGRAM_SPEC_V1_SCHEMA_VERSION
@@ -227,10 +227,12 @@ class LayerPlanGlslAuthorParseError(ValueError):
         code: str,
         *,
         details: tuple[dict[str, str], ...] = (),
+        violation_categories: tuple[dict[str, object], ...] = (),
     ) -> None:
         """保留稳定错误码和脱敏校验位置，不泄露原始值."""
         self.code = code
         self.details = details
+        self.violation_categories = violation_categories
         super().__init__(code)
 
 
@@ -458,7 +460,10 @@ def parse_program_spec_semantics(
     if not isinstance(payload, dict):
         raise LayerPlanGlslAuthorParseError("invalid_program_spec_json")
     try:
-        build_program_spec(payload, author_identity=_PARSE_PROBE_IDENTITY)
+        probe_spec = build_program_spec(
+            payload,
+            author_identity=_PARSE_PROBE_IDENTITY,
+        )
     except ProgramSpecParseError as exc:
         raise LayerPlanGlslAuthorParseError(
             "invalid_program_spec_json",
@@ -469,36 +474,113 @@ def parse_program_spec_semantics(
         canvas.get("width") != expected_width or canvas.get("height") != expected_height
     ):
         raise LayerPlanGlslAuthorParseError("program_spec_canvas_mismatch")
-    glsl_violations = _shadow_glsl_violations(str(payload.get("fragment_source", "")))
+    glsl_violations = _shadow_glsl_violations(probe_spec)
     if glsl_violations:
+        binding_codes = {
+            "too_many_uniforms",
+            "too_many_uniform_components",
+            "too_many_tunables",
+        }
         raise LayerPlanGlslAuthorParseError(
             "glsl_renderer_contract_violation",
             details=tuple(
                 {
-                    "location": "fragment_source",
-                    "type": code,
-                    "message": "fragment_source 违反 webgl1_static_no_texture_v1 契约。",
+                    "location": (
+                        "uniform_bindings"
+                        if str(item["code"]) in binding_codes
+                        else (
+                            "canvas"
+                            if str(item["code"]) == "canvas_too_large"
+                            else "fragment_source"
+                        )
+                    ),
+                    "type": str(item["code"]),
+                    "message": "模型输出违反 webgl1_static_no_texture_v1 契约。",
                 }
-                for code in glsl_violations[:12]
+                for item in glsl_violations
             ),
+            violation_categories=glsl_violations,
         )
     return payload
 
 
-def _shadow_glsl_violations(source: str) -> tuple[str, ...]:
-    """返回 shadow GLSL 契约违规代码（去重保序），空元组表示通过.
+def _shadow_glsl_violations(
+    spec: ShaderProgramSpecV1,
+) -> tuple[dict[str, object], ...]:
+    """返回安全的 shadow GLSL 违规类别（去重保序，最多 12 条）.
 
-    canonical ``validate_shader`` 全量规则 + 额外 sampler 声明禁令：
+    复用 canonical ``validate_program_spec_safety`` 全量规则 + 额外 sampler 禁令：
     只允许保留的兼容声明 ``uniform sampler2D u_image;``（仅声明不可采样）。
+    不携带 Validator message、源码或编译日志。
     """
-    codes: list[str] = []
-    stripped = _GLSL_COMMENT_RE.sub("", source)
+    source = spec.fragment_source
+    categories: list[dict[str, object]] = []
+    seen: set[str] = set()
+
+    def add(code: str, line: int | None) -> None:
+        if code in seen or len(categories) >= 12:
+            return
+        seen.add(code)
+        categories.append({"code": code, "line": line})
+
+    stripped = _GLSL_COMMENT_RE.sub(
+        lambda match: "\n" * match.group(0).count("\n"),
+        source,
+    )
     for match in _GLSL_SAMPLER_DECLARATION_RE.finditer(stripped):
         if not (match.group(1) == "sampler2D" and match.group(2) == "u_image"):
-            codes.append("extra_sampler_declaration")
-    result = validate_shader(source)
-    codes.extend(item.code for item in result.violations if item.severity == "error")
-    return tuple(dict.fromkeys(codes))
+            add("extra_sampler_declaration", source.count("\n", 0, match.start()) + 1)
+    result = validate_program_spec_safety(spec)
+    for item in result.violations:
+        if item.severity == "error":
+            add(item.code, item.line)
+    return tuple(categories)
+
+
+GLSL_REQUIRED_DECLARATIONS = (
+    "precision mediump float;（第一条有效声明）",
+    "varying vec2 v_uv;",
+    "uniform sampler2D u_image;（仅声明，不采样）",
+    "uniform vec2 u_resolution;",
+    "uniform float u_time;",
+    "void main()",
+    "gl_FragColor 赋值",
+)
+
+_GLSL_REPAIR_DIRECTIVES = {
+    "extra_sampler_declaration": "删除 u_image 之外的 sampler 声明。",
+    "forbidden_preprocessor": "删除会创建或改写 token 的预处理指令。",
+    "unbounded_loop": "改为具有整数常量边界和静态非零步长的规范 for 循环。",
+    "loop_iteration_limit": "把规范 for 循环的可证明迭代次数降到 1024 以内。",
+    "reversed_smoothstep_edges": "确保 smoothstep 的常量 edge0 严格小于 edge1。",
+    "texture_sampling": "删除所有纹理采样调用。",
+    "unsupported_derivative_builtin": "删除 fwidth、dFdx 和 dFdy 调用。",
+    "webgl2_io": "改用 WebGL1 varying 与 gl_FragColor。",
+    "custom_fragment_output": "删除自定义 fragment 输出并使用 gl_FragColor。",
+    "literal_divide_by_zero": "移除字面量除零。",
+    "normalize_zero": "避免 normalize 明确零向量。",
+    "source_too_large": "把 fragment_source 缩减到 30000 字符以内。",
+    "too_many_uniforms": "把自定义 uniform_schema 缩减到最多 16 项，并同步 bindings。",
+    "too_many_uniform_components": "把自定义 uniform 总分量缩减到最多 64，并同步 bindings。",
+    "too_many_tunables": "把 tunable_manifest 缩减到最多 16 项。",
+}
+
+
+def build_glsl_repair_hints(error: ValueError) -> dict[str, object] | None:
+    """从可信 Parser 错误生成固定、无源码的 repair v2 提示."""
+    categories = getattr(error, "violation_categories", ())
+    if not categories:
+        return None
+    codes = [str(item["code"]) for item in categories]
+    return {
+        "required_declarations": list(GLSL_REQUIRED_DECLARATIONS),
+        "violation_categories": list(categories),
+        "repair_directives": [
+            {"code": code, "directive": _GLSL_REPAIR_DIRECTIVES[code]}
+            for code in codes
+            if code in _GLSL_REPAIR_DIRECTIVES
+        ],
+    }
 
 
 # --- 薄装配：真实 author/input 身份 + canonical build/hash ---

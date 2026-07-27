@@ -38,6 +38,7 @@ from agent.app.contracts.llm import (
 from agent.app.nodes.layerplan_glsl_shadow.authors import (
     DIRECT_GLSL_INITIAL_PROMPT,
     DIRECT_GLSL_REFINE_PROMPT,
+    DIRECT_GLSL_REPAIR_PROMPT,
     VISUAL_ANALYSIS_PROMPT,
     run_initial_glsl_author,
     run_refine_glsl_author,
@@ -325,6 +326,31 @@ def test_parse_program_spec_valid() -> None:
     assert semantics["schema_version"] == "shader_program_spec_v1"
     assert semantics["uniform_values"]["u_gain"] == 0.5
     assert semantics["tunable_manifest"][0]["path"] == "u_gain"
+
+
+def test_parse_program_spec_reports_full_safety_categories_without_messages() -> None:
+    payload = _spec_payload()
+    payload["fragment_source"] = (
+        _CANONICAL_DECLARATIONS
+        + "#define STEPS 4\n"
+        + "void main(){for(int i=0;i<STEPS;i++){ }"
+        + "gl_FragColor=vec4(1.0);}\n"
+    )
+
+    with pytest.raises(LayerPlanGlslAuthorParseError) as raised:
+        parse_program_spec_semantics(
+            json.dumps(payload), expected_width=64, expected_height=64
+        )
+
+    assert raised.value.code == "glsl_renderer_contract_violation"
+    assert raised.value.violation_categories == (
+        {"code": "forbidden_preprocessor", "line": 6},
+        {"code": "unbounded_loop", "line": 7},
+    )
+    assert all(
+        set(item) == {"code", "line"}
+        for item in raised.value.violation_categories
+    )
 
 
 @pytest.mark.parametrize(
@@ -739,13 +765,46 @@ async def test_failed_repair_converges_to_error_code() -> None:
     assert result.spec is None
 
 
+@pytest.mark.anyio
+async def test_direct_glsl_repair_v2_receives_only_safe_violation_hints() -> None:
+    bad = _spec_payload()
+    bad["fragment_source"] = (
+        _CANONICAL_DECLARATIONS
+        + "#define STEPS 4\n"
+        + "void main(){gl_FragColor=vec4(1.0);}\n"
+    )
+    gateway = _FakeGateway(json.dumps(bad), json.dumps(_spec_payload()))
+
+    result = await run_initial_glsl_author(
+        gateway=gateway,
+        reference_image=_IMAGE,
+        canvas_width=64,
+        canvas_height=64,
+        remaining_calls=2,
+    )
+
+    assert result.spec is not None
+    assert result.repaired is True
+    assert result.spec.author_identity.repair_context_sha256 is not None
+    repair_messages = gateway.calls[1][0]
+    assert repair_messages[0].content == DIRECT_GLSL_REPAIR_PROMPT.prompt
+    repair_payload = json.loads(str(repair_messages[1].content))
+    hints = repair_payload["safe_repair_hints"]
+    assert hints["violation_categories"] == [
+        {"code": "forbidden_preprocessor", "line": 6}
+    ]
+    assert "fragment_source" not in json.dumps(hints)
+    assert "message" not in json.dumps(hints)
+
+
 # --- Prompt 装配 ---
 
 
 def test_prompt_definitions_are_versioned_and_bind_contract() -> None:
     assert VISUAL_ANALYSIS_PROMPT.version
-    assert DIRECT_GLSL_INITIAL_PROMPT.version
-    assert DIRECT_GLSL_REFINE_PROMPT.version
+    assert DIRECT_GLSL_INITIAL_PROMPT.version == "direct_glsl_initial_v2_1"
+    assert DIRECT_GLSL_REFINE_PROMPT.version == "direct_glsl_refine_v2_1"
+    assert DIRECT_GLSL_REPAIR_PROMPT.version == "min_author_repair_v2_1"
     assert "layer_plan_v1" in VISUAL_ANALYSIS_PROMPT.prompt
     assert "webgl1_static_no_texture_v1" in DIRECT_GLSL_INITIAL_PROMPT.prompt
     assert "incumbent" in DIRECT_GLSL_REFINE_PROMPT.prompt
