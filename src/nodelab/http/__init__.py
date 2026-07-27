@@ -8,9 +8,9 @@ from typing import Any
 __all__ = ["NodeLabHttpService", "NodeLabServiceSettings", "create_app"]
 
 _EXPORT_MODULES = {
-    "NodeLabHttpService": "nodelab_service.service",
-    "NodeLabServiceSettings": "nodelab_service.settings",
-    "create_app": "nodelab_service.main",
+    "NodeLabHttpService": "nodelab.http.service",
+    "NodeLabServiceSettings": "nodelab.http.settings",
+    "create_app": "nodelab.http.main",
 }
 
 

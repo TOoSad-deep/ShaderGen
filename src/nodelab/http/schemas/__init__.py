@@ -1,0 +1,61 @@
+"""Node Lab HTTP 请求与响应契约的稳定聚合入口."""
+
+from nodelab.http.schemas.batch import (
+    NodeLabBatchReportResponse,
+    NodeLabBatchRunBody,
+    NodeLabBatchSuiteListResponse,
+    NodeLabBatchValidateBody,
+    NodeLabBatchValidationResponse,
+    NodeLabDurationSummaryResponse,
+)
+from nodelab.http.schemas.common import NodeLabHttpModel, NodeLabSuiteId
+from nodelab.http.schemas.errors import NodeLabErrorDetail, NodeLabErrorResponse
+from nodelab.http.schemas.execution import (
+    NODE_LAB_RUN_OPENAPI_EXAMPLES,
+    NODE_LAB_STEP_OPENAPI_EXAMPLES,
+    NodeLabArtifactListResponse,
+    NodeLabArtifactResponse,
+    NodeLabCapabilityBody,
+    NodeLabCapabilityDescriptorResponse,
+    NodeLabCapabilityResponse,
+    NodeLabHealthResponse,
+    NodeLabNodeDescriptorResponse,
+    NodeLabNodeInputExampleResponse,
+    NodeLabRunCreateBody,
+    NodeLabRunResponse,
+    NodeLabStateDiffResponse,
+    NodeLabStepBody,
+    NodeLabStepListResponse,
+    NodeLabStepResponse,
+    NodeLabStepSummaryResponse,
+)
+
+__all__ = [
+    "NODE_LAB_RUN_OPENAPI_EXAMPLES",
+    "NODE_LAB_STEP_OPENAPI_EXAMPLES",
+    "NodeLabArtifactListResponse",
+    "NodeLabArtifactResponse",
+    "NodeLabBatchReportResponse",
+    "NodeLabBatchRunBody",
+    "NodeLabBatchSuiteListResponse",
+    "NodeLabBatchValidateBody",
+    "NodeLabBatchValidationResponse",
+    "NodeLabCapabilityBody",
+    "NodeLabCapabilityDescriptorResponse",
+    "NodeLabCapabilityResponse",
+    "NodeLabDurationSummaryResponse",
+    "NodeLabErrorDetail",
+    "NodeLabErrorResponse",
+    "NodeLabHealthResponse",
+    "NodeLabHttpModel",
+    "NodeLabNodeDescriptorResponse",
+    "NodeLabNodeInputExampleResponse",
+    "NodeLabRunCreateBody",
+    "NodeLabRunResponse",
+    "NodeLabStateDiffResponse",
+    "NodeLabStepBody",
+    "NodeLabStepListResponse",
+    "NodeLabStepResponse",
+    "NodeLabStepSummaryResponse",
+    "NodeLabSuiteId",
+]

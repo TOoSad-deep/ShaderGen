@@ -1,4 +1,4 @@
-"""Node Lab 独立服务的启动配置."""
+"""Node Lab 独立 HTTP 服务的启动配置."""
 
 from __future__ import annotations
 

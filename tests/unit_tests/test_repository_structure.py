@@ -61,3 +61,71 @@ def test_frontend_backend_fetches_are_centralized_in_api_client() -> None:
     }
 
     assert direct_fetches == {"frontend/src/api/client.ts"}
+
+
+def test_node_lab_core_does_not_depend_on_transport_or_product_packages() -> None:
+    node_lab_root = ROOT / "src/nodelab"
+    violations = {
+        path.relative_to(ROOT).as_posix(): import_name
+        for path in node_lab_root.rglob("*.py")
+        if "http" not in path.relative_to(node_lab_root).parts
+        for import_name in _imports(path)
+        if import_name == "fastapi"
+        or import_name.startswith("fastapi.")
+        or import_name == "backend"
+        or import_name.startswith("backend.")
+        or import_name == "agent"
+        or import_name.startswith("agent.")
+        or import_name == "shaderforge"
+        or import_name.startswith("shaderforge.")
+        or import_name == "nodelab.http"
+        or import_name.startswith("nodelab.http.")
+    }
+
+    assert violations == {}
+
+
+def test_node_lab_http_does_not_depend_on_product_packages() -> None:
+    violations = {
+        path.relative_to(ROOT).as_posix(): import_name
+        for path in (ROOT / "src/nodelab/http").rglob("*.py")
+        for import_name in _imports(path)
+        if import_name == "backend"
+        or import_name.startswith("backend.")
+        or import_name == "agent"
+        or import_name.startswith("agent.")
+        or import_name == "shaderforge"
+        or import_name.startswith("shaderforge.")
+    }
+
+    assert violations == {}
+
+
+def test_backend_does_not_register_node_lab_http_transport() -> None:
+    violations = {
+        path.relative_to(ROOT).as_posix(): import_name
+        for path in (ROOT / "backend").rglob("*.py")
+        for import_name in _imports(path)
+        if import_name == "nodelab.http"
+        or import_name.startswith("nodelab.http.")
+    }
+
+    assert violations == {}
+
+
+def test_node_lab_schema_leaf_does_not_depend_on_http_runtime() -> None:
+    violations = {
+        path.relative_to(ROOT).as_posix(): import_name
+        for path in (ROOT / "src/nodelab/http/schemas").rglob("*.py")
+        for import_name in _imports(path)
+        if import_name == "nodelab.http.main"
+        or import_name.startswith("nodelab.http.main.")
+        or import_name == "nodelab.http.routes"
+        or import_name.startswith("nodelab.http.routes.")
+        or import_name == "nodelab.http.service"
+        or import_name.startswith("nodelab.http.service.")
+        or import_name == "nodelab.http.factory"
+        or import_name.startswith("nodelab.http.factory.")
+    }
+
+    assert violations == {}

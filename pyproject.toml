@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.scripts]
-nodelab-service = "nodelab_service.cli:main"
+nodelab-service = "nodelab.http.cli:main"
 
 
 [project.optional-dependencies]
@@ -53,7 +53,9 @@ packages = [
     "agent.app.nodes",
     "agent.app.nodes.png_to_shader_min",
     "nodelab",
-    "nodelab_service",
+    "nodelab.http",
+    "nodelab.http.routes",
+    "nodelab.http.schemas",
     "agent.app.observability",
     "agent.app.parsers",
     "agent.app.prompts",
@@ -84,7 +86,6 @@ packages = [
 [tool.setuptools.package-dir]
 "agent" = "src/agent"
 "nodelab" = "src/nodelab"
-"nodelab_service" = "src/nodelab_service"
 "shaderforge" = "src/shaderforge"
 
 

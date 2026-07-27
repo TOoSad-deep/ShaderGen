@@ -1,6 +1,6 @@
 # Node Lab 内核架构
 
-`src/nodelab/` 是与具体 Agent、Graph、HTTP 和 Shader 领域解耦的 Python Harness。空 Application 不注入任何生产 Node、Fixture、capability 或 suite；独立 HTTP transport 位于 `src/nodelab_service/`。
+`src/nodelab/` 是与具体 Agent、Graph、HTTP 和 Shader 领域解耦的 Python Harness。空 Application 不注入任何生产 Node、Fixture、capability 或 suite；独立 HTTP transport 位于 `src/nodelab/http/`。
 
 ## 组件
 
@@ -22,7 +22,7 @@ nodelab.runner -> models / registry / store / benchmark
        |
        -X-> agent / backend / shaderforge / FastAPI
 
-nodelab_service -> nodelab.runner
+nodelab.http -> nodelab.runner
 ```
 
 `nodelab` 不依赖 FastAPI、Backend、LangGraph 编译图、具体 LLM Gateway、Agent Node 或 ShaderForge。领域 Artifact hydration、模型门禁、Renderer、数据库与 Memory 生命周期由 Pipeline Executor 注入。

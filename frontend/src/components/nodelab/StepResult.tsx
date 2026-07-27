@@ -33,12 +33,12 @@ export function StepResult({ step, loading }: StepResultProps) {
       {step ? (
         <div className="node-lab-output-scroll">
           <dl className="node-lab-step-facts">
-            <div><dt>step_id</dt><dd>{step.step_id}</dd></div>
-            <div><dt>node_id</dt><dd>{step.node_id}</dd></div>
+            <div><dt>step_id</dt><dd title={step.step_id}>{step.step_id}</dd></div>
+            <div><dt>node_id</dt><dd title={step.node_id}>{step.node_id}</dd></div>
             <div><dt>execution_mode</dt><dd>{step.execution_mode}</dd></div>
             <div><dt>duration</dt><dd>{step.duration_ms.toFixed(2)} ms</dd></div>
-            <div><dt>next_action</dt><dd>{step.next_action ?? "—"}</dd></div>
-            <div><dt>fingerprint</dt><dd>{step.execution_fingerprint.slice(0, 12)}…</dd></div>
+            <div><dt>next_action</dt><dd title={step.next_action ?? undefined}>{step.next_action ?? "—"}</dd></div>
+            <div><dt>fingerprint</dt><dd title={step.execution_fingerprint}>{step.execution_fingerprint.slice(0, 12)}…</dd></div>
           </dl>
 
           <h3>Output</h3>

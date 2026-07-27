@@ -18,7 +18,7 @@ make dev-frontend
 
 ```python
 from nodelab import NodeLabApplication, NodeProviderBuilder
-from nodelab_service import NodeLabServiceSettings
+from nodelab.http import NodeLabServiceSettings
 
 
 def create_application(settings: NodeLabServiceSettings) -> NodeLabApplication:

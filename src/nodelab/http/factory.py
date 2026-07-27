@@ -6,8 +6,8 @@ from importlib import import_module
 from pathlib import Path
 from typing import Protocol
 
+from nodelab.http.settings import NodeLabServiceSettings
 from nodelab.runner import NodeLabApplication
-from nodelab_service.settings import NodeLabServiceSettings
 
 
 class ApplicationFactory(Protocol):

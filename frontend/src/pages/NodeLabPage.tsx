@@ -25,6 +25,7 @@ import {
   type NodeLabStepSummary,
 } from "../api/nodeLab";
 import { ArtifactPanel } from "../components/nodelab/ArtifactPanel";
+import { LabOnboarding } from "../components/nodelab/LabOnboarding";
 import { LabStatusBar, type NodeLabConnection } from "../components/nodelab/LabStatusBar";
 import { NodeCatalog } from "../components/nodelab/NodeCatalog";
 import { NodeInspector } from "../components/nodelab/NodeInspector";
@@ -62,6 +63,8 @@ function defaultMode(node: NodeLabNodeDescriptor): NodeLabExecutionMode {
   return node.execution_modes[0] ?? "deterministic";
 }
 
+type NodeLabBusyAction = "create" | "resume" | "execute" | "upload";
+
 export function NodeLabPage() {
   const [connection, setConnection] = useState<NodeLabConnection>("connecting");
   const [health, setHealth] = useState<NodeLabHealth | null>(null);
@@ -86,8 +89,10 @@ export function NodeLabPage() {
   const [baseStepId, setBaseStepId] = useState("");
   const [artifactKind, setArtifactKind] = useState("reference_png");
   const [uploadedArtifacts, setUploadedArtifacts] = useState<NodeLabArtifact[]>([]);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<NodeLabBusyAction | null>(null);
   const [error, setError] = useState("");
+  const [discoveryAttempt, setDiscoveryAttempt] = useState(0);
+  const busy = busyAction !== null;
 
   const selectedNode = nodes.find((node) => node.node_id === selectedNodeId) ?? null;
   const selectedStep = selectedStepId ? stepDetails[selectedStepId] ?? null : null;
@@ -119,7 +124,11 @@ export function NodeLabPage() {
         if (cancelled) return;
         setHealth(nextHealth);
         setNodes(nextNodes);
-        setSelectedNodeId(nextNodes[0]?.node_id ?? "");
+        setSelectedNodeId((current) =>
+          nextNodes.some((node) => node.node_id === current)
+            ? current
+            : nextNodes[0]?.node_id ?? "",
+        );
         setConnection("online");
       } catch {
         if (!cancelled) setConnection("offline");
@@ -129,7 +138,13 @@ export function NodeLabPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [discoveryAttempt]);
+
+  /** 重试连接：回到 connecting 并触发 effect 重新请求 health/nodes。 */
+  function handleRetry() {
+    setConnection("connecting");
+    setDiscoveryAttempt((attempt) => attempt + 1);
+  }
 
   useEffect(() => {
     if (!selectedNode) return;
@@ -175,15 +190,15 @@ export function NodeLabPage() {
     setInputsText(pretty(example.inputs));
   }
 
-  async function withBusy(action: () => Promise<void>) {
-    setBusy(true);
+  async function withBusy(action: NodeLabBusyAction, task: () => Promise<void>) {
+    setBusyAction(action);
     setError("");
     try {
-      await action();
+      await task();
     } catch (reason) {
       setError(errorText(reason));
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   }
 
@@ -202,7 +217,7 @@ export function NodeLabPage() {
   }
 
   async function handleCreateRun() {
-    await withBusy(async () => {
+    await withBusy("create", async () => {
       const created = await createNodeLabRun(
         projectId.trim() || null,
         parseObject(initialStateText, "初始 State"),
@@ -217,7 +232,7 @@ export function NodeLabPage() {
       setError("请输入 LabRun ID。");
       return;
     }
-    await withBusy(async () => {
+    await withBusy("resume", async () => {
       const [loadedRun, loadedSteps, loadedArtifacts] = await Promise.all([
         getNodeLabRun(id),
         listNodeLabSteps(id),
@@ -232,7 +247,7 @@ export function NodeLabPage() {
       setError("请先创建或恢复 LabRun。 ");
       return;
     }
-    await withBusy(async () => {
+    await withBusy("execute", async () => {
       const completed = await executeNodeLabStep(run.lab_run_id, {
         node_id: selectedNode.node_id,
         execution_mode: executionMode,
@@ -266,7 +281,7 @@ export function NodeLabPage() {
       setError("请先创建 LabRun，再选择 Artifact 文件。 ");
       return;
     }
-    await withBusy(async () => {
+    await withBusy("upload", async () => {
       const artifact = await uploadNodeLabArtifact(
         run.lab_run_id,
         file,
@@ -283,16 +298,32 @@ export function NodeLabPage() {
 
   return (
     <main className="node-lab-app">
-      <LabStatusBar connection={connection} health={health} />
+      <LabStatusBar connection={connection} health={health} onRetry={handleRetry} />
 
       <div className="node-lab-body">
         {connection === "offline" ? (
           <div className="node-lab-error" role="alert">
-            无法连接 Node Lab 独立服务（{NODE_LAB_API_BASE_URL}）。请先在另一个终端运行
-            <code>make dev-node-lab</code>，再刷新本页；只运行产品 Backend 时本页面不可用。
+            <p>
+              无法连接 Node Lab 独立服务（<code>{NODE_LAB_API_BASE_URL}</code>）。请先在另一个终端运行
+              <code>make dev-node-lab</code>，再点击重试；只运行产品 Backend 时本页面不可用。
+            </p>
+            <div className="node-lab-error-actions">
+              <button type="button" onClick={handleRetry}>
+                重试连接
+              </button>
+            </div>
           </div>
         ) : null}
-        {error ? <div className="node-lab-error" role="alert">{error}</div> : null}
+        {error ? (
+          <div className="node-lab-error" role="alert">
+            <p>{error}</p>
+            <div className="node-lab-error-actions">
+              <button type="button" aria-label="关闭错误提示" onClick={() => setError("")}>
+                关闭
+              </button>
+            </div>
+          </div>
+        ) : null}
 
         <RunControls
           projectId={projectId}
@@ -301,6 +332,8 @@ export function NodeLabPage() {
           run={run}
           stepCount={steps.length}
           busy={busy}
+          creating={busyAction === "create"}
+          resuming={busyAction === "resume"}
           disabled={connection !== "online"}
           onProjectIdChange={setProjectId}
           onInitialStateTextChange={setInitialStateText}
@@ -309,50 +342,55 @@ export function NodeLabPage() {
           onResumeRun={() => void handleResumeRun()}
         />
 
-        <section className="node-lab-workbench">
-          <NodeCatalog
-            connection={connection}
-            nodes={nodes}
-            visibleNodes={visibleNodes}
-            selectedNodeId={selectedNodeId}
-            search={search}
-            onSearchChange={setSearch}
-            onSelect={setSelectedNodeId}
-          />
-          <NodeInspector
-            node={selectedNode}
-            hasRun={Boolean(run)}
-            busy={busy}
-            steps={steps}
-            exampleId={exampleId}
-            executionMode={executionMode}
-            effectMode={effectMode}
-            previewOnly={previewOnly}
-            allowModelCall={allowModelCall}
-            fixtureId={fixtureId}
-            mockArtifactId={mockArtifactId}
-            baseStepId={baseStepId}
-            inputsText={inputsText}
-            inputsError={inputsError}
-            onApplyExample={applyExample}
-            onExecutionModeChange={setExecutionMode}
-            onEffectModeChange={setEffectMode}
-            onPreviewOnlyChange={setPreviewOnly}
-            onAllowModelCallChange={setAllowModelCall}
-            onFixtureIdChange={setFixtureId}
-            onMockArtifactIdChange={setMockArtifactId}
-            onBaseStepIdChange={setBaseStepId}
-            onInputsTextChange={setInputsText}
-            onFormatInputs={handleFormatInputs}
-            onExecute={() => void handleExecute()}
-          />
-          <StepResult step={selectedStep} loading={stepLoading} />
-        </section>
+        {nodes.length ? (
+          <section className="node-lab-workbench">
+            <NodeCatalog
+              visibleNodes={visibleNodes}
+              selectedNodeId={selectedNodeId}
+              search={search}
+              onSearchChange={setSearch}
+              onSelect={setSelectedNodeId}
+            />
+            <NodeInspector
+              node={selectedNode}
+              hasRun={Boolean(run)}
+              busy={busy}
+              executing={busyAction === "execute"}
+              steps={steps}
+              exampleId={exampleId}
+              executionMode={executionMode}
+              effectMode={effectMode}
+              previewOnly={previewOnly}
+              allowModelCall={allowModelCall}
+              fixtureId={fixtureId}
+              mockArtifactId={mockArtifactId}
+              baseStepId={baseStepId}
+              inputsText={inputsText}
+              inputsError={inputsError}
+              onApplyExample={applyExample}
+              onExecutionModeChange={setExecutionMode}
+              onEffectModeChange={setEffectMode}
+              onPreviewOnlyChange={setPreviewOnly}
+              onAllowModelCallChange={setAllowModelCall}
+              onFixtureIdChange={setFixtureId}
+              onMockArtifactIdChange={setMockArtifactId}
+              onBaseStepIdChange={setBaseStepId}
+              onInputsTextChange={setInputsText}
+              onFormatInputs={handleFormatInputs}
+              onExecute={() => void handleExecute()}
+            />
+            <StepResult step={selectedStep} loading={stepLoading} />
+          </section>
+        ) : (
+          <LabOnboarding connection={connection} onRefresh={handleRetry} />
+        )}
 
         <ArtifactPanel
           artifacts={allArtifacts}
           artifactKind={artifactKind}
+          hasRun={Boolean(run)}
           disabled={!run || busy}
+          uploading={busyAction === "upload"}
           onArtifactKindChange={setArtifactKind}
           onUpload={(file) => void handleUpload(file)}
         />

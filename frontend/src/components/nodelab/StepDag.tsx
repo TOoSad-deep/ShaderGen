@@ -23,6 +23,7 @@ export function StepDag({ steps, selectedStepId, baseStepId, onSelectStep, onRes
         <button
           type="button"
           className={`node-lab-dag-root ${!baseStepId ? "is-base" : ""}`}
+          aria-pressed={!baseStepId}
           onClick={onResetBase}
           title="把分支基点重置为 Root State"
         >
@@ -37,6 +38,7 @@ export function StepDag({ steps, selectedStepId, baseStepId, onSelectStep, onRes
               baseStepId === step.step_id ? "is-base" : "",
               `is-outcome-${step.outcome}`,
             ].join(" ").trim()}
+            aria-pressed={selectedStepId === step.step_id}
             onClick={() => onSelectStep(step.step_id)}
             title={`${step.step_id} · fingerprint ${step.execution_fingerprint.slice(0, 12)}…`}
           >

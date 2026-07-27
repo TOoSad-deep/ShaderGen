@@ -9,6 +9,7 @@ interface NodeInspectorProps {
   node: NodeLabNodeDescriptor | null;
   hasRun: boolean;
   busy: boolean;
+  executing: boolean;
   steps: NodeLabStepSummary[];
   exampleId: string;
   executionMode: NodeLabExecutionMode;
@@ -42,6 +43,7 @@ export function NodeInspector({
   node,
   hasRun,
   busy,
+  executing,
   steps,
   exampleId,
   executionMode,
@@ -228,9 +230,10 @@ export function NodeInspector({
               className="node-lab-execute"
               type="button"
               disabled={busy || !hasRun || Boolean(inputsError)}
+              aria-busy={executing}
               onClick={onExecute}
             >
-              {busy ? "执行中…" : "执行节点"}
+              {executing ? "执行中…" : "执行节点"}
             </button>
           </div>
         </>

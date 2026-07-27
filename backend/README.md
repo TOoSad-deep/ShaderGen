@@ -2,7 +2,7 @@
 
 Backend 负责 FastAPI HTTP 边界、应用生命周期、过程账本和 `scene_mvp` 用例编排。
 
-通用 Node Lab 由 `src/nodelab_service/` 独立启动；Backend 不导入该包，也不注册 `/api/lab/v1/*`。
+通用 Node Lab 由 `src/nodelab/http/` 独立启动；Backend 不导入该子包，也不注册 `/api/lab/v1/*`。
 
 ## 当前契约
 

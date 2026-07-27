@@ -7,6 +7,8 @@ interface RunControlsProps {
   run: NodeLabRun | null;
   stepCount: number;
   busy: boolean;
+  creating: boolean;
+  resuming: boolean;
   disabled: boolean;
   onProjectIdChange(value: string): void;
   onInitialStateTextChange(value: string): void;
@@ -23,6 +25,8 @@ export function RunControls({
   run,
   stepCount,
   busy,
+  creating,
+  resuming,
   disabled,
   onProjectIdChange,
   onInitialStateTextChange,
@@ -31,7 +35,7 @@ export function RunControls({
   onResumeRun,
 }: RunControlsProps) {
   return (
-    <section className="node-lab-runbar" aria-label="LabRun 控制">
+    <section className="node-lab-runbar" aria-label="LabRun 控制" aria-busy={busy}>
       <div className="node-lab-runbar-actions">
         <label>
           <span>project_id（可选）</span>
@@ -51,7 +55,7 @@ export function RunControls({
           />
         </label>
         <button type="button" disabled={busy || disabled} onClick={onCreateRun}>
-          新建 LabRun
+          {creating ? "创建中…" : "新建 LabRun"}
         </button>
         <label>
           <span>恢复 LabRun ID</span>
@@ -68,14 +72,14 @@ export function RunControls({
           disabled={busy || disabled || !resumeRunId.trim()}
           onClick={onResumeRun}
         >
-          恢复
+          {resuming ? "恢复中…" : "恢复"}
         </button>
       </div>
       <div className="node-lab-run-id" aria-live="polite">
         <strong>当前 LabRun</strong>
         {run ? (
           <>
-            <code>{run.lab_run_id}</code>
+            <code title={run.lab_run_id}>{run.lab_run_id}</code>
             <span>{run.project_id ?? "无 project_id"}</span>
             <span>{stepCount} 个不可变步骤</span>
           </>

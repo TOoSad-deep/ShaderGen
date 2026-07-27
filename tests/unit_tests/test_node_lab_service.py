@@ -8,11 +8,11 @@ from types import ModuleType
 import pytest
 from fastapi.testclient import TestClient
 
+from nodelab.http.factory import load_application
+from nodelab.http.main import create_app
+from nodelab.http.settings import NodeLabServiceSettings
 from nodelab.provider import NodeProviderBuilder
 from nodelab.runner import NodeLabApplication
-from nodelab_service.factory import load_application
-from nodelab_service.main import create_app
-from nodelab_service.settings import NodeLabServiceSettings
 
 
 def _install_factory_module(

@@ -3,6 +3,7 @@ import subprocess
 import sys
 from importlib.resources import files
 from pathlib import Path
+from typing import cast
 
 import agent.app.config
 import backend.sql
@@ -18,7 +19,7 @@ def _run_probe(source: str) -> dict[str, object]:
         capture_output=True,
         text=True,
     )
-    return json.loads(completed.stdout)
+    return cast(dict[str, object], json.loads(completed.stdout))
 
 
 def test_shaderforge_typed_contract_import_does_not_load_renderer() -> None:
@@ -97,3 +98,28 @@ def test_scene_mvp_yaml_is_an_explicit_packaged_resource() -> None:
     policy = files(agent.app.config).joinpath("png_to_shader_min.yaml")
     assert policy.is_file()
     assert "scene_mvp_runtime_policy_v1" in policy.read_text(encoding="utf-8")
+
+
+def test_node_lab_http_is_packaged_under_the_core_namespace() -> None:
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    result = _run_probe(
+        """
+import json
+import nodelab.http
+from nodelab.http import NodeLabServiceSettings
+
+print(json.dumps({
+    "module": nodelab.http.__name__,
+    "settings_module": NodeLabServiceSettings.__module__,
+}))
+"""
+    )
+
+    assert '    "nodelab.http",' in pyproject
+    assert '    "nodelab.http.routes",' in pyproject
+    assert '    "nodelab.http.schemas",' in pyproject
+    assert '"nodelab_service"' not in pyproject
+    assert result == {
+        "module": "nodelab.http",
+        "settings_module": "nodelab.http.settings",
+    }

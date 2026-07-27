@@ -9,8 +9,8 @@ from typing import Sequence
 
 import uvicorn
 
-from nodelab_service.main import create_app
-from nodelab_service.settings import NodeLabServiceSettings
+from nodelab.http.main import create_app
+from nodelab.http.settings import NodeLabServiceSettings
 
 
 def build_parser() -> argparse.ArgumentParser:

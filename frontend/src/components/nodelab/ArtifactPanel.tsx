@@ -8,7 +8,9 @@ import {
 interface ArtifactPanelProps {
   artifacts: NodeLabArtifact[];
   artifactKind: string;
+  hasRun: boolean;
   disabled: boolean;
+  uploading: boolean;
   onArtifactKindChange(value: string): void;
   onUpload(file: File | undefined): void;
 }
@@ -17,7 +19,9 @@ interface ArtifactPanelProps {
 export function ArtifactPanel({
   artifacts,
   artifactKind,
+  hasRun,
   disabled,
+  uploading,
   onArtifactKindChange,
   onUpload,
 }: ArtifactPanelProps) {
@@ -27,7 +31,7 @@ export function ArtifactPanel({
   }
 
   return (
-    <section className="node-lab-artifacts" aria-label="Lab Artifacts">
+    <section className="node-lab-artifacts" aria-label="Lab Artifacts" aria-busy={uploading}>
       <div className="node-lab-section-heading">
         <div>
           <h2>Lab Artifacts</h2>
@@ -40,11 +44,16 @@ export function ArtifactPanel({
             onChange={(event) => onArtifactKindChange(event.target.value)}
           />
           <label className={disabled ? "is-disabled" : ""}>
-            上传 Artifact
+            {uploading ? "上传中…" : "上传 Artifact"}
             <input type="file" disabled={disabled} onChange={handleFileChange} />
           </label>
         </div>
       </div>
+      {!hasRun ? (
+        <p className="node-lab-hint node-lab-artifact-hint">
+          创建或恢复 LabRun 后即可上传 Artifact。
+        </p>
+      ) : null}
       <div className="node-lab-artifact-list">
         {artifacts.map((artifact) => (
           <a
@@ -55,7 +64,7 @@ export function ArtifactPanel({
             title={`sha256: ${artifact.sha256}`}
           >
             <strong>{artifact.kind}</strong>
-            <code>{artifact.artifact_id}</code>
+            <code title={artifact.artifact_id}>{artifact.artifact_id}</code>
             <span>{artifact.content_type} · {artifact.size_bytes} bytes</span>
           </a>
         ))}

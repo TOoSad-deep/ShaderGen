@@ -1,4 +1,4 @@
-"""独立 Node Lab HTTP transport 的编排层."""
+"""Node Lab 独立 HTTP transport 的编排层."""
 
 from __future__ import annotations
 

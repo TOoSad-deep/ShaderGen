@@ -5,6 +5,7 @@ export type NodeLabConnection = "connecting" | "online" | "offline";
 interface LabStatusBarProps {
   connection: NodeLabConnection;
   health: NodeLabHealth | null;
+  onRetry(): void;
 }
 
 const CONNECTION_LABEL: Record<NodeLabConnection, string> = {
@@ -14,7 +15,7 @@ const CONNECTION_LABEL: Record<NodeLabConnection, string> = {
 };
 
 /** 顶部状态栏：服务连接、Pipeline 身份、节点/capability/suite 数量和真实模型门禁。 */
-export function LabStatusBar({ connection, health }: LabStatusBarProps) {
+export function LabStatusBar({ connection, health, onRetry }: LabStatusBarProps) {
   return (
     <header className="node-lab-topbar">
       <div className="node-lab-title">
@@ -23,10 +24,15 @@ export function LabStatusBar({ connection, health }: LabStatusBarProps) {
         <p>任意 Pipeline Node 的逐节点调试工作台：输入、观察、分支、留证。</p>
       </div>
       <div className="node-lab-health" aria-label="服务状态">
-        <span className={`node-lab-pill is-${connection}`}>
+        <span className={`node-lab-pill is-${connection}`} role="status">
           <span className="node-lab-dot" aria-hidden="true" />
           {CONNECTION_LABEL[connection]}
         </span>
+        {connection === "offline" ? (
+          <button type="button" className="node-lab-retry" onClick={onRetry}>
+            重试连接
+          </button>
+        ) : null}
         <code className="node-lab-pill is-neutral" title="Node Lab 独立服务地址">
           {NODE_LAB_API_BASE_URL}
         </code>

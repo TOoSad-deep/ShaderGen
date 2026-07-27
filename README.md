@@ -27,14 +27,14 @@ uv run pytest tests/integration_tests
 uv run python scripts/run_scene_mvp_run_diagnostics.py --run-dir <run-dir> --output-dir <new-output-dir>
 ```
 
-`make check` 执行单元测试、文档边界检查、LangGraph validate 和前端构建。跨组件改动还需按范围运行集成测试或页面 E2E。
+`make check` 执行单元测试、文档边界检查、从干净 sdist 构建的 wheel 边界检查、LangGraph validate 和前端构建。跨组件改动还需按范围运行集成测试或页面 E2E。
 
 `run_scene_mvp_acceptance_live_ab.py` 与 `run_scene_mvp_maturity_budget_replay.py` 仅保留旧 MinScene 纯函数、历史实现和既有报告审计。D076 已退役其 benchmark/Oracle 运行依赖，当前分支不得把它们作为可执行入口，也不能用旧结果证明 ShaderGraph 产品质量或授权修改当前预算。
 
 ## 当前边界
 
 - `langgraph.json` 只注册 `png_to_shader_min`。
-- `src/nodelab/` 与 `src/nodelab_service/` 提供通用 Node Lab 和独立服务；`/lab` 工作台连接端口 8090，产品 Backend 不注册其路由。
+- `src/nodelab/` 提供通用 Node Lab，独立 HTTP transport 位于 `src/nodelab/http/`；`/lab` 工作台连接端口 8090，产品 Backend 不注册其路由。
 - `POST /api/shader/generate` 不再接受生成模式；所有请求执行 `scene_mvp`。
 - 前端不再提供 V1 模式、项目 Memory、V1 score/review/current_best 展示。
 - 只公开 `final-render`、`metrics`、`manifest` 三种运行 Artifact。

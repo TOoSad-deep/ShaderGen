@@ -12,13 +12,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse, Response
 from starlette.types import ExceptionHandler
 
+from nodelab.http.factory import load_application
+from nodelab.http.routes import router
+from nodelab.http.service import NodeLabHttpService, create_node_lab_http_service
+from nodelab.http.settings import NodeLabServiceSettings
 from nodelab.runner import NodeLabApplication
-from nodelab_service.factory import load_application
-from nodelab_service.routes import router
-from nodelab_service.service import NodeLabHttpService, create_node_lab_http_service
-from nodelab_service.settings import NodeLabServiceSettings
 
-logger = logging.getLogger("nodelab_service")
+logger = logging.getLogger("nodelab.http")
 
 
 async def log_request_validation_error(

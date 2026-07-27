@@ -646,3 +646,24 @@
 - 决策：将 `origin/codex/refactor-node-lab-generic@222ea96` 的 Pipeline 无关 `nodelab` 内核、独立 `nodelab_service`、受信任 Application factory 和 `/lab` 工作台向前移植到当前 `main`。独立服务默认创建空安全 Application，产品 Backend 不注册 `/api/lab/v1/*`。冲突中继续采用当前 `main` 对旧 PNG-to-Shader V1 Graph、Agent Adapter、benchmark manifest、脚本与专用测试的删除结果。
 - 原因：目标分支基于旧 V1 架构开发，直接接受全部 modify/delete 冲突会重新开放 D076 已退役且当前代码无法支撑的运行入口；完全采用 `main` 删除结果又会丢失已经完成的通用 Harness、独立部署边界和工作台。以受信任 factory 作为唯一领域注入点，可以保留通用能力而不让 transport 反向依赖 Agent 或 ShaderForge。
 - 影响：新增 `make dev-node-lab`、`NODELAB_*` 服务端配置、`VITE_NODE_LAB_API_BASE_URL` 和 `/lab` 页面；`nodelab`/`nodelab_service` 随 `shadergen` distribution 发布。若未来需要调试当前 `png_to_shader_min`，必须为 ShaderGraph 现契约另建 Provider/Executor factory，不得复活旧 V1 Adapter 或引用已删除的 benchmark 证据。F09 的产品 Graph、路由、`current_best`、质量门禁和历史 evidence registry 均不改变。
+
+## D083 - Node Lab HTTP transport 收拢到 nodelab 命名空间
+
+- 日期：2026-07-27
+- 决策：删除与 `nodelab` 并列的顶级 Python 包 `nodelab_service`，将其 FastAPI transport、进程组合根、Schema、Route、Service、配置、factory 和 CLI 实现原样迁入 `nodelab.http`。控制台命令 `nodelab-service`、`make dev-node-lab`、默认端口 8090、`NODELAB_*` 环境变量、`/api/lab/v1/*` HTTP 契约、空安全默认 Application 和受信任 factory 语义保持不变；本分支不提供旧 Python import 路径兼容层。
+- 原因：`nodelab` 与 `nodelab_service` 虽表现为两个顶级包，实际始终由同一个 `shadergen` distribution、同一份依赖和同一版本发布，拆分没有形成独立 wheel 或发布生命周期，只增加源码导航、打包清单和命名负担。独立进程边界不要求独立顶级包；`nodelab.http -> nodelab` 可以同时表达同一工具命名空间与单向 transport 依赖。
+- 影响：Python 导入从 `nodelab_service.*` 改为 `nodelab.http.*`，wheel 只包含 `nodelab` 顶级包，CLI entry point 改指 `nodelab.http.cli:main`。新增结构测试锁定核心不得依赖 FastAPI、产品包或 HTTP 子包，HTTP 子包不得依赖 Agent、Backend 或 ShaderForge，Backend 不得反向注册 HTTP transport；新增包导入测试和隔离 wheel smoke test。当前 ShaderGraph、产品 Backend、Graph 拓扑、HTTP/Artifact 契约、Node Lab 数据格式、旧 V1 退役边界和 F09 状态均不改变。
+
+## D084 - Node Lab HTTP Schema 按资源职责拆分并保留稳定 façade
+
+- 日期：2026-07-27
+- 决策：将单文件 `nodelab.http.schemas` 改为同名 package，通过 `schemas/__init__.py` 继续导出全部原公共名称；内部拆为 `common.py` 公共严格基类与 suite id、`execution.py` LabRun/Node/Capability/Artifact 契约、`batch.py` 固定 suite/report 契约和 `errors.py` 稳定错误 envelope。Route 继续只从 `nodelab.http.schemas` 聚合入口导入，不直接耦合叶子模块。
+- 原因：原 `schemas.py` 以 377 行同时承载在线执行资源、离线 batch/report 和错误模型，职责边界只能靠类的排列顺序辨认。Schema 是纯声明层，按资源拆分可以在不触碰执行流程的情况下先降低 HTTP 模块认知负担，并为后续 Route 拆分提供稳定契约边界。
+- 影响：Pydantic 类名、字段、默认值、严格校验、OpenAPI component 名称、`/api/lab/v1/*` 路径和原 `from nodelab.http.schemas import ...` 导入保持不变；`nodelab.http.schemas` 加入显式 wheel package 清单。新增 façade identity、OpenAPI 关键 Schema/路径和 Schema leaf 不依赖 HTTP runtime 的测试；`make check` 新增从干净 sdist 构建 wheel 的边界门禁，拒绝旧 `schemas.py`、旧 `nodelab_service` 或错误 CLI entry point，避免工作区 `build/` 缓存混入发布物。Node Lab 执行、Artifact、benchmark、产品 Graph、Backend 和 F09 状态均不改变。
+
+## D085 - Node Lab HTTP Route 按资源拆分并锁定完整 OpenAPI 操作集
+
+- 日期：2026-07-27
+- 决策：将 449 行 `nodelab.http.routes` 单文件改为同名 package，通过 `routes/__init__.py` 继续导出唯一公共 `router`；内部拆为 `dependencies.py` 服务解析与稳定错误映射、`health.py` 健康状态、`batch.py` 固定 suite/report、`catalog.py` Node/Capability descriptor、`runs.py` LabRun/Step/Capability 执行和 `artifacts.py` Artifact 上传/目录/读取。聚合 Router 继续统一持有 `/api/lab/v1` prefix 与 `node-lab` tag。
+- 原因：原文件同时维护组合根读取、错误码映射和五类资源端点，任何局部 HTTP 改动都需要理解完整 449 行上下文。Schema 已由 D084 形成稳定 façade，Route 可以按资源独立评审，同时让共享错误/服务依赖保持单一实现。
+- 影响：18 个公开 method/path 组合、endpoint 函数名与 operationId、响应模型、OpenAPI tag、错误状态映射、8MB Artifact 上限、受信任 factory 和 HTTP/CLI 外部契约保持不变；`nodelab.http.routes` 加入显式 wheel package 清单。新增完整 OpenAPI 操作集、operationId 唯一性和 tag 回归，clean-wheel 门禁拒绝旧 `routes.py` 并要求全部 Route 叶子模块存在。Node Lab Application、benchmark、产品 Backend、Graph 和 F09 状态均不改变。
