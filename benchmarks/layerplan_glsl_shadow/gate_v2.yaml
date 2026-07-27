@@ -1,0 +1,27 @@
+# D089：必须在查看 direct GLSL v2 真实结果前冻结。
+schema_version: layerplan_glsl_shadow_gate_v2
+experiment_id: layerplan_glsl_shadow_ab_v1
+run_classification: independent_experiment
+report_schema_version: layerplan_glsl_shadow_ab_report_v1
+metric_version: min_scene_composite_v3
+frozen_at: 2026-07-27
+manifest_sha256: ac4eb80838c1b49ac948a4892ce0ce9a133534062d67e79cfc404307d5d0b394
+implementation_identity_sha256: 76897856088dd9adebd99d87c8585a00b68c524ea5438774d9a85a1e8fdfb9a4
+config_fingerprints:
+  AB: 22a4fad1ba6242cda3fa2a0d9c82e55cc9e8e2b338fc171ad1db71b52d1bb86f
+  BA: 92ffe28f5d2588b7cc2f0975ca59cb38be74542c852a076615d43d3f80666eb7
+primary_endpoint:
+  metric: current_best_loss
+  comparison: paired_per_sample_per_round
+  improvement_margin: 0.005
+  min_improved_sample_ratio: 0.75
+order_effect:
+  rule: consistent_direction_required
+inconclusive_policy:
+  counting: inconclusive_counts_against_arm_b
+  max_inconclusive_sample_ratio: 0.25
+human_review:
+  required: true
+  min_arm_b_preference_rate: 0.5
+  tie_policy: ties_not_counted_as_b_win
+durability_requirement: durable_required_for_promotion

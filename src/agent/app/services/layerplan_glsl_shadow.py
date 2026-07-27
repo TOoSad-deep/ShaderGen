@@ -190,6 +190,7 @@ class ShadowABConfig:
     arm_order: tuple[ArmId, ArmId] = (ARM_A, ARM_B)
     canvas_width: int | None = None
     canvas_height: int | None = None
+    implementation_identity_sha256: str | None = None
 
     def __post_init__(self) -> None:
         """校验预算与臂顺序，非法配置 fail-closed."""
@@ -213,6 +214,17 @@ class ShadowABConfig:
                 raise ShadowABConfigError(f"{name} 必须是正整数或 None。")
         if (self.canvas_width is None) != (self.canvas_height is None):
             raise ShadowABConfigError("canvas_width 与 canvas_height 必须同时给出。")
+        if self.implementation_identity_sha256 is not None and (
+            not isinstance(self.implementation_identity_sha256, str)
+            or len(self.implementation_identity_sha256) != 64
+            or any(
+                char not in "0123456789abcdef"
+                for char in self.implementation_identity_sha256
+            )
+        ):
+            raise ShadowABConfigError(
+                "implementation_identity_sha256 必须是小写 SHA-256 或 None。"
+            )
         if (
             self.canvas_width is not None
             and self.canvas_height is not None
@@ -228,7 +240,7 @@ class ShadowABConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """返回可序列化的冻结配置."""
-        return {
+        payload = {
             "direct_author_llm_budget": self.direct_author_llm_budget,
             "compile_budget_per_arm": self.compile_budget_per_arm,
             "draw_budget_per_arm": self.draw_budget_per_arm,
@@ -244,6 +256,11 @@ class ShadowABConfig:
                 "sampling_params 的 effective 记录为准。"
             ),
         }
+        if self.implementation_identity_sha256 is not None:
+            payload["implementation_identity_sha256"] = (
+                self.implementation_identity_sha256
+            )
+        return payload
 
 
 @dataclass

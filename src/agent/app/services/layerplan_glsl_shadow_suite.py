@@ -14,7 +14,7 @@ import os
 import re
 import shutil
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date
 from hashlib import sha256
 from math import isfinite
@@ -27,7 +27,22 @@ from uuid import uuid4
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from agent.app.contracts.layerplan_glsl_shadow import (
+    PROGRAM_SPEC_SCHEMA_VERSION,
+    glsl_repair_policy_identity,
+    layer_plan_json_schema,
+    program_spec_json_schema,
+)
 from agent.app.contracts.llm import LLMGateway
+from agent.app.nodes.layerplan_glsl_shadow.authors import (
+    DEFAULT_PLAN_MAX_OUTPUT_TOKENS,
+    DEFAULT_SPEC_MAX_OUTPUT_TOKENS,
+    DIRECT_GLSL_INITIAL_PROMPT,
+    DIRECT_GLSL_REFINE_PROMPT,
+    DIRECT_GLSL_REPAIR_PROMPT,
+    VISUAL_ANALYSIS_PROMPT,
+)
+from agent.app.nodes.png_to_shader_min.model_author import MAX_STRUCTURED_ATTEMPTS
 from agent.app.services.layerplan_glsl_shadow import (
     ARM_A,
     ARM_B,
@@ -42,11 +57,20 @@ from agent.app.services.layerplan_glsl_shadow import (
     verify_shadow_run,
     write_shadow_run,
 )
+from shaderforge.contracts import WEBGL1_STATIC_NO_TEXTURE_V1
 from shaderforge.evaluation import MIN_SCENE_METRIC_VERSION
 from shaderforge.program_spec import canonical_json
+from shaderforge.validation import ProgramSpecSafetyLimits
 
 MANIFEST_SCHEMA_VERSION = "layerplan_glsl_shadow_manifest_v1"
 GATE_SCHEMA_VERSION = "layerplan_glsl_shadow_gate_v1"
+MANIFEST_SCHEMA_VERSION_V2 = "layerplan_glsl_shadow_manifest_v2"
+GATE_SCHEMA_VERSION_V2 = "layerplan_glsl_shadow_gate_v2"
+CURRENT_MANIFEST_SCHEMA_VERSION = MANIFEST_SCHEMA_VERSION_V2
+CURRENT_GATE_SCHEMA_VERSION = GATE_SCHEMA_VERSION_V2
+IMPLEMENTATION_IDENTITY_SCHEMA_VERSION = "direct_glsl_shadow_implementation_v2"
+PARSER_POLICY_VERSION = "direct_glsl_program_spec_parser_v2_1"
+REPAIR_PAYLOAD_POLICY_VERSION = "direct_glsl_safe_repair_payload_v2_1"
 OrderLabel = Literal["AB", "BA"]
 
 _SHA256_PATTERN = r"^[0-9a-f]{64}$"
@@ -59,6 +83,54 @@ _ORDER_BY_LABEL: dict[OrderLabel, tuple[ArmId, ArmId]] = {
 
 class ShadowSuiteContractError(ValueError):
     """冻结 manifest/gate 违反契约或哈希绑定的 fail-closed 错误."""
+
+
+def current_direct_glsl_implementation_identity() -> dict[str, Any]:
+    """返回与路径、Git 状态无关的 direct GLSL v2 运行契约身份."""
+    prompts = {}
+    for role, prompt in (
+        ("visual_analysis", VISUAL_ANALYSIS_PROMPT),
+        ("initial", DIRECT_GLSL_INITIAL_PROMPT),
+        ("refine", DIRECT_GLSL_REFINE_PROMPT),
+        ("repair", DIRECT_GLSL_REPAIR_PROMPT),
+    ):
+        prompts[role] = {
+            "name": prompt.name,
+            "version": prompt.version,
+            "prompt_sha256": sha256(prompt.prompt.encode("utf-8")).hexdigest(),
+        }
+    body: dict[str, Any] = {
+        "schema_version": IMPLEMENTATION_IDENTITY_SCHEMA_VERSION,
+        "parser_policy_version": PARSER_POLICY_VERSION,
+        "repair_payload_policy_version": REPAIR_PAYLOAD_POLICY_VERSION,
+        "program_spec_schema_version": PROGRAM_SPEC_SCHEMA_VERSION,
+        "layer_plan_json_schema_sha256": sha256(
+            canonical_json(layer_plan_json_schema()).encode("utf-8")
+        ).hexdigest(),
+        "program_spec_json_schema_sha256": sha256(
+            canonical_json(program_spec_json_schema()).encode("utf-8")
+        ).hexdigest(),
+        "glsl_repair_policy_sha256": glsl_repair_policy_identity()[
+            "policy_sha256"
+        ],
+        "author_limits": {
+            "plan_max_output_tokens": DEFAULT_PLAN_MAX_OUTPUT_TOKENS,
+            "spec_max_output_tokens": DEFAULT_SPEC_MAX_OUTPUT_TOKENS,
+            "max_structured_attempts": MAX_STRUCTURED_ATTEMPTS,
+        },
+        "prompts": prompts,
+        "renderer_contract_id": WEBGL1_STATIC_NO_TEXTURE_V1.contract_id,
+        "renderer_contract_sha256": sha256(
+            canonical_json(WEBGL1_STATIC_NO_TEXTURE_V1.to_dict()).encode("utf-8")
+        ).hexdigest(),
+        "program_spec_safety_limits": asdict(ProgramSpecSafetyLimits()),
+    }
+    # canonical JSON round-trip 把 tuple 规范化为 YAML 可表达的 list。
+    normalized = cast(dict[str, Any], yaml.safe_load(canonical_json(body)))
+    normalized["identity_sha256"] = sha256(
+        canonical_json(normalized).encode("utf-8")
+    ).hexdigest()
+    return normalized
 
 
 class ShadowSharedArmConfig(BaseModel):
@@ -89,7 +161,10 @@ class _ManifestSample(BaseModel):
 class _ManifestRoot(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    schema_version: Literal["layerplan_glsl_shadow_manifest_v1"]
+    schema_version: Literal[
+        "layerplan_glsl_shadow_manifest_v1",
+        "layerplan_glsl_shadow_manifest_v2",
+    ]
     experiment_id: str = Field(min_length=1, max_length=100)
     run_classification: Literal["independent_experiment"]
     report_schema_version: str = Field(min_length=1, max_length=100)
@@ -98,6 +173,14 @@ class _ManifestRoot(BaseModel):
     arm_order_schedule: list[OrderLabel] = Field(min_length=2, max_length=64)
     config: ShadowSharedArmConfig
     samples: list[_ManifestSample] = Field(min_length=1, max_length=64)
+    implementation_identity: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def validate_versioned_identity(self) -> _ManifestRoot:
+        is_v2 = self.schema_version == MANIFEST_SCHEMA_VERSION_V2
+        if is_v2 != (self.implementation_identity is not None):
+            raise ValueError("只有 manifest v2 必须且只能携带 implementation_identity。")
+        return self
 
 
 class _GatePrimaryEndpoint(BaseModel):
@@ -133,7 +216,10 @@ class _GateHumanReview(BaseModel):
 class _GateRoot(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
-    schema_version: Literal["layerplan_glsl_shadow_gate_v1"]
+    schema_version: Literal[
+        "layerplan_glsl_shadow_gate_v1",
+        "layerplan_glsl_shadow_gate_v2",
+    ]
     experiment_id: str = Field(min_length=1, max_length=100)
     run_classification: Literal["independent_experiment"]
     report_schema_version: str = Field(min_length=1, max_length=100)
@@ -146,6 +232,9 @@ class _GateRoot(BaseModel):
     inconclusive_policy: _GateInconclusivePolicy
     human_review: _GateHumanReview
     durability_requirement: Literal["durable_required_for_promotion"]
+    implementation_identity_sha256: str | None = Field(
+        default=None, pattern=_SHA256_PATTERN
+    )
 
     @model_validator(mode="after")
     def validate_config_fingerprints(self) -> _GateRoot:
@@ -155,6 +244,11 @@ class _GateRoot(BaseModel):
         for fingerprint in self.config_fingerprints.values():
             if re.fullmatch(_SHA256_PATTERN, fingerprint) is None:
                 raise ValueError("config_fingerprints 必须是小写 SHA-256。")
+        is_v2 = self.schema_version == GATE_SCHEMA_VERSION_V2
+        if is_v2 != (self.implementation_identity_sha256 is not None):
+            raise ValueError(
+                "只有 gate v2 必须且只能携带 implementation_identity_sha256。"
+            )
         return self
 
 
@@ -183,6 +277,9 @@ class ShadowSuiteManifest:
     arm_order_schedule: tuple[tuple[ArmId, ArmId], ...]
     shared_config: ShadowSharedArmConfig
     samples: tuple[ShadowSuiteSample, ...]
+    schema_version: str = MANIFEST_SCHEMA_VERSION
+    implementation_identity: MappingProxyType[str, Any] | None = None
+    implementation_identity_sha256: str | None = None
 
     def arm_order(self, round_index: int) -> tuple[ArmId, ArmId]:
         """返回指定轮次的冻结臂序."""
@@ -212,6 +309,7 @@ class ShadowSuiteManifest:
             arm_order=arm_order,
             canvas_width=self.shared_config.canvas_width,
             canvas_height=self.shared_config.canvas_height,
+            implementation_identity_sha256=self.implementation_identity_sha256,
         )
 
 
@@ -231,6 +329,8 @@ class ShadowSuiteGate:
     min_improved_sample_ratio: float
     max_inconclusive_sample_ratio: float
     min_arm_b_preference_rate: float
+    schema_version: str = GATE_SCHEMA_VERSION
+    implementation_identity_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -305,6 +405,21 @@ def load_shadow_suite_manifest(path: Path | str) -> ShadowSuiteManifest:
         raise ShadowSuiteContractError("rounds 必须等于 arm_order_schedule 长度。")
     if set(root.arm_order_schedule) != {"AB", "BA"}:
         raise ShadowSuiteContractError("调度必须同时包含 AB 与 BA 以交叉平衡。")
+    implementation_identity: dict[str, Any] | None = None
+    implementation_identity_sha256: str | None = None
+    if root.schema_version == MANIFEST_SCHEMA_VERSION_V2:
+        assert root.implementation_identity is not None
+        implementation_identity = dict(root.implementation_identity)
+        claimed_sha256 = implementation_identity.pop("identity_sha256", None)
+        actual_sha256 = sha256(
+            canonical_json(implementation_identity).encode("utf-8")
+        ).hexdigest()
+        if claimed_sha256 != actual_sha256:
+            raise ShadowSuiteContractError(
+                "manifest implementation identity 自哈希不匹配。"
+            )
+        implementation_identity["identity_sha256"] = claimed_sha256
+        implementation_identity_sha256 = actual_sha256
 
     sample_ids: set[str] = set()
     samples: list[ShadowSuiteSample] = []
@@ -348,6 +463,13 @@ def load_shadow_suite_manifest(path: Path | str) -> ShadowSuiteManifest:
         arm_order_schedule=schedule,
         shared_config=root.config,
         samples=tuple(samples),
+        schema_version=root.schema_version,
+        implementation_identity=(
+            MappingProxyType(implementation_identity)
+            if implementation_identity is not None
+            else None
+        ),
+        implementation_identity_sha256=implementation_identity_sha256,
     )
     try:
         for round_index in range(1, result.rounds + 1):
@@ -370,6 +492,13 @@ def load_shadow_suite_gate(
 
     if root.experiment_id != manifest.experiment_id:
         raise ShadowSuiteContractError("gate experiment_id 与 manifest 不一致。")
+    expected_gate_schema = (
+        GATE_SCHEMA_VERSION_V2
+        if manifest.schema_version == MANIFEST_SCHEMA_VERSION_V2
+        else GATE_SCHEMA_VERSION
+    )
+    if root.schema_version != expected_gate_schema:
+        raise ShadowSuiteContractError("gate schema_version 与 manifest 世代不一致。")
     if root.report_schema_version != manifest.report_schema_version:
         raise ShadowSuiteContractError(
             "gate report_schema_version 与 manifest 不一致。"
@@ -378,6 +507,11 @@ def load_shadow_suite_gate(
         raise ShadowSuiteContractError("gate metric_version 与实现不一致。")
     if root.manifest_sha256 != manifest.manifest_sha256:
         raise ShadowSuiteContractError("gate 绑定的 manifest hash 已漂移。")
+    if (
+        root.implementation_identity_sha256
+        != manifest.implementation_identity_sha256
+    ):
+        raise ShadowSuiteContractError("gate implementation identity 绑定已漂移。")
     for label in ("AB", "BA"):
         expected = manifest.config_fingerprint_for_order(label)
         if root.config_fingerprints[label] != expected:
@@ -400,6 +534,8 @@ def load_shadow_suite_gate(
         min_arm_b_preference_rate=(
             root.human_review.min_arm_b_preference_rate
         ),
+        schema_version=root.schema_version,
+        implementation_identity_sha256=root.implementation_identity_sha256,
     )
 
 
@@ -431,6 +567,33 @@ def resolve_verified_sample_images(
             raise ShadowSuiteContractError(f"参考图 hash 漂移：{sample.sample_id}")
         resolved_images[sample.sample_id] = resolved
     return resolved_images
+
+
+def require_current_protocol_for_live(
+    manifest: ShadowSuiteManifest,
+    gate: ShadowSuiteGate,
+) -> tuple[ShadowSuiteManifest, ShadowSuiteGate]:
+    """真实模型只允许当前 v2；v1 仅保留历史证据复验能力."""
+    reloaded_manifest = load_shadow_suite_manifest(manifest.path)
+    reloaded_gate = load_shadow_suite_gate(gate.path, manifest=reloaded_manifest)
+    if reloaded_manifest != manifest or reloaded_gate != gate:
+        raise ShadowSuiteContractError("live 前 manifest/gate 内存对象或文件已漂移。")
+    current_identity = current_direct_glsl_implementation_identity()
+    current_identity_sha256 = str(current_identity["identity_sha256"])
+    if (
+        reloaded_manifest.schema_version != CURRENT_MANIFEST_SCHEMA_VERSION
+        or reloaded_gate.schema_version != CURRENT_GATE_SCHEMA_VERSION
+        or reloaded_manifest.implementation_identity is None
+        or dict(reloaded_manifest.implementation_identity) != current_identity
+        or reloaded_manifest.implementation_identity_sha256
+        != current_identity_sha256
+        or reloaded_gate.implementation_identity_sha256
+        != current_identity_sha256
+    ):
+        raise ShadowSuiteContractError(
+            "非当前 suite 协议只允许 --verify，不再提供真实模型运行入口。"
+        )
+    return reloaded_manifest, reloaded_gate
 
 
 def _arm_summary(
@@ -632,7 +795,7 @@ def build_shadow_suite_report(
     gate: ShadowSuiteGate,
 ) -> dict[str, Any]:
     """构造不含自身 hash 的 suite 报告主体."""
-    return {
+    report: dict[str, Any] = {
         "report_schema_version": "layerplan_glsl_shadow_suite_report_v1",
         "experiment_id": manifest.experiment_id,
         "run_classification": "independent_experiment",
@@ -658,6 +821,12 @@ def build_shadow_suite_report(
             "自动 gate 通过也不得晋升；仍需独立人工盲评与 durable 跨环境证据。",
         ],
     }
+    if manifest.implementation_identity_sha256 is not None:
+        report["implementation_identity"] = {
+            "schema_version": IMPLEMENTATION_IDENTITY_SCHEMA_VERSION,
+            "sha256": manifest.implementation_identity_sha256,
+        }
+    return report
 
 
 def _suite_id(report_body: Mapping[str, Any]) -> str:
@@ -795,6 +964,7 @@ async def run_shadow_suite(
     ) = None,
 ) -> Path:
     """顺序执行冻结 suite，写入并复验全部私有证据."""
+    manifest, gate = require_current_protocol_for_live(manifest, gate)
     images = resolve_verified_sample_images(manifest)
     records: list[VerifiedSuiteRun] = []
     for sample in manifest.samples:
@@ -844,7 +1014,12 @@ async def run_shadow_suite(
 
 __all__ = [
     "GATE_SCHEMA_VERSION",
+    "GATE_SCHEMA_VERSION_V2",
+    "IMPLEMENTATION_IDENTITY_SCHEMA_VERSION",
     "MANIFEST_SCHEMA_VERSION",
+    "MANIFEST_SCHEMA_VERSION_V2",
+    "CURRENT_GATE_SCHEMA_VERSION",
+    "CURRENT_MANIFEST_SCHEMA_VERSION",
     "ShadowSharedArmConfig",
     "ShadowSuiteContractError",
     "ShadowSuiteGate",
@@ -853,9 +1028,11 @@ __all__ = [
     "VerifiedSuiteRun",
     "aggregate_shadow_suite",
     "build_shadow_suite_report",
+    "current_direct_glsl_implementation_identity",
     "load_shadow_suite_gate",
     "load_shadow_suite_manifest",
     "resolve_verified_sample_images",
+    "require_current_protocol_for_live",
     "run_shadow_suite",
     "verify_shadow_suite_report",
     "write_shadow_suite_report",

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import date
 from hashlib import sha256
 from pathlib import Path
@@ -15,14 +16,20 @@ from agent.app.services.layerplan_glsl_shadow_suite import (
     ShadowSuiteContractError,
     VerifiedSuiteRun,
     aggregate_shadow_suite,
+    build_shadow_suite_report,
+    current_direct_glsl_implementation_identity,
     load_shadow_suite_gate,
     load_shadow_suite_manifest,
+    require_current_protocol_for_live,
     resolve_verified_sample_images,
 )
+from shaderforge.program_spec import canonical_json
 
 ROOT = Path(__file__).resolve().parents[2]
 MANIFEST = ROOT / "benchmarks/layerplan_glsl_shadow/manifest_v1.yaml"
 GATE = ROOT / "benchmarks/layerplan_glsl_shadow/gate_v1.yaml"
+MANIFEST_V2 = ROOT / "benchmarks/layerplan_glsl_shadow/manifest_v2.yaml"
+GATE_V2 = ROOT / "benchmarks/layerplan_glsl_shadow/gate_v2.yaml"
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -76,6 +83,97 @@ def test_repository_protocol_loads_and_cross_balances() -> None:
     }
     assert gate.manifest_sha256 == manifest.manifest_sha256
     assert gate.gate_sha256 == sha256(GATE.read_bytes()).hexdigest()
+
+
+def test_repository_v2_protocol_binds_current_implementation() -> None:
+    manifest = load_shadow_suite_manifest(MANIFEST_V2)
+    gate = load_shadow_suite_gate(GATE_V2, manifest=manifest)
+    identity = current_direct_glsl_implementation_identity()
+
+    assert manifest.schema_version == "layerplan_glsl_shadow_manifest_v2"
+    assert dict(manifest.implementation_identity or {}) == identity
+    assert manifest.implementation_identity_sha256 == identity["identity_sha256"]
+    assert gate.schema_version == "layerplan_glsl_shadow_gate_v2"
+    assert gate.implementation_identity_sha256 == identity["identity_sha256"]
+    legacy = load_shadow_suite_manifest(MANIFEST)
+    assert manifest.config_fingerprint_for_order("AB") != (
+        legacy.config_fingerprint_for_order("AB")
+    )
+    assert manifest.arm_config(1).implementation_identity_sha256 == (
+        identity["identity_sha256"]
+    )
+
+
+def test_legacy_protocol_remains_loadable_without_v2_identity() -> None:
+    manifest = load_shadow_suite_manifest(MANIFEST)
+    gate = load_shadow_suite_gate(GATE, manifest=manifest)
+
+    assert manifest.implementation_identity is None
+    assert manifest.implementation_identity_sha256 is None
+    assert gate.implementation_identity_sha256 is None
+
+
+def test_v2_manifest_rejects_implementation_drift(tmp_path: Path) -> None:
+    payload = _load_yaml(MANIFEST_V2)
+    payload["implementation_identity"]["prompts"]["repair"]["version"] = "drifted"
+    path = tmp_path / "manifest_v2.yaml"
+    _write_yaml(path, payload)
+
+    with pytest.raises(
+        ShadowSuiteContractError, match="implementation identity 自哈希不匹配"
+    ):
+        load_shadow_suite_manifest(path)
+
+
+def test_v2_historical_self_consistent_identity_remains_loadable(
+    tmp_path: Path,
+) -> None:
+    payload = _load_yaml(MANIFEST_V2)
+    identity = payload["implementation_identity"]
+    identity["prompts"]["repair"]["version"] = "historical-version"
+    identity_without_hash = dict(identity)
+    identity_without_hash.pop("identity_sha256")
+    identity["identity_sha256"] = sha256(
+        canonical_json(identity_without_hash).encode("utf-8")
+    ).hexdigest()
+    path = tmp_path / "historical_manifest_v2.yaml"
+    _write_yaml(path, payload)
+
+    loaded = load_shadow_suite_manifest(path)
+    assert loaded.implementation_identity_sha256 == identity["identity_sha256"]
+    assert dict(loaded.implementation_identity or {}) != (
+        current_direct_glsl_implementation_identity()
+    )
+
+
+def test_v2_gate_rejects_identity_or_generation_mismatch(tmp_path: Path) -> None:
+    manifest = load_shadow_suite_manifest(MANIFEST_V2)
+    payload = _load_yaml(GATE_V2)
+    payload["implementation_identity_sha256"] = "0" * 64
+    path = tmp_path / "gate_v2.yaml"
+    _write_yaml(path, payload)
+    with pytest.raises(
+        ShadowSuiteContractError, match="implementation identity 绑定已漂移"
+    ):
+        load_shadow_suite_gate(path, manifest=manifest)
+
+    with pytest.raises(ShadowSuiteContractError, match="世代不一致"):
+        load_shadow_suite_gate(GATE, manifest=manifest)
+
+
+def test_legacy_protocol_is_verify_only() -> None:
+    legacy_manifest = load_shadow_suite_manifest(MANIFEST)
+    legacy_gate = load_shadow_suite_gate(GATE, manifest=legacy_manifest)
+    with pytest.raises(ShadowSuiteContractError, match="只允许 --verify"):
+        require_current_protocol_for_live(legacy_manifest, legacy_gate)
+
+    current_manifest = load_shadow_suite_manifest(MANIFEST_V2)
+    current_gate = load_shadow_suite_gate(GATE_V2, manifest=current_manifest)
+    require_current_protocol_for_live(current_manifest, current_gate)
+
+    forged = replace(current_manifest, rounds=4)
+    with pytest.raises(ShadowSuiteContractError, match="内存对象或文件已漂移"):
+        require_current_protocol_for_live(forged, current_gate)
 
 
 def test_instruction_hash_drift_is_rejected(tmp_path: Path) -> None:
@@ -230,6 +328,26 @@ def _records(
                 )
             )
     return tuple(records)
+
+
+def test_v2_suite_report_explicitly_binds_implementation_identity() -> None:
+    manifest = load_shadow_suite_manifest(MANIFEST_V2)
+    gate = load_shadow_suite_gate(GATE_V2, manifest=manifest)
+    report = build_shadow_suite_report(
+        _records(
+            deltas={
+                sample.sample_id: (-0.01, -0.01)
+                for sample in manifest.samples
+            }
+        ),
+        manifest=manifest,
+        gate=gate,
+    )
+
+    assert report["implementation_identity"] == {
+        "schema_version": "direct_glsl_shadow_implementation_v2",
+        "sha256": manifest.implementation_identity_sha256,
+    }
 
 
 def test_aggregate_passes_only_with_margin_and_both_order_directions() -> None:

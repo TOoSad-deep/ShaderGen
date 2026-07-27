@@ -54,6 +54,7 @@
 | D086 | accepted | — | 冻结 LayerPlan shadow suite 的四样本、AB/BA 调度、预算指纹与预声明 gate；真实运行前 fail-closed 复验。 |
 | D087 | accepted | — | 首轮真实 LayerPlan suite 自动 gate 失败，保持生产 no-go；先修复 direct GLSL 契约遵循稳定性再重新冻结实验。 |
 | D088 | accepted | — | direct GLSL v2 只提高 shadow 两臂共用契约稳定性；生产路径保持不变，重跑前必须重新冻结实现身份。 |
+| D089 | accepted | — | 冻结 manifest_v2/gate_v2 与完整 shadow Author 实现身份；v1 只保留历史复验，禁止再次 live。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -697,3 +698,10 @@
 - 决策：新增 `direct_glsl_initial_v2_1`、`direct_glsl_refine_v2_1` 与 `min_author_repair_v2_1`，只供 LayerPlan shadow 的 direct Initial/Refine 使用；生产 scene_mvp 与 VisualAnalysis Author 继续默认使用原 repair v1。Parser 保留可信层生成的 probe Spec 并复用完整 `validate_program_spec_safety`，在结构 repair 前覆盖预处理指令、规范循环/1024 上限、资源上限与既有 WebGL1 规则；顶层错误码保持 `glsl_renderer_contract_violation`，次级诊断仅为去重保序、最多 12 条的固定 `code + line|null`。repair v2 只接收固定 required declarations、按错误码映射的指令和安全类别，修复上下文哈希绑定实际 repair Prompt、hints、Schema、原输出哈希和两次有效调用身份。
 - 原因：D087 的 3/4 inconclusive 主要来自两臂共用 direct GLSL 契约遵循不稳定；若只改 LayerPlan 臂或放宽 Validator，会污染 A/B 控制变量并掩盖模型失败。把 runner 已执行的 canonical safety 前移到 Author Parser，才能让同一次有界 repair 处理真实阻塞规则，同时不引入确定性 GLSL 静默改写。
 - 影响：生产 Graph、API、ShaderDocument/Compiler、scorer、预算和 `current_best` 不变；两臂仍使用相同 direct Prompt/repair/调用参数，唯一预期差异仍是 LayerPlan advisory 输入。shadow 编译失败事件同步移除原始 compiler/link log 与 Validator message，只保留日志存在性、SHA-256 和安全违规类别。v1 Prompt、suite 和真实证据继续保留；下一步必须另行冻结绑定 v2 实现身份的 manifest/gate，验证前不得声称质量改善或晋升生产。
+
+## D089 - 冻结 direct GLSL v2 suite 与完整实现身份后才允许重跑
+
+- 日期：2026-07-27
+- 决策：新增 `manifest_v2.yaml` 与 `gate_v2.yaml`，样本、AB/BA 调度、预算和判定阈值保持 v1 不变，以隔离 D088 契约稳定性增量；v2 manifest 额外绑定 VisualAnalysis/Initial/Refine/repair 四个 Prompt 的名称、版本与正文哈希，两类 Author JSON Schema、repair policy、Plan/Spec 输出上限、结构修复次数、Renderer contract 和 ProgramSpec SafetyLimits，gate 同时绑定 manifest SHA、实现身份 SHA 与带实现身份的两种 `ShadowABConfig` 指纹。suite 报告显式写入实现身份，单 run 的 config fingerprint 也携带该身份，禁止用旧实现 run 冒充 v2 结果。
+- 原因：只在 suite 报告声明 v2 不足以阻止历史单 run 被重新拼装；Prompt、Schema、repair mapping、token 上限或 Validator 资源限制任一漂移都可能改变结果。实现身份必须由运行时 canonical 重算并与冻结 YAML 全量相等，再传递进单 run fingerprint、gate 和 suite report，才能 fail-closed。
+- 影响：CLI 默认切到 v2；`run_shadow_suite()` 公共入口同样拒绝 v1 live。v1 manifest/gate、首轮 no-go 报告与 verifier 继续保留，只允许显式 `--verify` 历史复验，不恢复旧运行入口。v2 协议提交前不调用真实模型；生产 Graph/API/ShaderDocument/Compiler/scorer/预算/`current_best` 均不变。

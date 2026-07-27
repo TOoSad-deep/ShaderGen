@@ -583,6 +583,16 @@ def build_glsl_repair_hints(error: ValueError) -> dict[str, object] | None:
     }
 
 
+def glsl_repair_policy_identity() -> dict[str, object]:
+    """返回 repair v2 固定声明与错误码指令的 canonical 身份."""
+    body: dict[str, object] = {
+        "required_declarations": list(GLSL_REQUIRED_DECLARATIONS),
+        "repair_directives": dict(sorted(_GLSL_REPAIR_DIRECTIVES.items())),
+    }
+    body["policy_sha256"] = sha256_hex_text(canonical_json(body))
+    return body
+
+
 # --- 薄装配：真实 author/input 身份 + canonical build/hash ---
 
 
@@ -642,6 +652,8 @@ __all__ = [
     "ValidatedIncumbent",
     "assemble_layer_plan",
     "assemble_program_spec",
+    "build_glsl_repair_hints",
+    "glsl_repair_policy_identity",
     "initial_input_context_sha256",
     "layer_plan_json_schema",
     "parse_layer_plan_semantics",

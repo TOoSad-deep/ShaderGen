@@ -14,6 +14,7 @@ import yaml
 from PIL import Image
 
 from agent.app.services.layerplan_glsl_shadow_suite import (
+    current_direct_glsl_implementation_identity,
     load_shadow_suite_gate,
     load_shadow_suite_manifest,
     run_shadow_suite,
@@ -55,7 +56,7 @@ def _write_protocol(root: Path) -> tuple[Path, Path]:
     manifest_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": "layerplan_glsl_shadow_manifest_v1",
+                "schema_version": "layerplan_glsl_shadow_manifest_v2",
                 "experiment_id": "layerplan_glsl_shadow_ab_v1",
                 "run_classification": "independent_experiment",
                 "report_schema_version": "layerplan_glsl_shadow_ab_report_v1",
@@ -72,6 +73,9 @@ def _write_protocol(root: Path) -> tuple[Path, Path]:
                     "canvas_height": CANVAS,
                 },
                 "samples": samples,
+                "implementation_identity": (
+                    current_direct_glsl_implementation_identity()
+                ),
             },
             allow_unicode=True,
             sort_keys=False,
@@ -83,13 +87,16 @@ def _write_protocol(root: Path) -> tuple[Path, Path]:
     gate_path.write_text(
         yaml.safe_dump(
             {
-                "schema_version": "layerplan_glsl_shadow_gate_v1",
+                "schema_version": "layerplan_glsl_shadow_gate_v2",
                 "experiment_id": "layerplan_glsl_shadow_ab_v1",
                 "run_classification": "independent_experiment",
                 "report_schema_version": "layerplan_glsl_shadow_ab_report_v1",
                 "metric_version": "min_scene_composite_v3",
                 "frozen_at": date(2026, 7, 27),
                 "manifest_sha256": manifest.manifest_sha256,
+                "implementation_identity_sha256": (
+                    manifest.implementation_identity_sha256
+                ),
                 "config_fingerprints": {
                     "AB": manifest.config_fingerprint_for_order("AB"),
                     "BA": manifest.config_fingerprint_for_order("BA"),

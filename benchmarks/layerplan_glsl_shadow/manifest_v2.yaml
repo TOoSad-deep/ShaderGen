@@ -1,0 +1,80 @@
+# D089：direct GLSL v2 冻结协议。样本/预算沿用 v1，新增实现身份绑定。
+schema_version: layerplan_glsl_shadow_manifest_v2
+experiment_id: layerplan_glsl_shadow_ab_v1
+run_classification: independent_experiment
+report_schema_version: layerplan_glsl_shadow_ab_report_v1
+frozen_at: 2026-07-27
+rounds: 2
+arm_order_schedule: [AB, BA]
+config:
+  direct_author_llm_budget: 8
+  compile_budget_per_arm: 8
+  draw_budget_per_arm: 8
+  refine_budget_per_arm: 2
+  plan_llm_budget: 2
+  canvas_width: null
+  canvas_height: null
+samples:
+  - sample_id: solid_circle
+    reference_path: images/solid_circle.png
+    reference_sha256: 7ed59045ada3434c126f70a60a079d75ebf461359e34165f6f56700c1d360ac8
+    reference_content_type: image/png
+    instruction: "复刻参考图的结构、颜色、高光与阴影。"
+    instruction_sha256: c4ea37b47714e353cecfdde5e34720da21a2f4de12ea060a42d35f31f486d994
+  - sample_id: ellipse_gradient
+    reference_path: images/ellipse_gradient.png
+    reference_sha256: 799877174ff433b4764877f2835e71c2b87a62487ae67edf55ad487a5bf9f1da
+    reference_content_type: image/png
+    instruction: "复刻参考图的结构、颜色、高光与阴影。"
+    instruction_sha256: c4ea37b47714e353cecfdde5e34720da21a2f4de12ea060a42d35f31f486d994
+  - sample_id: rimmed_disk
+    reference_path: images/rimmed_disk.png
+    reference_sha256: a50d8f24fd99f98225c9d859e036ac6830307e1c5f7ffd87522ff37109298b6a
+    reference_content_type: image/png
+    instruction: "复刻参考图的结构、颜色、高光与阴影。"
+    instruction_sha256: c4ea37b47714e353cecfdde5e34720da21a2f4de12ea060a42d35f31f486d994
+  - sample_id: pink_gel
+    reference_path: images/pink_gel.png
+    reference_sha256: 5f182a927055e607dc85261c7d035d45fe5cef4081f833a71858dbcafe184140
+    reference_content_type: image/png
+    instruction: "复刻参考图的结构、颜色、高光与阴影。"
+    instruction_sha256: c4ea37b47714e353cecfdde5e34720da21a2f4de12ea060a42d35f31f486d994
+implementation_identity:
+  schema_version: direct_glsl_shadow_implementation_v2
+  parser_policy_version: direct_glsl_program_spec_parser_v2_1
+  repair_payload_policy_version: direct_glsl_safe_repair_payload_v2_1
+  program_spec_schema_version: shader_program_spec_v1
+  prompts:
+    initial:
+      name: direct_glsl_initial_v2
+      version: direct_glsl_initial_v2_1
+      prompt_sha256: 558328fe72959cf44b75a1e80cf93ee15082e7d112a93e18e77dc5026f14d772
+    refine:
+      name: direct_glsl_refine_v2
+      version: direct_glsl_refine_v2_1
+      prompt_sha256: ef4c2b4bf15559e6583cb4bed808cbe18331c47a5f264c34a68385c9a9a80828
+    repair:
+      name: min_author_repair_v2
+      version: min_author_repair_v2_1
+      prompt_sha256: 23ef42f05352219819c296bbf852a58c47cb17d9023c0476360da4d4bf38d71a
+    visual_analysis:
+      name: layerplan_visual_analysis_v1
+      version: layerplan_visual_analysis_v1_1
+      prompt_sha256: dc2a13514021fbc871589a381d94431fba532ea67fc0244e1b9046e47b3cd937
+  renderer_contract_id: webgl1_static_no_texture_v1
+  renderer_contract_sha256: b27725287f6b277f3776746c79e78379bd17d2221cd4ccb5575c07e4155878cc
+  layer_plan_json_schema_sha256: 35165e4b9665e6e39fa2eb4e2a64125836adf42df640b1edaf9b0f4622b638b1
+  program_spec_json_schema_sha256: 2b650806d254a002780424b9c5e398d616ab72bccecef55f6fd5c1bb221b1c04
+  glsl_repair_policy_sha256: 6744cff7f6fc1b1675d1baa2694fd89e793d1fc85345a94156888dfc54ee9253
+  author_limits:
+    plan_max_output_tokens: 2048
+    spec_max_output_tokens: 4096
+    max_structured_attempts: 2
+  program_spec_safety_limits:
+    max_source_chars: 30000
+    max_uniforms: 16
+    max_uniform_components: 64
+    max_tunables: 16
+    max_canvas_side: 1024
+    max_loop_iterations: 1024
+  identity_sha256: 76897856088dd9adebd99d87c8585a00b68c524ea5438774d9a85a1e8fdfb9a4

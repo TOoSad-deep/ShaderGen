@@ -1,4 +1,4 @@
-"""执行 D086 冻结的 LayerPlan/direct GLSL shadow suite."""
+"""执行最新冻结的 LayerPlan/direct GLSL shadow suite."""
 
 from __future__ import annotations
 
@@ -11,14 +11,15 @@ from agent.app.llms.gateway import LangChainLLMGateway
 from agent.app.services.layerplan_glsl_shadow_suite import (
     load_shadow_suite_gate,
     load_shadow_suite_manifest,
+    require_current_protocol_for_live,
     run_shadow_suite,
     verify_shadow_suite_report,
 )
 from shaderforge.rendering import PlaywrightWebGL1Renderer
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MANIFEST = ROOT / "benchmarks/layerplan_glsl_shadow/manifest_v1.yaml"
-DEFAULT_GATE = ROOT / "benchmarks/layerplan_glsl_shadow/gate_v1.yaml"
+DEFAULT_MANIFEST = ROOT / "benchmarks/layerplan_glsl_shadow/manifest_v2.yaml"
+DEFAULT_GATE = ROOT / "benchmarks/layerplan_glsl_shadow/gate_v2.yaml"
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -69,6 +70,11 @@ def main(argv: list[str] | None = None) -> int:
             f"outcome={payload['aggregate']['automatic_gate']['outcome']}"
         )
         return 0
+    try:
+        require_current_protocol_for_live(manifest, gate)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)  # noqa: T201
+        return 2
     if not args.output_root:
         print("缺少 --output-root。", file=sys.stderr)  # noqa: T201
         return 2
