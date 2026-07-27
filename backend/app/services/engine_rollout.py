@@ -273,11 +273,14 @@ def resolve_parent_run_plan(
             if direct_implementation_identity is not None
             else str(current_direct_glsl_implementation_identity()["identity_sha256"])
         )
-        authorization_sha = _verify_promotion_authority(
-            policy=policy,
-            verifier=promotion_verifier,
-            direct_implementation_identity=current_identity,
-        )
+        if policy.promotion_authorization is not None:
+            authorization_sha = _verify_promotion_authority(
+                policy=policy,
+                verifier=promotion_verifier,
+                direct_implementation_identity=current_identity,
+            )
+        elif stage != "direct_default":
+            raise PromotionAuthorityUnavailable("promotion_authority_unavailable")
         primary_engine = "direct_glsl_layerplan_v1"
     elif policy.promotion_authorization is not None:
         authorization_sha = promotion_authorization_sha256(

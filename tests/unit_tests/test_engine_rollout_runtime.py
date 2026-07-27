@@ -16,6 +16,7 @@ import backend.app.services.engine_rollout_runtime as runtime_module
 from backend.app.core.engine_policy import (
     PromotionAuthorizationV1,
     ShaderEnginePolicyV1,
+    direct_default_shader_engine_policy,
     promotion_authorization_sha256,
     resolve_engine_policy,
 )
@@ -350,6 +351,31 @@ def test_disabled_stage_does_not_construct_artifact_or_executor_runtime(
     )
     assert runtime is None
     assert not (tmp_path / "must-not-exist").exists()
+
+
+def test_default_direct_runtime_builds_without_promotion_receipt(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        runtime_module,
+        "current_direct_glsl_implementation_identity",
+        lambda: {"identity_sha256": _IDENTITY},
+    )
+    policy = direct_default_shader_engine_policy()
+    runtime = build_engine_rollout_runtime(
+        policy=policy,
+        resolution=resolve_engine_policy(policy, kill_switch_active=False),
+        promotion_verification=None,
+        public_min_service=_PublicService(tmp_path / "public"),
+        private_attempt_root=tmp_path / "private",
+        direct_runner_factory=_DirectFactory(ok=True),
+        private_shader_graph_service_factory=_OldFactory(),
+    )
+    assert runtime is not None
+    plan = runtime.plan(parent_run_id=uuid4(), project_id="solo-developer")
+    assert plan.primary_engine == "direct_glsl_layerplan_v1"
+    assert plan.promotion_authorization_sha256 is None
 
 
 def test_frozen_verifier_rejects_receipt_drift() -> None:

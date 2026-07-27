@@ -274,6 +274,8 @@ def verify_runtime_promotion_authorization(
             raise PromotionAuthorizationError("非晋升 stage 不得携带授权。")
         return None
     authorization = policy.promotion_authorization
+    if policy.stage == "direct_default" and authorization is None:
+        return None
     if authorization is None or authorization.target_stage != policy.stage:
         raise PromotionAuthorizationError("晋升授权缺失或 target_stage 不匹配。")
     if (
@@ -319,6 +321,12 @@ def require_verification_matches_policy(
     if policy.stage not in {"canary", "direct_default"}:
         if verification is not None:
             raise PromotionAuthorizationError("非晋升 stage 不得携带验证回执。")
+        return
+    if policy.stage == "direct_default" and authorization is None:
+        if verification is not None:
+            raise PromotionAuthorizationError(
+                "无授权 direct_default 不得携带验证回执。"
+            )
         return
     if authorization is None or verification is None:
         raise PromotionAuthorizationError("晋升 stage 缺少可信授权验证回执。")

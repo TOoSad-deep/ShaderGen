@@ -32,12 +32,12 @@
 - `LayerPlanGlslDirectRunner` 只运行 VisualAnalysis LayerPlan + direct Initial/Refine，不运行 A/B 对照 Arm A。它与 shadow Arm B 共同调用 `LayerPlanGlslShadowRunner.execute_layerplan_direct_arm()`，因此 canonical safety、真实 Renderer receipt、metric、program cache、预算与 strict incumbent 选择只有一份实现。
 - `LayerPlanGlslDirectConfig` 独立冻结 plan/direct/repair/compile/draw/refine 预算和 implementation identity；`DirectAttemptResult` 是不可变内存结果，保留 canonical LayerPlan、ProgramSpec、render bytes、receipt 与完整 metric，供后续私有 attempt Artifact 使用。`to_safe_summary()` 只暴露 engine/representation/hash、loss、状态、安全失败码与 ledger，不含 GLSL、LayerPlan 正文、Prompt、render bytes 或原始错误。
 - 本模块本身不装配 LangGraph、不注册 Backend/API、不写产品 Artifact，也不更新
-  D070 `current_best`；production shadow 和已授权 rollout runtime 均从 Backend
+  D070 `current_best`；production shadow 和 direct-default rollout runtime 均从 Backend
   组合根调用它。`engine_rollout_artifacts.py` 负责 public/private store 隔离，
   只有父协调器可把被选 child 的三个白名单文件原子发布为
   `png_to_shader_manifest_v2`；发布前强制 engine/representation 合法配对且与
-  `engine_run.selected_representation` 一致。当前真实 registry 缺 durable entry，因此该
-  canary runtime 已实现但不会在实际启动中取得 authority。
+  `engine_run.selected_representation` 一致。D097 后无 policy 文件时直接装配
+  `direct_default`；显式 canary 或携带授权的 policy 仍执行 registry 校验。
 
 ## layerplan_glsl_promotion_evidence.py（D096 私有晋升证据，非 registry）
 

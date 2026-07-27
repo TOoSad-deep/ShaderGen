@@ -18,6 +18,7 @@ from agent.app.services.engine_rollout_artifacts import (
 from backend.app.core.engine_policy import (
     PromotionAuthorizationV1,
     ShaderEnginePolicyV1,
+    direct_default_shader_engine_policy,
     promotion_authorization_sha256,
     resolve_engine_policy,
     stable_project_bucket,
@@ -105,6 +106,19 @@ class _Verifier:
                 authorization.direct_implementation_identity
             ),
         )
+
+
+def test_default_direct_plan_needs_no_promotion_verifier() -> None:
+    policy = direct_default_shader_engine_policy()
+    plan = resolve_parent_run_plan(
+        policy=policy,
+        resolution=resolve_engine_policy(policy, kill_switch_active=False),
+        parent_run_id=uuid4(),
+        project_id="solo-developer",
+    )
+    assert plan.primary_engine == "direct_glsl_layerplan_v1"
+    assert plan.effective_stage == "direct_default"
+    assert plan.promotion_authorization_sha256 is None
 
 
 def _artifacts(marker: str) -> SelectedEngineArtifacts:

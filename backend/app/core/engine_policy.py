@@ -26,6 +26,7 @@ PROMOTION_SCHEMA_VERSION: Literal["promotion_authorization_v1"] = (
     "promotion_authorization_v1"
 )
 DEFAULT_DISABLED_POLICY_ID = "default-disabled-v1"
+DEFAULT_DIRECT_POLICY_ID = "default-direct-glsl-v1"
 
 PolicyStage = Literal["disabled", "production_shadow", "canary", "direct_default"]
 PromotionStage = Literal["canary", "direct_default"]
@@ -174,13 +175,13 @@ class ShaderEnginePolicyV1(_FrozenPolicyModel):
         else:
             if self.shadow_percent:
                 raise ValueError("direct_default 不得同时配置 production shadow。")
-            if authorization is None or authorization.target_stage != "direct_default":
+            if authorization is not None and authorization.target_stage != "direct_default":
                 raise ValueError(
-                    "direct_default 必须绑定目标为 direct_default 的完整晋升授权。"
+                    "direct_default 携带授权时，目标必须为 direct_default。"
                 )
             if self.canary_percent != 100:
                 raise ValueError("direct_default 必须配置 canary_percent=100。")
-            if authorization.max_canary_percent != 100:
+            if authorization is not None and authorization.max_canary_percent != 100:
                 raise ValueError(
                     "direct_default 晋升授权必须配置 max_canary_percent=100。"
                 )
@@ -203,6 +204,20 @@ def disabled_shader_engine_policy() -> ShaderEnginePolicyV1:
         stage="disabled",
         shadow_percent=0,
         canary_percent=0,
+        bucket_basis="project_id_v1",
+        direct_engine="direct_glsl_layerplan_v1",
+        fallback_engine="shader_graph_v1",
+        promotion_authorization=None,
+    )
+
+
+def direct_default_shader_engine_policy() -> ShaderEnginePolicyV1:
+    """构造单环境开发默认使用的 direct-first policy."""
+    return ShaderEnginePolicyV1(
+        policy_id=DEFAULT_DIRECT_POLICY_ID,
+        stage="direct_default",
+        shadow_percent=0,
+        canary_percent=100,
         bucket_basis="project_id_v1",
         direct_engine="direct_glsl_layerplan_v1",
         fallback_engine="shader_graph_v1",
@@ -241,9 +256,9 @@ def promotion_authorization_sha256(
 def load_shader_engine_policy(
     path: str | Path | None,
 ) -> ShaderEnginePolicyV1:
-    """严格加载受信 YAML；未配置路径时返回 disabled policy."""
+    """严格加载受信 YAML；未配置路径时返回 direct-default policy."""
     if path is None or (isinstance(path, str) and not path.strip()):
-        return disabled_shader_engine_policy()
+        return direct_default_shader_engine_policy()
     resolved = Path(path).expanduser()
     try:
         raw_text = resolved.read_text(encoding="utf-8")

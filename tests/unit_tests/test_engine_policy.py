@@ -10,7 +10,7 @@ from backend.app.core.engine_policy import (
     EnginePolicyConfigurationError,
     ShaderEnginePolicyV1,
     bucket_matches_percent,
-    disabled_shader_engine_policy,
+    direct_default_shader_engine_policy,
     load_shader_engine_policy,
     parse_direct_glsl_kill_switch,
     resolve_engine_policy,
@@ -83,10 +83,12 @@ fallback_engine: shader_graph_v1
 """
 
 
-def test_missing_policy_is_frozen_disabled_old() -> None:
+def test_missing_policy_is_frozen_direct_default() -> None:
     policy = load_shader_engine_policy(None)
-    assert policy == disabled_shader_engine_policy()
-    assert policy.stage == "disabled"
+    assert policy == direct_default_shader_engine_policy()
+    assert policy.stage == "direct_default"
+    assert policy.canary_percent == 100
+    assert policy.promotion_authorization is None
     assert policy.fallback_engine == "shader_graph_v1"
     with pytest.raises(ValidationError):
         policy.stage = "canary"
@@ -206,6 +208,22 @@ def test_direct_default_accepts_only_full_100_percent_authorization(tmp_path) ->
     assert policy.promotion_authorization.max_canary_percent == 100
 
 
+def test_direct_default_accepts_no_promotion_authorization(tmp_path) -> None:
+    path = tmp_path / "direct-default-local.yaml"
+    path.write_text(
+        _policy_yaml(
+            stage="direct_default",
+            canary_percent=100,
+            authorization="null\n",
+        ),
+        encoding="utf-8",
+    )
+    policy = load_shader_engine_policy(path)
+    assert policy == direct_default_shader_engine_policy().model_copy(
+        update={"policy_id": "rollout-001"}
+    )
+
+
 @pytest.mark.parametrize(
     ("field", "unsupported"),
     [
@@ -296,4 +314,4 @@ def test_backend_settings_freezes_policy_and_kill_switch(monkeypatch, tmp_path) 
 def test_backend_settings_does_not_read_client_engine(monkeypatch) -> None:
     monkeypatch.setenv("SHADERGEN_ENGINE", "direct_glsl_layerplan_v1")
     settings = BackendSettings.from_env(load_environment=False)
-    assert settings.engine_policy.stage == "disabled"
+    assert settings.engine_policy.stage == "direct_default"

@@ -10,7 +10,7 @@
 - 已按 D083–D085 完成 Node Lab 结构收拢：HTTP transport 已迁入 `src/nodelab/http/`，Schema 与 Route 分层，稳定 API/CLI/8090 端口保持不变；干净 wheel 门禁确认旧 `nodelab_service` 不再打包，产品 Backend 仍不注册 Lab route。
 - 已按 D086 将当前 `scene_mvp` 12 个生产 Node 接入独立 Node Lab：Provider/Executor 位于 `agent.app.nodes.png_to_shader_min.node_lab`，受信任组合根位于 `agent.app.services.node_lab`；Artifact hydration、带指纹状态恢复、AI-off 与真实模型门禁均已贯通。`/lab` 已支持 descriptor 驱动 Artifact 输入、等价 SHA 合并、推荐父 Step、空目录/离线恢复与响应式可访问性。
 - 当前 `main` 已先快进吸收 `TOoSad-deep/feature-improve@4768aa5`，再合并 `origin/mvp@6d4aac6`；代码、Graph 文档、ADR、进度和证据冲突已按当前 ShaderGraph 产品事实收口。
-- 产品仍只有 `scene_mvp`，`langgraph.json` 只注册 `png_to_shader_min`。默认组合根使用 `shader_graph_v1`：Initial/Refine Author、specialized Compiler、真实 WebGL1、多 program cache、CandidateSnapshot、node/layer 参数 block、Backend/API/UI 已贯通，12 节点拓扑未改变。
+- 产品仍只有 `scene_mvp`，`langgraph.json` 只注册 `png_to_shader_min`。D097 后 Backend 无 policy 文件时默认使用 `direct_glsl_layerplan_v1`，失败才创建独立的私有 `shader_graph_v1` fallback attempt；旧引擎的 Initial/Refine Author、specialized Compiler、真实 WebGL1、多 program cache、CandidateSnapshot 与 12 节点 Graph 均保留为 fallback，Graph 拓扑未改变。
 - 感知阶段同时保留 legacy MinScene 测量与产品 `fallback_shader_graph`；默认产品使用 ShaderDocument。Memory/checkpoint Python/SQL 与 PostgreSQL 数据继续休眠保留；旧 V1 产品、Adapter、manifest 与 benchmark 入口仍保持删除，通用 Node Lab 不改变该边界。
 - mvp 的 acceptance live A/B、strict total-loss 防漂移 helper、私有 MinScene Patch replay 和 12/32 maturity fixture 已合入。由于两分支复用了 `D064–D068`，本次把 mvp 五项决策顺延为 D072–D076，保留现有清理/Memory 决策编号不变。
 - D072/D073 证明旧 MinScene 诊断候选空间内 strict total-loss 优于 geometry-first，并纠正生产原本即为 strict total-loss 的事实；当前 ShaderGraph 同样执行 strict total-loss，但旧实验不能外推为 ShaderGraph 质量结论。
@@ -21,8 +21,8 @@
 - `codex/layerplan-glsl-shadow` 分支已按 D088 实现独立离线 LayerPlan/direct GLSL shadow A/B harness：`shaderforge.program_spec` 是唯一 canonical LayerPlan/ProgramSpec/哈希/attestation 真相，三类 Author 直读参考图，LayerPlan 永久 advisory；VisualAnalysis 使用独立 `plan_llm_budget/plan_ledger`，不挤占两臂相同的 direct Author 预算；候选必须通过 canonical 安全校验与真实 WebGL1 prepare/draw，才能按真实 metric 更新 arm-local `current_best`。详细证据只写显式本地私有目录（同根 staging + 原子 rename、0700/0600、`verify_shadow_run` 可复验），不进入生产 Artifact/evidence registry；生产 Graph、API、ShaderDocument/Compiler 和 FEATURE 状态均未变。Codex 复审后身份已改为事实制：`author_identity` 只记录 Gateway effective 采样身份（kimi 实际 temperature=1），缺有效身份 fail-closed；Initial/Refine/LayerPlan 哈希绑定 content_type，Refine 另绑定 current_render 与 canonical 评估上下文；显式画布在 resize 前受 Renderer 上限约束，可信装配错误收敛为安全结果，token usage 缺失保持 `null`，证据目录名必须匹配报告内容 run id。无 seed 的温度 1 A/B 只具探索性，结论必须多轮重复并做 AB/BA 交叉平衡。
 - 已按 D090 完成冻结 LayerPlan shadow suite，并按 D091 完成首轮有效真实模型运行。正式 suite `shadow-suite-43a0748fa395` 与 8 个单 run 递归复验通过：Arm B 成功 `7/8`、Arm A `5/8`，5 个可比较 run 中 B 4 胜 1 负，AB/BA 子集方向均有利于 B；但 3/4 样本至少一轮因 `glsl_renderer_contract_violation` 无法配对，inconclusive ratio=`0.75`，只有 `rimmed_disk` 两轮可比较，improved sample ratio=`0.25`，自动 gate=`not_supported`，生产结论明确 no-go。报告 SHA-256 为 `43a0748fa39525b0c44106b2ffc323557e29fc1cb553300cb60408af39ee1075`，仍为 `local_private_not_registered`。首次配置失败 suite `4cd3b45d7644` 继续保留不覆盖。
 - 已按 D092 完成 direct GLSL 契约稳定性 v2：shadow Initial/Refine 改用独立 v2 Prompt 与 GLSL repair v2，生产 scene_mvp 和 VisualAnalysis 继续默认 repair v1。Author Parser 复用完整 `validate_program_spec_safety`，把安全违规收敛为最多 12 条 `code + line`，repair 上下文哈希绑定实际 repair Prompt 和安全 hints；不放宽 Validator、不静默改写 GLSL。shadow 编译失败事件不再保存原始 compiler log 或 Validator message，只记录存在性、日志哈希及安全类别。
-- 已按 D093/D094 完成冻结 v2 真实 suite `shadow-suite-d03e2224684b`：8 个 run 递归复验通过，improved ratio=`0.75`、inconclusive ratio=`0.25`、AB/BA 方向一致，自动 gate=`supported`。D096 人工盲评中 LayerPlan Arm B 获 `5/8=0.625` 偏好，人工 gate=`supported`；完整 suite、8 个 run、盲评包与 canonical 人工结果已组成并复验 `promotion-evidence-f42aefb52724`。该约 1.7 MB/210 文件 bundle 仍位于 `/private/tmp`、未登记 durable，生产结论为 `no_go_pending_durable`。ShaderGen 实验使用 `kimi:k3-256k`、temperature=1、`reasoning_effort=low`；代码子代理 high 不属于实验身份。
-- D095 的替换 runtime 已完整接入但保持不可启用：production shadow 仍是有界非权威队列；`canary/direct_default` 只有在启动期 `PromotionAuthorizationV1` 与唯一 durable registry entry、当前实现 identity 全量匹配后才装配。父 run 在 Graph START 前稳定选 engine，direct 与 fresh ShaderGraph fallback 使用确定性 UUID5、独立 Renderer/cache/预算和 write-once private store；失败只写安全摘要，未选 child 不进入公开 index。选中结果才原子发布 v2 父 manifest/API discriminator，历史 v1 reader 与 kill switch 永久保留。当前真实 registry 无 durable entry，故实际生产仍只有 `shader_graph_v1`。
+- 已按 D093/D094 完成冻结 v2 真实 suite `shadow-suite-d03e2224684b`，并按 D096 完成人工盲评与本地 promotion bundle。bundle 仍是 `local_private_not_registered`，但 D097 明确它不再作为单人单环境默认切换的前置条件；历史证据原样保留。
+- D095 的替换 runtime 已按 D097 直接启用为默认路径：无授权 `direct_default` 不读取 registry，direct 与 fresh ShaderGraph fallback 使用确定性 UUID5、独立 Renderer/cache/预算和 write-once private store；选中结果原子发布 v2 父 manifest/API discriminator，历史 v1 reader与 kill switch 保留。显式 canary 或携带授权的 policy 仍执行原严格校验。
 
 ## 当前 active 功能
 
@@ -35,8 +35,7 @@
 - 为 ShaderGraph 重新设计 typed layer patch replay、冻结 benchmark manifest、质量指标和人工门禁；不得直接复用旧 MinScene replay/12–32 draw 的发布含义。
 - 保留“模型 Initial 仍输给 fallback”的负面质量事实，继续用版本中立的固定小样例验证 Prompt/搜索，不通过放宽 Schema 掩盖问题。
 - 参数优化继续评估 rotation/成组参数、typed layer patch 局部成熟和更大搜索；任何预算变化必须使用 ShaderGraph 候选空间重新建立证据。
-- 由用户明确选择并授权私有 promotion bundle 的不可变目标介质（Git/Release/对象存储之一）；迁入后登记 registry 的 URI/size/hash，把 durability 从 `local_private_not_registered` 提升为 `durable`。
-- durable 完成后新增 canary ADR 与 `PromotionAuthorizationV1`，绑定 D094 suite、D096 人工结果、registry entry、当前 direct implementation identity、最大比例和线上回滚阈值；代码侧 direct-first/fresh old fallback/父 manifest discriminator/kill switch 已完成，届时只允许在新 ADR 的比例与观测窗口内启用并演练，不再补签历史运行。
+- 用日常本地请求观察 direct 成功率、fallback 原因与最终视觉质量；出现阻断时直接使用 `SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 回到旧引擎，不再建设独立 canary 流程。
 
 ## 未解决缺口
 
@@ -49,10 +48,11 @@
 - 进度注册表是单进程内存态、重启即失且无历史 run 查询：终态后前端只能展示本次会话已缓存事件，无法回放历史 run 阶段视图；后端也不提供节点开始/进行中百分比、完整 run 时长或最终 current_best provenance，前端按 D089 只展示事件级真实事实。
 - 历史 V1/Node Lab real-model 完整报告与公开 review package 已按授权随旧 `output/` 删除；registry 对应条目为 `missing`，只能审计定位。
 - 当前 scene_mvp Node Lab 尚无覆盖真实 Chromium Renderer、工作台操作、断线恢复和真实模型的自动浏览器 E2E；LabRun 也没有单 run cancel/close API，Renderer 只能在 finalize 或进程退出时回收。
-- LayerPlan shadow v2 自动与人工 gate 均已通过，但完整 promotion bundle 仍是 `local_private_not_registered`；阈值结果恰好位于 `0.75/0.25` 自动边界，且仍有一个 `glsl_renderer_contract_violation` inconclusive。用户未授权扩大私有 bundle 可见范围前，不得登记 durable、签发 promotion authorization 或启用 canary。
+- LayerPlan shadow v2 自动与人工 gate 均已通过，但完整 promotion bundle 仍是 `local_private_not_registered`；它只保留为历史质量证据，不再阻止 D097 的单环境默认 direct 路径，也不构成多环境发布授权。
 
 ## 当前验证基线
 
+- 2026-07-27 D097 直切验证：`BackendSettings.from_env()` 在无 policy/registry 配置时返回 `direct_default`、无 `PromotionAuthorizationV1`、有效阶段 `direct_default`；83 个聚焦 policy/rollout/lifecycle 单测和 `make check` 全绿（693 个 Python 单测、docs-check、干净 wheel、1 个 LangGraph validate、32 个 Node 内置测试、32 个 Vitest、前端构建），全仓 Ruff 与 `mypy --strict src backend`（156 个源文件）通过。使用无数据库、无 policy、无 registry 配置完成真实 Backend lifespan smoke，`GET /health` 返回 200 后正常关闭；未调用真实模型或运行 benchmark。
 - 2026-07-27 合并主干验证：`make check` 全绿（690 个 Python 单测、docs-check、干净 sdist→wheel 边界、1 个 LangGraph validate、32 个 Node 内置测试、32 个 Vitest、前端生产构建）；真实 Chromium 全量集成 `23 passed, 1 skipped`，`make test-scene-mvp-ui` 通过。
 - 全仓 Ruff、`mypy --strict src backend`（156 个源文件）、`uv lock --check`、冻结 v1/v2 manifest/gate 原字节对比分支和 `git diff --check` 通过。合并时新增 Vitest include 边界，避免 Node 内置测试被重复收集。
 - D083–D096 编号已无重复：Node Lab 保留 D083–D086，LayerPlan/direct GLSL 顺延为 D087–D096；冻结 benchmark YAML 为保持历史 hash 原样保留分支内旧编号注释，外部 ADR 与实现引用使用新编号。
@@ -61,8 +61,8 @@
 ## 最近重要变更
 
 - 2026-07-27：按 D096 完成匿名人工盲评与私有 promotion bundle：LayerPlan Arm B 偏好 `5/8=0.625`，人工 gate=`supported`；自动 suite、8 个 run、盲评与人工结果合并为 `f42aefb…` 并离线递归验签。由于 bundle 尚未迁入用户授权的 durable 介质，生产保持 `no_go_pending_durable`。
+- 2026-07-27：按 D097 将单人单环境默认路径直接切换为无授权 `direct_default`；保留 fresh old fallback、父 discriminator、历史 reader 与 kill switch，显式 canary 仍使用原严格授权边界。
 - 2026-07-27：按 D095 完成不可达的生产替换 runtime：启动期 durable/identity 授权、稳定 engine 选择、direct child、fresh old fallback、父 v2 Artifact/API discriminator、历史 reader 和 kill switch 已贯通；当前 registry 无 durable entry，生产仍 old，未上传或登记私有 bundle。
-- 2026-07-27：按 D091 完成首轮有效 LayerPlan 真实 suite 并作 no-go 决策：8 个 run 全部递归复验，B 在可配对 run 中 4 胜 1 负且成功率高于 A，但 3/4 样本受 `glsl_renderer_contract_violation` 影响而 inconclusive，自动 gate 明确失败；不进入人工晋升盲评，生产路径不变，下一步先做版本化 direct GLSL 契约稳定性改进。
 - 2026-07-27：按 D089 完成前端运行可观测性并经多轮审计收口证据语义：新增 `frontend/src/runStages.ts` 单一可测试阶段视图模型与 vitest 单测，覆盖五态状态、阶段摘要、失败定位与真实计时；阶段只显示“预计下一节点（未确认开始）”，`author_source`/首轮 `selected_source` 均不冒充最终 provenance。轮询 single-flight、失败/连续 pending capped backoff、按 seq 去重；匹配 run_id 的稳定应用失败与 run 创建前的 `client_validation/request_validation` 才作为确定终态，计时与状态 live region 分离。生产 Graph/API/事件契约不变。
 - 2026-07-27：按 D083–D086 完成 Node Lab transport、Schema、Route 分层及当前 scene_mvp 12 节点接入；独立 HTTP 服务、产品 Backend 隔离、干净 wheel、Artifact hydration 和 `/lab` descriptor 驱动输入均已建立门禁。
 

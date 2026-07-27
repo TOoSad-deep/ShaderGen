@@ -798,7 +798,7 @@ class EngineRolloutRuntime:
         *,
         policy: ShaderEnginePolicyV1,
         resolution: EnginePolicyResolution,
-        promotion_verifier: FrozenPromotionEvidenceVerifier,
+        promotion_verifier: FrozenPromotionEvidenceVerifier | None,
         direct_implementation_identity: str,
         coordinator: EngineParentRunCoordinator,
         artifacts: EngineRolloutArtifactService,
@@ -962,14 +962,19 @@ def build_engine_rollout_runtime(
     """仅为有效 canary/direct-default 构造真实 runtime，其他阶段零副作用."""
     if resolution.effective_stage not in {"canary", "direct_default"}:
         return None
-    if promotion_verification is None:
+    if (
+        promotion_verification is None
+        and policy.promotion_authorization is not None
+    ):
         raise PromotionAuthorityUnavailable("promotion_authority_unavailable")
     identity_value = current_direct_glsl_implementation_identity().get(
         "identity_sha256"
     )
+    if not isinstance(identity_value, str):
+        raise PromotionAuthorityUnavailable("direct_implementation_identity_invalid")
     if (
-        not isinstance(identity_value, str)
-        or identity_value
+        promotion_verification is not None
+        and identity_value
         != promotion_verification.direct_implementation_identity
     ):
         raise PromotionAuthorityUnavailable("direct_implementation_identity_drift")
@@ -1011,8 +1016,10 @@ def build_engine_rollout_runtime(
     return EngineRolloutRuntime(
         policy=policy,
         resolution=resolution,
-        promotion_verifier=FrozenPromotionEvidenceVerifier(
-            promotion_verification
+        promotion_verifier=(
+            FrozenPromotionEvidenceVerifier(promotion_verification)
+            if promotion_verification is not None
+            else None
         ),
         direct_implementation_identity=identity_value,
         coordinator=coordinator,

@@ -11,7 +11,7 @@ Frontend React
   -> 启动期冻结的 engine policy
      ├─ disabled / production_shadow -> png_to_shader_min LangGraph
      │                                -> ShaderGraph DSL / Compiler
-     └─ 已授权 canary / direct_default -> parent coordinator
+     └─ canary / direct_default（默认） -> parent coordinator
           ├─ direct child -> advisory LayerPlan / canonical ProgramSpec / WebGL1
           └─ fresh fallback child -> 私有 png_to_shader_min LangGraph
   -> 父 run 原子公开 final-render / metrics / manifest
@@ -65,16 +65,15 @@ D090 在单 run 之上新增冻结 suite 层；D093 将默认协议升级为 `ma
 
 D094 的 v2 真实 suite 自动 gate 已通过。`scripts/run_layerplan_glsl_shadow_review.py` 只接受已递归复验的当前 v2 suite：以 suite hash + sample + round 确定匿名 A/B，公开 `reviewer/` 只含 reference/A/B 图片、静态页面和 template，真实 Arm/run 映射留在父目录私有文件；全部内容带 hash/size，递归 verifier 拒绝 symlink、额外文件、篡改和改名。只有同时存在 A/B current best 的 round 可评；不可配对 round 不伪造图片并继续进入偏好率分母。Agent 不生成投票，人工结果只能由 `A/B/tie` 完整提交。D096 的独立人工结果为 Arm B `5/8=0.625`，达到冻结 `0.5` 门槛；`layerplan_glsl_promotion_evidence.py` 已把 suite、8 个 run、盲评包与 canonical 人工结果组合为可离线递归复验的内容寻址私有 bundle，但 `f42aefb…` 仍位于 `/private/tmp`、未登记 durable，因此生产结论是 `no_go_pending_durable`。
 
-D095 已落地默认关闭的服务端 `ShaderEnginePolicyV1` 与 production-shadow coordinator：Backend 启动时从受信 YAML 冻结 policy，缺失等价于 `disabled/shader_graph_v1`，非法组合 fail-closed；稳定分桶只读取 project id，客户端不能选择 engine；`SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 对新 run 具有最高优先级。命中 `production_shadow` 时，权威 ShaderGraph 完成且 Backend 响应契约校验通过后，才在项目锁外非阻塞提交确定性 UUID5 direct child attempt；attempt 使用全新 direct runner/Playwright Renderer、独立预算与有界 timeout。队列满、失败、超时和 shutdown cancel 都不能改变 HTTP、产品 `current_best`、公开 Artifact 或 DB 成功；私有 LayerPlan/ProgramSpec/render/metric 以 staging + rename 写入独立 0700/0600 write-once 目录，递归 verifier 拒绝 symlink、额外文件、改名和篡改，该根不进入产品 Artifact 白名单。默认 disabled 不创建 worker/模型/Renderer/目录。
+D095 最初以默认关闭方式落地服务端 `ShaderEnginePolicyV1` 与 production-shadow coordinator。D097 根据单人、单环境开发事实把无 policy 文件时的默认值改为 `direct_default`：新请求先运行 direct GLSL，失败时创建全新的私有 ShaderGraph fallback attempt；客户端仍不能选择 engine，`SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 仍对新 run 具有最高优先级并强制回到旧引擎。显式 `disabled` 与 `production_shadow` policy 继续可用。
 
-`canary/direct_default` 不能只依赖 policy 内自报的
-`PromotionAuthorizationV1`。Backend 启动时还会读取显式
+显式 `canary` 以及携带 `PromotionAuthorizationV1` 的 `direct_default` 继续执行
+durable registry 校验。Backend 启动时会读取显式
 `SHADERGEN_EVIDENCE_REGISTRY_PATH`，拒绝 symlink、重复 JSON key/evidence id，
 并要求授权逐字段匹配唯一的 durable promotion entry、不可变 URI/hash、目标
 stage 以及当前代码重算的 direct implementation identity；验证回执和 registry
-文件 hash 冻结进进程配置。当前 `docs/evidence/registry.json` 没有该 entry，
-所以当前真实配置必然 fail-closed。代码侧已经接入 canary/direct-default 的父
-run runtime：命中 direct 时创建确定性 UUID5 child，使用独立 Renderer、预算和
+文件 hash 冻结进进程配置。D097 允许不携带授权的 `direct_default` 直接装配，不读取
+registry；代码侧接入的父 run runtime 会创建确定性 UUID5 child，使用独立 Renderer、预算和
 write-once 私有 attempt；失败只以安全码记录并创建 fresh ShaderGraph fallback
 child。选中结果经过 manifest/hash 复验后才把三个公开 Artifact 原子登记到父 run，
 未选 child 永不进入公开 index。API/前端返回只读 `engine/representation/engine_run`
@@ -88,14 +87,13 @@ discriminator，完整 LayerPlan、ProgramSpec 和失败上下文保持私有；
 安全字段路径并收敛为 `response_contract_failed`。完整父 run/child attempt、production shadow、
 fallback 与 manifest union 契约见
 `docs/superpowers/specs/2026-07-27-direct-glsl-production-rollout.md`。在 durable
-门禁完成前，生产 `png_to_shader_min` 的 12 节点拓扑与
-ShaderDocument/Compiler 权威路径不变。
+证据缺失时只禁止 canary/带授权晋升，不再阻止单环境默认 direct。
 
 紧急回滚是上述 promotion 校验的唯一启动例外：
 `SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 仍要求 policy YAML 严格解析，但有效阶段先
 降为 `disabled`，启动不读取 promotion registry，也不要求验证回执；这样 registry
-或 durable 存储故障不能阻止旧引擎恢复。开关回到 `0` 后，配置的晋升 stage 必须
-重新通过全部授权校验。
+或 durable 存储故障不能阻止旧引擎恢复。开关回到 `0` 后，无授权
+`direct_default` 直接恢复 direct-first；显式携带授权的 policy 仍须重新通过校验。
 
 ## HTTP 与进度
 

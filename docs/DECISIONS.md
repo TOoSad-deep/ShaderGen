@@ -757,3 +757,10 @@
 - 决策：接受当前 v2 匿名盲评的人工 gate=`supported`。7 个可评项中，映射回真实 Arm 后 LayerPlan Arm B 获 5 次偏好、Arm A 获 1 次、平局 1 次；`pink_gel/BA` 仍按不可评项进入全部 8 个预定 round 的分母，因此 Arm B preference=`5/8=0.625`，超过冻结门槛 `0.5`。下载文件的 reviewer 字段为空，评价前只在私有规范化副本中补入非识别代号 `human-reviewer-1`，7 个 choice 原样保留；canonical evaluation 与原始选择 hash 绑定。随后构建并离线递归复验内容寻址 bundle `promotion-evidence-f42aefb52724`，manifest SHA-256=`f42aefb5272421987926b03598172767ddec1629fcc6ba95ea2175ee009576a6`，包含冻结 suite、8 个完整 run、盲评包、人工选择与评价。
 - 原因：D094 只允许进入人工与 durable 阶段；人工选择已经独立完成且 evaluator 按私有映射重算，没有由 Agent 代投或移动阈值。promotion bundle 把自动与人工证据合并为可离线递归复验的 write-once 树，但其当前位置仍是 `/private/tmp`，不具备不可变保留或跨环境可获得性。
 - 影响：生产决策收敛为 `no_go_pending_durable`。bundle 的 durability 继续标记为 `local_private_not_registered`，不得登记为 `durable`、不得签发 `PromotionAuthorizationV1`、不得启用 canary/direct-default。把约 1.7 MB、210 个文件（含参考图、ProgramSpec/GLSL、render 与人工选择）上传 Git/Release/对象存储会扩大私有内容可见范围，必须由用户明确选择并授权目标介质；完成后还需新 ADR 绑定 registry entry、不变 URI/hash、当前 direct implementation identity 和 canary 上限。默认关闭的 production shadow、旧 `shader_graph_v1` 权威路径与 kill switch 不受本人工结果自动改变。
+
+## D097 - 单人单环境开发默认直接切换 direct_default
+
+- 日期：2026-07-27
+- 决策：根据用户确认的单人、单环境开发边界，不再把 durable promotion evidence、人工授权或 canary 演练作为本地产品路径切换的前置条件。未配置 `SHADERGEN_ENGINE_POLICY_PATH` 时，Backend 默认冻结无 `PromotionAuthorizationV1` 的 `direct_default` policy：每个新父 run 先执行 `direct_glsl_layerplan_v1/shader_program_spec_v1`，direct 失败仍创建全新的私有 `shader_graph_v1/shader_document_v1` fallback attempt；选中结果继续通过父 manifest/API `engine/representation/engine_run` discriminator 公开。`SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 仍立即让新 run 回到旧引擎。
+- 原因：D095 的授权与灰度模型面向多环境生产发布；当前项目只有开发者本人使用，不存在独立生产/测试环境或跨团队审批链。继续要求上传私有 bundle、登记 durable registry、签发 canary authorization 只增加流程负担，不改变该单环境中的责任主体。
+- 影响：无授权 `direct_default` 不读取 evidence registry，`promotion_authorization_sha256` 保持 `null`，但 direct/fallback attempt 隔离、私有 Artifact 权限、Renderer/cache/预算隔离、父原子发布、历史 v1 reader 和 kill switch 均保留。显式 `canary` 仍必须携带并验证 `PromotionAuthorizationV1`；显式 `direct_default` 若携带授权，也继续逐字段校验 registry。该决策覆盖 D095/D096 对“默认路径必须等待 durable”的限制，不删除或改写任何历史 benchmark、盲评或 promotion bundle。
