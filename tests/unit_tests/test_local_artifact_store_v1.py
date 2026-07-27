@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
 
 import pytest
 
+import shaderforge.store.local_artifacts as local_artifacts
 from shaderforge.store import LocalArtifactStore
 
 
@@ -94,3 +97,96 @@ def test_store_rejects_run_id_collision_across_projects(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="其他 project_id"):
         store.register_run("project-2", "shared-run")
+
+
+def test_restrictive_store_uses_0700_directories_and_0600_files(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "private"
+    store = LocalArtifactStore(root, restrictive_permissions=True)
+    run = store.register_run("project", "run")
+    run.write_json("private/nested/value.json", {"private": True})
+
+    for path in [root, *root.rglob("*")]:
+        expected = 0o700 if path.is_dir() else 0o600
+        assert stat.S_IMODE(path.stat().st_mode) == expected
+
+
+def test_public_final_reader_rejects_symlink_before_following_it(
+    tmp_path: Path,
+) -> None:
+    store = LocalArtifactStore(tmp_path / "public")
+    files = {
+        "render.png": b"png",
+        "metrics.json": b"{}\n",
+        "manifest.json": b"{}\n",
+    }
+    store.publish_public_final_bundle("project", "run", files)
+    run = store.resolve_run("run")
+    outside = tmp_path / "outside.json"
+    outside.write_bytes(files["metrics.json"])
+    metrics = run.root / "final/metrics.json"
+    metrics.unlink()
+    metrics.symlink_to(outside)
+
+    with pytest.raises(ValueError, match="symlink|安全读取"):
+        store.verify_public_final_bundle("run")
+
+
+def test_public_final_publish_fsyncs_files_and_directory_entries(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    synced_modes: list[int] = []
+    original_fsync = os.fsync
+
+    def tracked_fsync(descriptor: int) -> None:
+        synced_modes.append(os.fstat(descriptor).st_mode)
+        original_fsync(descriptor)
+
+    monkeypatch.setattr(local_artifacts.os, "fsync", tracked_fsync)
+    store = LocalArtifactStore(tmp_path / "public")
+    store.publish_public_final_bundle(
+        "project",
+        "run",
+        {
+            "render.png": b"png",
+            "metrics.json": b"{}\n",
+            "manifest.json": b"{}\n",
+        },
+    )
+
+    assert sum(stat.S_ISREG(mode) for mode in synced_modes) >= 4
+    assert sum(stat.S_ISDIR(mode) for mode in synced_modes) >= 3
+
+
+def test_public_final_reader_detects_directory_replacement_during_read(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = LocalArtifactStore(tmp_path / "public")
+    files = {
+        "render.png": b"png",
+        "metrics.json": b"{}\n",
+        "manifest.json": b"{}\n",
+    }
+    store.publish_public_final_bundle("project", "run", files)
+    final_dir = store.resolve_run("run").root / "final"
+    original_listdir = local_artifacts.os.listdir
+    replaced = False
+
+    def replace_after_open(path: int | str | bytes | os.PathLike[str]) -> list[str]:
+        nonlocal replaced
+        names = original_listdir(path)
+        if isinstance(path, int) and not replaced:
+            replaced = True
+            pinned = final_dir.with_name("final-pinned")
+            final_dir.rename(pinned)
+            final_dir.mkdir()
+            for name, data in files.items():
+                (final_dir / name).write_bytes(data)
+        return names
+
+    monkeypatch.setattr(local_artifacts.os, "listdir", replace_after_open)
+    with pytest.raises(ValueError, match="读取期间发生替换"):
+        store.verify_public_final_bundle("run")

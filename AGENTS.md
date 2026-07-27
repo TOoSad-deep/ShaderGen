@@ -15,7 +15,7 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 - 单元测试：`make test`
 - Memory PostgreSQL 验收：`make test-memory-postgres`
 - 文档边界检查：`make docs-check`
-- 默认主干验证（单元测试、docs-check、干净 wheel 边界、LangGraph validate、前端构建）：`make check`
+- 默认主干验证（单元测试、docs-check、干净 wheel 边界、LangGraph validate、前端单元测试与构建）：`make check`
 - scene_mvp 页面验收：`make test-scene-mvp-ui`
 
 ## 硬约束
@@ -52,4 +52,5 @@ ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输
 - `src/nodelab/http/`：同一 `nodelab` 命名空间下的独立 FastAPI transport；不得由产品 Backend 隐式注册。
 - `backend/`：FastAPI 后端。Route 放 `backend/app/api/routes/`，编排逻辑放 `backend/app/services/`，手写 SQL 放 `backend/sql/`。
 - `frontend/`：Vite/React 前端。源码在 `frontend/src/`。
+- `benchmarks/`：版本化 benchmark/shadow 协议与固定样本；输入、instruction、预算和 gate 必须以内容 hash 冻结，运行产物不得写入此目录。
 - `tests/`：Python 测试。单元测试放 `tests/unit_tests/`，集成测试放 `tests/integration_tests/`。

@@ -48,6 +48,8 @@ check:
 	uv run python scripts/docs_check.py
 	uv run python scripts/check_wheel.py
 	uv run langgraph validate
+	npm --prefix frontend run test:unit
+	npm --prefix frontend run test
 	npm --prefix frontend run build
 
 check-wheel:
@@ -108,7 +110,7 @@ help:
 	@echo 'dev-backend                  - run FastAPI backend on port 8088'
 	@echo 'dev-node-lab                 - run standalone Node Lab on port 8090'
 	@echo 'dev-frontend                 - run Vite frontend'
-	@echo 'check                        - run unit tests, docs, clean wheel, LangGraph, frontend build'
+	@echo 'check                        - run unit tests, docs, clean wheel, LangGraph, frontend unit tests and build'
 	@echo 'check-wheel                  - build a clean wheel from sdist and verify package boundaries'
 	@echo 'docs-check                   - verify harness docs and architecture boundaries'
 	@echo 'test-memory-postgres         - verify Shader Memory against PostgreSQL'

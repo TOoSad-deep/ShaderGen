@@ -5,15 +5,21 @@ from shaderforge.validation.models import (
     ValidationResult,
     ValidationViolation,
 )
+from shaderforge.validation.program_spec_safety import (
+    ProgramSpecSafetyLimits,
+    validate_program_spec_safety,
+)
 from shaderforge.validation.shader_validator import (
     repair_constant_reversed_smoothsteps,
     validate_shader,
 )
 
 __all__ = [
+    "ProgramSpecSafetyLimits",
     "ShaderRepairResult",
     "ValidationResult",
     "ValidationViolation",
     "repair_constant_reversed_smoothsteps",
+    "validate_program_spec_safety",
     "validate_shader",
 ]

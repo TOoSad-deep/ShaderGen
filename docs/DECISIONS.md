@@ -48,6 +48,13 @@
 | D079 | updated | D080 | kimi provider 注册保留；“复用 openai family”已由 D080 改为独立 kimi family。 |
 | D080 | accepted | — | Kimi Code 端点仅允许 temperature=1，kimi 独立 family 固定温度，生产默认模型切换为 `kimi:k3-256k`。 |
 | D081 | accepted | — | kimi family 经 `SHADER_GEN_KIMI_REASONING_EFFORT` 下发 `reasoning_effort`，默认 low。 |
+| D083 | accepted | — | LayerPlan + 直接 GLSL Author 仅以非权威 shadow 实验接入，第一阶段只交付修订版设计基线；晋升新 ADR 方可取代 D070 执行表示部分。 |
+| D084 | accepted | — | 实现隔离的 LayerPlan/direct GLSL shadow A/B harness；不接入生产 Graph、API 或 `current_best`。 |
+| D085 | accepted | — | 前端运行可观测性只展示后端可证明的阶段事实，不伪造 active node、完整时长或最终 provenance。 |
+| D086 | accepted | — | 冻结 LayerPlan shadow suite 的四样本、AB/BA 调度、预算指纹与预声明 gate；真实运行前 fail-closed 复验。 |
+| D087 | accepted | — | 首轮真实 LayerPlan suite 自动 gate 失败，保持生产 no-go；先修复 direct GLSL 契约遵循稳定性再重新冻结实验。 |
+| D088 | accepted | — | direct GLSL v2 只提高 shadow 两臂共用契约稳定性；生产路径保持不变，重跑前必须重新冻结实现身份。 |
+| D089 | accepted | — | 冻结 manifest_v2/gate_v2 与完整 shadow Author 实现身份；v1 只保留历史复验，禁止再次 live。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -674,3 +681,79 @@
 - 决策：在生产侧 `agent.app.nodes.png_to_shader_min.node_lab` 新增 `scene_mvp` 显式 Provider/Executor，登记当前 Graph 的 12 个稳定 Node ID，但不编译或执行 Graph；`agent.app.services.node_lab` 作为受信任 factory 组合根，按服务配置选择具体 LLM Gateway 并创建 Application，Node 命名空间继续只依赖中立 `LLMGateway` 契约。普通节点使用 `deterministic` binding；`author_initial`/`author_refine` 同时提供 AI-off deterministic 与 real binding，AI-off 强制把可用模型预算收敛到已消费值，real 继续要求 `NODELAB_REAL_MODEL_ENABLED=true` 和请求 `allow_model_call=true`。Lab State 只保存 JSON-safe 值：参考图、目标 RGB、候选 Render 和 final 文件使用同一 LabRun 的不透明 Artifact；`current_best` 保存 ShaderDocument、Compiler 指纹、active block、指标、provenance 与 Render Artifact ID，下一 Step 校验后重新编译并恢复 `ShaderGraphCandidateSnapshot`。Renderer registry 在同一服务 Application 内跨 Step 复用，由 `finalize` 幂等关闭。
 - 原因：当前生产 Node 是由 `make_shader_graph_nodes()` 组合出的闭包，依赖 Artifact Store、Renderer registry 与 Gateway，且 State 包含 bytes、NumPy 数组、Compiler 产物和不可变 CandidateSnapshot，不能用通用 `DirectNodeExecutor` 安全直调。把领域 hydration/projection 留在 Agent 生产命名空间，可保持 `nodelab` 对 Agent/ShaderForge 零依赖，同时让工作台真正调试当前产品实现而不是复制节点语义。
 - 影响：启动当前 Provider 需要设置 `NODELAB_APPLICATION_FACTORY=agent.app.services.node_lab:create_application`；默认空 Application、产品 Backend 隔离、HTTP 路径、Graph 节点/边/路由、scorer、预算和 `current_best` 生产安全语义均不改变。新增单元测试锁定 12 节点目录、Artifact hydration、NPY 投影、路由、真实 factory 导入和 real fail-closed，AI-off 集成测试覆盖 initialize、感知、fallback Author、Compiler、Renderer、优化、路由、Refine no-op 与 finalize Artifact。旧 V1 Adapter、Fixture、manifest、benchmark 和证据没有恢复；真实模型与真实 Chromium 工作台仍需操作者显式启动和授权。
+## D087 - LayerPlan + 直接 GLSL Author 仅以非权威 shadow 实验接入，第一阶段只交付修订版设计基线
+
+- 日期：2026-07-26
+- 决策：按用户确认的语义建立四层真相层级：参考图是视觉真相，LayerPlan 是由独立受约束视觉分析 Author 直接读取参考图生成的非权威视觉分层参考（永久 advisory，不参与 scorer/acceptance），ShaderProgramSpec 是模型生成并经安全校验的执行真相，真实 Render/metric 是选择真相。本决策只授权 shadow 实验：第一阶段只交付修订版设计基线 `docs/superpowers/specs/2026-07-26-layerplan-glsl-shadow-design.md`，其中定义 LayerPlanV1、ShaderProgramSpecV1、ShaderCandidateSnapshotV2 契约、Author 角色与时序、校验安全边界、Artifact/API 兼容、shadow A/B 预算隔离与晋升门禁；不修改生产 Graph、代码、API、FEATURE 状态、scorer、预算或 `current_best` 安全边界，不删除或覆盖任何历史证据。被 Codex 审阅否决的首稿（旧 `docs/LAYERPLAN_SHADOW_DESIGN.md`）已随修订移除，不作为任何基线。
+- 原因：生产 `kimi:k3-256k` 的 Initial 仍常由 scorer 判定输给 perception fallback（D080/F09 缺口），视觉分层参考可能改善 Author 的结构起点，但尚未有任何证据。首稿把 ShaderProgramSpec 错误定义为 D070 编译产物的派生身份、保留 document/compiled 双真相、且未让 Author 直接读取参考图，审阅不予验收；修订稿按上述语义重写。D069 的经验表明，不经门禁就把第二表示接入产品会形成双真相和架构死角，因此候选选择仍只能由真实 Render 与 strict total-loss 决定。
+- 影响：shadow 期间 D070 生产路径完全不变：`png_to_shader_min` 继续是 12 节点闭环，ShaderDocument/specialized Compiler/Renderer/CandidateSnapshot 链路是默认执行真相；legacy ShaderDocument 路径在 shadow 实验中只能作为带显式 provenance 的 control/fallback，任何失败不得冒充 model-generated。只有第 10 节晋升门禁（含 durable、内容寻址、可跨环境复验证据；`local_ignored`/`partial` 只能 no-go）全部通过后的新 ADR，才可以取代 D070 的执行表示部分。LayerPlan 在任何阶段都不得直接决定候选接受；后续实现（shadow harness、A/B、晋升）必须另立决策并满足设计文档中的预算隔离与晋升门禁，晋升前 F09 的发布缺口不变。第一阶段只改文档，不改 `langgraph.json`、Builder ASCII、Graph Mermaid 或路由表；设计文档中的契约在对应实现决策落地前不构成交付承诺。
+
+## D088 - 以独立 harness 实现 LayerPlan/direct GLSL shadow A/B
+
+- 日期：2026-07-27
+- 决策：按 D091 的修订设计实现第二阶段最小 shadow 能力：新增独立的 LayerPlanV1、ShaderProgramSpecV1、可信规范化/哈希/校验凭据契约，新增直读参考图的 VisualAnalysis、InitialGLSL、RefineGLSL Author，并用独立 harness 执行 Arm A（不提供 LayerPlan）与 Arm B（只增加同一 LayerPlan）。两臂固定同一模型、Prompt 主体、采样参数和 direct Author 预算，各自拥有隔离的调用、token、compile、draw、wall-clock、program cache 与 `current_best` 记账；VisualAnalysis 使用独立 `plan_llm_budget/PlanLedger`，不得减少 Arm B 的 Initial/Refine/repair 预算。LayerPlan 永久 advisory，接受谓词只能读取真实 Render 与 metric。详细产物只写显式指定的本地私有 run 目录，报告记录内容 hash、arm identity 和执行顺序，但本阶段不登记为 durable 发布证据。
+- 原因：D091 已冻结语义和安全边界，但没有可运行代码，无法验证“LayerPlan 是否真的改善 direct GLSL Author”。直接修改 D070 生产 Graph 会在尚无证据时制造双真相；独立 harness 可以先验证契约、模型输入、GLSL 安全校验、真实渲染和 A/B 隔离，同时让失败保持在实验域。
+- 影响：`png_to_shader_min` 的 12 节点拓扑、`langgraph.json`、Backend/API、公开 Artifact 白名单、scorer、产品预算及 D070 `current_best` 均保持不变；本次不增加产品路由，也不把 shadow 结果写入生产 manifest。ShaderProgramSpec 不得从 `CompiledDslShader` 或 `GraphProgramKey` 派生；模型不得提供 attestation/hash，可信层重算 hash，只有经过静态校验及真实 WebGL1 compile/link/draw 后签发且匹配的 attestation 才允许形成候选。实现和离线测试通过只证明 harness 可运行，不证明质量晋升；真实模型 A/B、durable 内容寻址证据、跨环境复验和人工偏好门禁仍需后续执行，任何生产晋升必须另立 ADR。
+- 修订（2026-07-27，Codex 独立审查高风险项收口）：调用身份改为事实制——`LLMResponse.effective_identity` 由 Gateway 按 family 实际下发参数记录（kimi 强制 temperature=1 并以 `SHADER_GEN_KIMI_REASONING_EFFORT` 承载 thinking），`author_identity.sampling_params` 只写 effective 值，真实响应缺有效身份时 shadow fail-closed（`author_identity_unavailable`），不得记录 unknown 或请求假值；配置中的 `requested_sampling_params` 仅审计用。输入身份强化：Initial/Refine/LayerPlan 哈希绑定 reference content_type，Refine 另绑定 current_render 内容哈希与 canonical 评估上下文（mae/loss/metrics/residual 哈希 + metric version + preprocess 事实），LayerPlan 绑定 instruction 与实际采样身份。私有证据改为同根 staging + 原子 rename（目录 0700、文件 0600、拒绝 symlink/覆盖），并提供 `verify_shadow_run`/CLI `--verify` 复验全部文件与报告哈希。有效性措辞冻结：无 seed 且 temperature=1 的单次 A/B 只具探索性，任何结论必须多轮重复并做 AB/BA 交叉平衡，单 run 不得声称 LayerPlan 是唯一因果变量；报告显式记录 metric version、preprocess、background 与候选 metric/residual 哈希。
+- 修订（2026-07-27，最终安全复核）：receipt capability 拆成 Renderer 私有 signer 与公共 verify-only verifier；公共 `shaderforge.program_spec` 不导出生产签发入口，receipt 必须绑定具体 Spec，候选还要求 PNG hash 与关键 runtime metadata。ProgramSpec 禁止宏定义等 token 改写型预处理指令，关闭 `#define LOOP for` 绕过循环上限；renderer 的 prepare/prepared draw/legacy render 均使用有界超时，worker reset 不再调用可能挂起的 `closePrepared`。结构修复结果通过 `repair_context_sha256` 绑定 repair Prompt、首轮输出、校验错误、Schema 以及首轮与第二次实际调用身份；私有 evidence verifier 只接受规范 POSIX 相对路径、验证 resolved containment，并拒绝证据树中的任意 symlink（含 dangling link）。
+
+## D089 - 前端运行可观测性收敛为单一可测试阶段视图模型，不伪造后端未提供的进度
+
+- 日期：2026-07-27
+- 决策：scene_mvp 运行面板的状态推导收敛到 `frontend/src/runStages.ts` 的纯函数 `buildRunViewModel`。它把 `/api/shader/runs/{run_id}/progress` 的白名单事件与快照映射为 pending/running/succeeded/failed/unknown 运行状态、12 节点的已完成/失败/待执行事实、预计下一节点、Graph 事件累计、trace 摘要、路由与停止原因、失败定位、预算和 current_best 质量进度。事件只在节点完成时发出，因此 `next_action` 或数组顺序只能展示为“预计下一节点（未确认开始）”，不得标成执行中或以 `snapshot.current_node` 冒充活动节点。`author_initial` trace 的 `author_source` 只说明 Initial Author 输出来源，首个 `render_and_evaluate.selected_source` 只证明首轮真实选择，二者都不代表最终 current_best provenance；候选基于参考图约束生成并经真实渲染/评分选择 current_best，最终 GLSL/Render 来自冻结 current_best 的 typed ShaderGraph 编译产物。`render_seq` 只作为实时帧刷新序号；预算 used 缺失保持未知；只有真实 `elapsed_ms` 才显示 Graph 事件累计，缺失时保持未知，不推算完整 run 结束时间。
+- 原因：旧实现把阶段、计时和标签推导散落在组件内，无法单测，还会把推测的下一节点误报为正在执行。后端不提供节点开始事件或精确百分比，前端不得制造这些事实；结构化文档的命名和 `author_source` 也不能替代参考图、真实渲染、评分与 current_best 选择链。
+- 影响：只改前端与 `make check` 接线（新增 `npm run test`，vitest）；进度轮询保持 single-flight，对失败和连续 pending 使用 capped backoff，每次 GET 有独立超时，重复事件按 seq 去重排序。POST 结算（含停止等待/超时）后继续有界观察，直到服务端终态、带匹配 run_id 与稳定 code/stage 的权威应用失败、新 run、页面卸载或观察上限；FastAPI 在 run 创建前产生的 `client_validation/request_validation` 因无法可靠回显 form run_id，作为唯一无匹配 id 的确定性例外。普通代理错误不作为 run 终态。状态 live region 不包含每秒计时，已完成节点提供读屏文本。产品 Graph、Backend/API、进度事件契约、Artifact 白名单和 `current_best` 均不变。后端仍是阻塞式 API、单进程内存注册表（重启即失、无历史 run 查询），也没有节点开始事件、完整 run 时长、最终候选 provenance 或 cancel；这些缺口由文档明确保留。
+
+## D090 - 冻结 LayerPlan shadow suite 协议后才运行真实 A/B
+
+- 日期：2026-07-27
+- 决策：为 D092 的单样本 runner 新建独立 suite 协议。`benchmarks/layerplan_glsl_shadow/manifest_v1.yaml` 冻结 `solid_circle`、`ellipse_gradient`、`rimmed_disk`、`pink_gel` 四个版本中立参考像素、统一 instruction、两轮 `AB/BA` 交叉顺序与两臂共享预算；`gate_v1.yaml` 在查看结果前绑定 manifest 文件 SHA-256、两种臂序的完整 `ShadowABConfig` 指纹、`min_scene_composite_v3`、配对改善阈值、顺序效应、inconclusive 计负、人工偏好与 durable 晋升要求。加载器对未知字段、路径、instruction/reference hash、臂序、配置指纹和 gate/manifest 绑定全部 fail-closed。
+- 原因：单次无 seed、temperature=1 的 A/B 只能证明 harness 可运行，不能隔离顺序或服务端漂移；如果在看到结果后再选样本、预算、顺序或阈值，结论不可审计。旧 V1 benchmark 已退役，但其参考 PNG 是与候选表示无关的固定视觉输入；本决策只把四张像素以新路径和新 hash 链纳入 LayerPlan/direct GLSL 新候选空间，不恢复旧 manifest、runner、golden、Feature/DSL 结论或产品入口。
+- 影响：本步只交付冻结 manifest/gate、四张固定样本、严格加载器和无模型单测；真实模型调度、跨 run 聚合、suite 报告、人工盲评包与 evidence registry 登记在后续小步实现。生产 Graph、API、scorer、预算、ShaderDocument/Compiler、`current_best` 和 F09 状态不变；即使自动 gate 通过，没有人工偏好和 durable 跨环境证据也只能保持 no-go。
+- 实现更新（2026-07-27）：同一协议冻结后新增 `run_layerplan_glsl_shadow_suite.py` 与 suite service，按 manifest 顺序执行全部样本/轮次；每个 run 必须先通过原 D092 verifier 且与 sample/reference/instruction/config/order 精确绑定，随后才按配对 `B-A`、样本中位数、AB/BA 方向一致性和 inconclusive 计负聚合。suite 报告采用私有 staging + 原子 rename、0600/0700、内容寻址目录，并可递归复验全部引用 run；自动结论只可能是 `no_go_automatic_gate_failed` 或 `no_go_pending_human_and_durable`。人工盲评包、durable registry 与生产晋升仍未实现。
+
+## D091 - 首轮真实 LayerPlan suite 自动 gate 失败，生产保持 no-go
+
+- 日期：2026-07-27
+- 决策：接受 D094 冻结 suite `shadow-suite-43a0748fa395` 的自动结论 `not_supported`，生产决策为 `no_go_automatic_gate_failed`。本轮不生成晋升用人工盲评、不登记为 durable 证据、不修改 D070 ShaderDocument/Compiler、Graph、scorer、预算或 `current_best`。下一实验增量先提高 Arm A/B 共用 direct GLSL Initial/Refine/repair 对 `webgl1_static_no_texture_v1` 的遵循稳定性；不得放宽 Validator、静默修补越权 GLSL或把 LayerPlan 直接接入接受谓词。Prompt/repair/实现变化后必须升级版本并重新冻结 manifest/gate/实现身份，不得覆盖 v1 run。
+- 原因：报告与 8 个单 run 已递归复验，suite SHA-256 为 `43a0748fa39525b0c44106b2ffc323557e29fc1cb553300cb60408af39ee1075`。Arm B 在 5 个可比较 run 中 4 胜 1 负，成功率 `7/8` 高于 Arm A 的 `5/8`，AB/BA 可比较子集方向均有利于 B；但 `solid_circle`、`ellipse_gradient`、`pink_gel` 各至少一轮因 `glsl_renderer_contract_violation` 无法配对，inconclusive ratio=`0.75` 超过 `0.25`，只有 `rimmed_disk` 两轮可比较，改善样本比例=`0.25` 低于 `0.75`。该信号值得后续验证，但不能越过预声明 gate，也不能在无 seed、temperature=1 下宣称 LayerPlan 是唯一因果变量。
+- 影响：完整安全摘要写入 `docs/analysis/layerplan-shadow-suite-43a0748fa395-2026-07-27.md`；详细 Spec/GLSL/render 继续只留本地私有目录，durability 为 `local_private_not_registered`，不能支撑跨环境晋升。自动 gate 未通过，人工偏好阶段当前无晋升价值；先完成版本化契约稳定性改造和新冻结实验，再决定是否进入盲评与 durable evidence。
+
+## D092 - direct GLSL v2 先提高两臂共用契约稳定性
+
+- 日期：2026-07-27
+- 决策：新增 `direct_glsl_initial_v2_1`、`direct_glsl_refine_v2_1` 与 `min_author_repair_v2_1`，只供 LayerPlan shadow 的 direct Initial/Refine 使用；生产 scene_mvp 与 VisualAnalysis Author 继续默认使用原 repair v1。Parser 保留可信层生成的 probe Spec 并复用完整 `validate_program_spec_safety`，在结构 repair 前覆盖预处理指令、规范循环/1024 上限、资源上限与既有 WebGL1 规则；顶层错误码保持 `glsl_renderer_contract_violation`，次级诊断仅为去重保序、最多 12 条的固定 `code + line|null`。repair v2 只接收固定 required declarations、按错误码映射的指令和安全类别，修复上下文哈希绑定实际 repair Prompt、hints、Schema、原输出哈希和两次有效调用身份。
+- 原因：D095 的 3/4 inconclusive 主要来自两臂共用 direct GLSL 契约遵循不稳定；若只改 LayerPlan 臂或放宽 Validator，会污染 A/B 控制变量并掩盖模型失败。把 runner 已执行的 canonical safety 前移到 Author Parser，才能让同一次有界 repair 处理真实阻塞规则，同时不引入确定性 GLSL 静默改写。
+- 影响：生产 Graph、API、ShaderDocument/Compiler、scorer、预算和 `current_best` 不变；两臂仍使用相同 direct Prompt/repair/调用参数，唯一预期差异仍是 LayerPlan advisory 输入。shadow 编译失败事件同步移除原始 compiler/link log 与 Validator message，只保留日志存在性、SHA-256 和安全违规类别。v1 Prompt、suite 和真实证据继续保留；下一步必须另行冻结绑定 v2 实现身份的 manifest/gate，验证前不得声称质量改善或晋升生产。
+
+## D093 - 冻结 direct GLSL v2 suite 与完整实现身份后才允许重跑
+
+- 日期：2026-07-27
+- 决策：新增 `manifest_v2.yaml` 与 `gate_v2.yaml`，样本、AB/BA 调度、预算和判定阈值保持 v1 不变，以隔离 D096 契约稳定性增量；v2 manifest 额外绑定 VisualAnalysis/Initial/Refine/repair 四个 Prompt 的名称、版本与正文哈希，两类 Author JSON Schema、repair policy、Plan/Spec 输出上限、结构修复次数、Renderer contract 和 ProgramSpec SafetyLimits，gate 同时绑定 manifest SHA、实现身份 SHA 与带实现身份的两种 `ShadowABConfig` 指纹。suite 报告显式写入实现身份，单 run 的 config fingerprint 也携带该身份，禁止用旧实现 run 冒充 v2 结果。
+- 原因：只在 suite 报告声明 v2 不足以阻止历史单 run 被重新拼装；Prompt、Schema、repair mapping、token 上限或 Validator 资源限制任一漂移都可能改变结果。实现身份必须由运行时 canonical 重算并与冻结 YAML 全量相等，再传递进单 run fingerprint、gate 和 suite report，才能 fail-closed。
+- 影响：CLI 默认切到 v2；`run_shadow_suite()` 公共入口同样拒绝 v1 live。v1 manifest/gate、首轮 no-go 报告与 verifier 继续保留，只允许显式 `--verify` 历史复验，不恢复旧运行入口。v2 协议提交前不调用真实模型；生产 Graph/API/ShaderDocument/Compiler/scorer/预算/`current_best` 均不变。
+
+## D094 - direct GLSL v2 自动门禁通过后仍保持生产 no-go
+
+- 日期：2026-07-27
+- 决策：接受冻结 v2 suite `shadow-suite-d03e2224684b` 的自动结论 `supported`，但生产决策严格保持 `no_go_pending_human_and_durable`。本轮允许进入确定性匿名人工盲评与 durable evidence 建设，不授权 direct GLSL 写入产品 `current_best`、公开 Artifact 或替换 D070 ShaderDocument/specialized Compiler。ShaderGen 真实运行继续使用 `kimi:k3-256k`、temperature=`1`、`reasoning_effort=low`；Kimi Code 子代理的代码审核/实现强度与产品模型实验身份分离，不进入 suite 指纹。
+- 原因：suite 与 8 个单 run 已递归验签，报告 SHA-256 为 `d03e2224684b134f59aaf0dd850cba97719ffc7b08e2ce90e2896b5c183e197d`。4 个样本中 3 个达到 `0.005` 配对改善边界，improved ratio=`0.75`；1/4 样本 inconclusive，ratio=`0.25`；AB/BA 的 `B-A` 中位数分别为 `-0.041426`、`-0.036113`，方向一致。所有自动阈值均通过，但改善率和 inconclusive 比例恰好位于冻结边界，且 `ellipse_gradient/BA` 出现 B 负向 run、`pink_gel/BA` 的 B 仍因 `glsl_renderer_contract_violation` 无有效候选，不能扩大解释为逐 run 稳定改善。
+- 影响：安全摘要写入 `docs/analysis/layerplan-shadow-suite-d03e2224684b-2026-07-27.md`；完整产物仍位于本地私有目录，durability 为 `local_private_not_registered`。下一增量必须生成公开资产与私有映射隔离、可递归复验的盲评包，Agent 不代投；人工偏好按冻结 `>=0.5`、tie 不计 B 胜。只有人工门禁与符合 `docs/evidence/README.md` 的 durable 跨环境证据同时通过后，才可由新 ADR 授权 production shadow/canary；阈值不得因本轮贴线结果移动。
+
+## D095 - 生产替换以 run 前 engine 冻结、隔离 attempt 和服务端 kill switch 分阶段推进
+
+- 日期：2026-07-27
+- 决策：采用 `docs/superpowers/specs/2026-07-27-direct-glsl-production-rollout.md` 作为生产接入契约。阶段固定为 `disabled -> production_shadow -> canary -> direct_default`；服务端版本化 policy 在 Backend 启动时冻结，每个产品父 run 在 Graph START 前通过稳定 project 分桶选择 engine，客户端、前端和 instruction 均不能覆盖。实际执行使用独立 child attempt，冻结 `shader_graph_v1/shader_document_v1` 或 `direct_glsl_layerplan_v1/shader_program_spec_v1` 表示以及独立预算、Renderer/cache、私有 Artifact 和 ledger；一个 attempt 内禁止跨表示。production shadow 永远由旧 engine 提供权威结果；canary 的 direct 失败必须创建新的 old-engine fallback attempt，不能覆盖或伪装；server-side kill switch 只让新 run 100% 回旧 engine，不改变已启动 attempt 的身份。
+- 原因：现有 `ShaderDocument` 不只是分层命名，而是 CandidateSnapshot、specialized Compiler/program key、layer/node 参数优化、typed Refine、finalize 与公开 manifest 的完整可执行 DSL。只替换 `materialize_shader` 会形成类型和语义双真相；在 Graph 运行中回退又会污染 current_best、预算与 Artifact。把选择上移到产品组合根并以父 run/child attempt 隔离，才能保留 D070 兼容、审计 fallback，并让 LayerPlan 继续只做 advisory。
+- 影响：D095 先冻结契约并授权实现默认关闭的 policy/production shadow scaffold，不授权 canary。canary 必须持有内容寻址 `PromotionAuthorizationV1`，绑定 D094 suite、完整独立人工盲评、durable registry、direct implementation identity 与允许的最大比例；缺任一项 fail-closed。父 manifest/API 后续升级为带 `engine/representation` discriminator 的兼容 union，公开 Artifact 白名单不扩大，完整 LayerPlan/ProgramSpec/Prompt 保持私有。任何 Graph 节点/边/路由或注册变化必须同步 Builder ASCII、Graph Mermaid、路由表并通过 docs-check 与 LangGraph validate；默认 engine 的最终切换必须再立 ADR，`shader_graph_v1`、历史 reader、测试和 kill switch 永久保留。
+- 实现更新（2026-07-27，runtime authorization guard）：policy 内嵌授权只作为待验证声明；`canary/direct_default` 的 Backend 启动配置必须额外读取显式受信 registry，把 D094 suite、递归 verifier、人工结果、目标 stage、不可变 bundle URI/hash 和当前 direct implementation identity 与唯一 durable entry 逐字段匹配，并冻结 authorization/registry hash 回执。缺 entry、`partial`、symlink、重复 key/id 或任一漂移均启动 fail-closed；启动期不联网拉取私有 bundle，上传后内容复验是登记与签发前置责任。当前 registry 没有 durable promotion entry，所以此 guard 不授权或启用 canary。
+- 回滚修订（2026-07-27）：kill switch 必须高于 promotion runtime verification，否则 registry 或 durable 存储故障会让紧急回滚进程无法启动。`SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 时仍严格解析整份 policy YAML，但有效 stage 先降为 `disabled`，允许跳过 registry 和授权回执；开关回到 `0` 后，configured `canary/direct_default` 重新要求完整校验。该修订只恢复旧引擎启动能力，不授权 canary。
+- Artifact 安全修订（2026-07-27）：rollout direct/private-old child 使用显式 restrictive `LocalArtifactStore`，只对私有根把目录/文件收紧为 0700/0600，不迁移历史 public store 默认权限；父发布前强制 engine/representation 与 `engine_run.selected_representation` 三方一致。公开 final bundle 改用 pinned dir fd、`O_NOFOLLOW` 与 inode/时间快照复验，消除原先普通 `read_bytes` 可能先跟随 symlink 才拒绝的窗口；本地根仍必须由单一服务进程独占。
+- 实现更新（2026-07-27，authority runtime 完成但不可启用）：Backend 已接入父 run 协调器、真实 owned direct child、独立 private ShaderGraph fallback child、确定性 UUID5 attempt、write-once claim/失败安全摘要、原子父 Artifact v2 发布、历史 v1 reader 回退和 API/Frontend discriminator。每个 direct/fallback attempt 使用独立 Renderer/cache/预算和 private store；direct 失败只能创建新 old child，未选 child 不进入公开 index。该实现不修改产品 Graph 拓扑，也不等价于签发 production authority：当前 registry 无 durable promotion entry，故真实 canary/direct-default 配置仍启动 fail-closed，默认 `shader_graph_v1` 不变。
+
+## D096 - 人工盲评通过并冻结本地 promotion bundle，生产仍等待 durable
+
+- 日期：2026-07-27
+- 决策：接受当前 v2 匿名盲评的人工 gate=`supported`。7 个可评项中，映射回真实 Arm 后 LayerPlan Arm B 获 5 次偏好、Arm A 获 1 次、平局 1 次；`pink_gel/BA` 仍按不可评项进入全部 8 个预定 round 的分母，因此 Arm B preference=`5/8=0.625`，超过冻结门槛 `0.5`。下载文件的 reviewer 字段为空，评价前只在私有规范化副本中补入非识别代号 `human-reviewer-1`，7 个 choice 原样保留；canonical evaluation 与原始选择 hash 绑定。随后构建并离线递归复验内容寻址 bundle `promotion-evidence-f42aefb52724`，manifest SHA-256=`f42aefb5272421987926b03598172767ddec1629fcc6ba95ea2175ee009576a6`，包含冻结 suite、8 个完整 run、盲评包、人工选择与评价。
+- 原因：D094 只允许进入人工与 durable 阶段；人工选择已经独立完成且 evaluator 按私有映射重算，没有由 Agent 代投或移动阈值。promotion bundle 把自动与人工证据合并为可离线递归复验的 write-once 树，但其当前位置仍是 `/private/tmp`，不具备不可变保留或跨环境可获得性。
+- 影响：生产决策收敛为 `no_go_pending_durable`。bundle 的 durability 继续标记为 `local_private_not_registered`，不得登记为 `durable`、不得签发 `PromotionAuthorizationV1`、不得启用 canary/direct-default。把约 1.7 MB、210 个文件（含参考图、ProgramSpec/GLSL、render 与人工选择）上传 Git/Release/对象存储会扩大私有内容可见范围，必须由用户明确选择并授权目标介质；完成后还需新 ADR 绑定 registry entry、不变 URI/hash、当前 direct implementation identity 和 canary 上限。默认关闭的 production shadow、旧 `shader_graph_v1` 权威路径与 kill switch 不受本人工结果自动改变。

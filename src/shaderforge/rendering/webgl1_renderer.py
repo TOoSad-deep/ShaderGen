@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import math
 import re
 import time
 from collections.abc import Mapping
+from hashlib import sha256
 from typing import Any, Literal, cast
 
 from playwright.async_api import (
@@ -24,6 +26,7 @@ from shaderforge.contracts.webgl1 import (
     WEBGL1_STATIC_NO_TEXTURE_V1,
     RenderContract,
 )
+from shaderforge.program_spec.receipt import _renderer_receipt_signer
 from shaderforge.rendering.models import (
     CompileResult,
     PreparedRenderResult,
@@ -462,7 +465,9 @@ def _decode_png_data_url(value: Any) -> bytes:
 UniformType = Literal["float", "vec2", "vec3", "vec4"]
 
 
-def _normalize_uniform_schema(uniform_schema: Mapping[str, Any]) -> dict[str, UniformType]:
+def _normalize_uniform_schema(
+    uniform_schema: Mapping[str, Any],
+) -> dict[str, UniformType]:
     """规范化 uniform 白名单，拒绝保留名、非法名和未支持类型."""
     normalized: dict[str, UniformType] = {}
     for name, raw_spec in uniform_schema.items():
@@ -470,7 +475,9 @@ def _normalize_uniform_schema(uniform_schema: Mapping[str, Any]) -> dict[str, Un
             raise ValueError("uniform 名必须是 u_ 开头的 ASCII 标识符。")
         if name in _RESERVED_UNIFORMS:
             raise ValueError(f"uniform {name} 由 Renderer 保留并自动上传。")
-        raw_type = raw_spec if isinstance(raw_spec, str) else getattr(raw_spec, "type", None)
+        raw_type = (
+            raw_spec if isinstance(raw_spec, str) else getattr(raw_spec, "type", None)
+        )
         if raw_type not in _UNIFORM_TYPES:
             raise ValueError(f"uniform {name} 只支持 float、vec2、vec3 或 vec4。")
         normalized[name] = cast(UniformType, raw_type)
@@ -493,7 +500,9 @@ def _validate_uniform_values(
     if set(uniform_values) != set(schema):
         missing = sorted(set(schema) - set(uniform_values))
         extra = sorted(set(uniform_values) - set(schema))
-        raise ValueError(f"uniform 值集必须与白名单完全一致；missing={missing}，extra={extra}。")
+        raise ValueError(
+            f"uniform 值集必须与白名单完全一致；missing={missing}，extra={extra}。"
+        )
     normalized: dict[str, float | list[float]] = {}
     lengths = {"vec2": 2, "vec3": 3, "vec4": 4}
     for name, uniform_type in schema.items():
@@ -520,8 +529,10 @@ class PlaywrightWebGL1Renderer:
         *,
         contract: RenderContract = WEBGL1_STATIC_NO_TEXTURE_V1,
         replay_on_worker_failure: int = 1,
+        prepare_timeout_ms: float = 30_000,
+        draw_timeout_ms: float = 15_000,
     ) -> None:
-        """配置渲染契约和 worker 失败重放次数."""
+        """配置渲染契约、worker 失败重放次数与 prepare/draw 有界超时."""
         if contract != WEBGL1_STATIC_NO_TEXTURE_V1:
             raise ValueError(
                 "PlaywrightWebGL1Renderer 当前只支持 canonical "
@@ -529,8 +540,22 @@ class PlaywrightWebGL1Renderer:
             )
         if replay_on_worker_failure < 0:
             raise ValueError("replay_on_worker_failure 不能小于 0。")
+        for name, value in (
+            ("prepare_timeout_ms", prepare_timeout_ms),
+            ("draw_timeout_ms", draw_timeout_ms),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or value <= 0
+            ):
+                raise ValueError(f"{name} 必须是正有限毫秒数。")
         self.contract = contract
         self.replay_on_worker_failure = replay_on_worker_failure
+        self.prepare_timeout_ms = float(prepare_timeout_ms)
+        self.draw_timeout_ms = float(draw_timeout_ms)
+        self._receipt_signer = _renderer_receipt_signer()
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self._page: Page | None = None
@@ -610,6 +635,38 @@ class PlaywrightWebGL1Renderer:
         if first_error is not None:
             raise first_error
 
+    async def _reset_worker_quietly(self) -> None:
+        """超时后有界重置 worker；不得再次调用可能已挂起的 program JS.
+
+        ``close()`` 会逐个执行 ``window.__closePrepared``。若 page/GPU 已因
+        模型 GLSL 卡死，再走该路径会让“超时处理”本身无限等待。因此这里先
+        在 Python 侧失效所有 prepared handle，再以有界等待直接关闭底层
+        page/browser/driver；任何关闭错误都不得掩盖原始超时。
+        """
+        page, browser, playwright = self._page, self._browser, self._playwright
+        self._page = None
+        self._browser = None
+        self._playwright = None
+        for prepared in tuple(self._prepared):
+            prepared._closed = True
+        self._prepared.clear()
+
+        async def close_quietly(resource: Any) -> None:
+            if resource is None:
+                return
+            try:
+                await asyncio.wait_for(resource.close(), timeout=1.0)
+            except (TimeoutError, PlaywrightError, OSError, RuntimeError):
+                pass
+
+        await close_quietly(page)
+        await close_quietly(browser)
+        if playwright is not None:
+            try:
+                await asyncio.wait_for(playwright.stop(), timeout=1.0)
+            except (TimeoutError, PlaywrightError, OSError, RuntimeError):
+                pass
+
     def _validate_dimensions(self, width: int, height: int) -> None:
         if (
             isinstance(width, bool)
@@ -685,15 +742,24 @@ class PlaywrightWebGL1Renderer:
         if self._page is None or self._browser is None:
             raise RendererUnavailableError("Playwright page 未就绪。")
         self._console_errors.clear()
-        payload = await self._page.evaluate(
-            "payload => window.__prepareShader(payload)",
-            {
-                "fragmentSource": fragment_source,
-                "width": width,
-                "height": height,
-                "uniformSchema": uniform_schema,
-            },
-        )
+        try:
+            payload = await asyncio.wait_for(
+                self._page.evaluate(
+                    "payload => window.__prepareShader(payload)",
+                    {
+                        "fragmentSource": fragment_source,
+                        "width": width,
+                        "height": height,
+                        "uniformSchema": uniform_schema,
+                    },
+                ),
+                timeout=self.prepare_timeout_ms / 1000.0,
+            )
+        except TimeoutError as exc:
+            await self._reset_worker_quietly()
+            raise RendererUnavailableError(
+                "prepare 超过有界超时，worker 已重置。"
+            ) from exc
         await self._page.wait_for_timeout(0)
         if not isinstance(payload, Mapping):
             raise RendererUnavailableError("浏览器返回了无效 prepared 结果。")
@@ -735,11 +801,14 @@ class PlaywrightWebGL1Renderer:
             compile_result=compile_result,
             metadata=metadata,
             prepare_duration_ms=(time.perf_counter() - started) * 1000.0,
+            source_sha256=sha256(fragment_source.encode("utf-8")).hexdigest(),
         )
         self._prepared.add(prepared)
         return prepared
 
-    async def render(self, fragment_source: str, width: int, height: int) -> RenderResult:
+    async def render(
+        self, fragment_source: str, width: int, height: int
+    ) -> RenderResult:
         """静态校验后编译并渲染 PNG；worker 异常时最多重放一次."""
         self._validate_dimensions(width, height)
         started = time.perf_counter()
@@ -795,14 +864,23 @@ class PlaywrightWebGL1Renderer:
         if self._page is None or self._browser is None:
             raise RendererUnavailableError("Playwright page 未就绪。")
         self._console_errors.clear()
-        payload = await self._page.evaluate(
-            "payload => window.__renderShader(payload)",
-            {
-                "fragmentSource": fragment_source,
-                "width": width,
-                "height": height,
-            },
-        )
+        try:
+            payload = await asyncio.wait_for(
+                self._page.evaluate(
+                    "payload => window.__renderShader(payload)",
+                    {
+                        "fragmentSource": fragment_source,
+                        "width": width,
+                        "height": height,
+                    },
+                ),
+                timeout=self.draw_timeout_ms / 1000.0,
+            )
+        except TimeoutError as exc:
+            await self._reset_worker_quietly()
+            raise RendererUnavailableError(
+                "render 超过有界超时，worker 已重置。"
+            ) from exc
         await self._page.wait_for_timeout(0)
         if not isinstance(payload, Mapping):
             raise RendererUnavailableError("浏览器返回了无效渲染结果。")
@@ -860,8 +938,9 @@ class PreparedWebGL1Renderer:
         compile_result: CompileResult,
         metadata: RendererMetadata | None,
         prepare_duration_ms: float,
+        source_sha256: str,
     ) -> None:
-        """绑定所属 page、program id、类型白名单与准备诊断."""
+        """绑定所属 page、program id、类型白名单、准备诊断与源码哈希."""
         self._owner = owner
         self._prepared_id = prepared_id
         self.width = width
@@ -870,6 +949,7 @@ class PreparedWebGL1Renderer:
         self.compile = compile_result
         self.metadata = metadata
         self.prepare_duration_ms = prepare_duration_ms
+        self._source_sha256 = source_sha256
         self._closed = False
         self._render_durations_ms: list[float] = []
 
@@ -888,8 +968,15 @@ class PreparedWebGL1Renderer:
         uniform_values: Mapping[str, Any],
         *,
         capture_png: bool = False,
+        receipt_spec_sha256: str | None = None,
     ) -> PreparedRenderResult:
-        """上传完整 typed uniform 值集并绘制；默认只返回原始 RGB."""
+        """上传完整 typed uniform 值集并绘制；默认只返回原始 RGB.
+
+        成功 draw 后由可信 issuer 就地签发 ``ExecutionReceipt``（绑定源码
+        哈希、RGB/PNG 像素哈希与 renderer/GL 运行身份）；``receipt_spec_sha256``
+        是调用方声明的 Spec 绑定，match 阶段会与 Spec 重算核对。draw 超过
+        有界超时即重置 worker 并抛 ``RendererUnavailableError``。
+        """
         if self._closed:
             raise RendererUnavailableError("prepared renderer 已关闭。")
         if not isinstance(capture_png, bool):
@@ -903,15 +990,23 @@ class PreparedWebGL1Renderer:
         started = time.perf_counter()
         self._owner._console_errors.clear()
         try:
-            payload = await page.evaluate(
-                "payload => window.__renderPrepared(payload)",
-                {
-                    "preparedId": self._prepared_id,
-                    "uniformValues": values,
-                    "capturePng": capture_png,
-                },
+            payload = await asyncio.wait_for(
+                page.evaluate(
+                    "payload => window.__renderPrepared(payload)",
+                    {
+                        "preparedId": self._prepared_id,
+                        "uniformValues": values,
+                        "capturePng": capture_png,
+                    },
+                ),
+                timeout=self._owner.draw_timeout_ms / 1000.0,
             )
             await page.wait_for_timeout(0)
+        except TimeoutError as exc:
+            await self._owner._reset_worker_quietly()
+            raise RendererUnavailableError(
+                "draw 超过有界超时，worker 已重置。"
+            ) from exc
         except (PlaywrightError, OSError) as exc:
             raise RendererUnavailableError("prepared uniform 绘制失败。") from exc
         duration_ms = (time.perf_counter() - started) * 1000.0
@@ -922,17 +1017,33 @@ class PreparedWebGL1Renderer:
         rgb_value = payload.get("rgb")
         rgb_bytes: bytes | None = None
         if success:
-            if not isinstance(rgb_value, list) or len(rgb_value) != self.width * self.height * 3:
+            if (
+                not isinstance(rgb_value, list)
+                or len(rgb_value) != self.width * self.height * 3
+            ):
                 raise RendererUnavailableError("浏览器返回了无效 RGB 像素。")
             try:
                 rgb_bytes = bytes(rgb_value)
             except (TypeError, ValueError) as exc:
-                raise RendererUnavailableError("浏览器返回的 RGB 像素超出 uint8。") from exc
+                raise RendererUnavailableError(
+                    "浏览器返回的 RGB 像素超出 uint8。"
+                ) from exc
         image_bytes = (
             _decode_png_data_url(payload.get("dataUrl"))
             if success and capture_png
             else None
         )
+        receipt = None
+        if success and rgb_bytes is not None and receipt_spec_sha256 is not None:
+            metadata = self.metadata
+            receipt = self._owner._receipt_signer.issue_after_draw(
+                source_sha256=self._source_sha256,
+                spec_sha256=receipt_spec_sha256,
+                rgb_bytes=rgb_bytes,
+                png_bytes=image_bytes,
+                renderer_version=RENDERER_VERSION,
+                runtime_metadata=(metadata.to_dict() if metadata is not None else {}),
+            )
         return PreparedRenderResult(
             success=success,
             rgb_bytes=rgb_bytes,
@@ -946,6 +1057,7 @@ class PreparedWebGL1Renderer:
                 if payload.get("drawError") is not None
                 else None
             ),
+            execution_receipt=receipt,
         )
 
     async def close(self) -> None:
@@ -957,7 +1069,9 @@ class PreparedWebGL1Renderer:
         page = self._owner._page
         if page is None or page.is_closed():
             return
-        await page.evaluate("preparedId => window.__closePrepared(preparedId)", self._prepared_id)
+        await page.evaluate(
+            "preparedId => window.__closePrepared(preparedId)", self._prepared_id
+        )
 
 
 def build_standalone_html(fragment_source: str, width: int, height: int) -> str:

@@ -80,7 +80,7 @@ async def generate_scene_shader_from_image(
     )
 
 
-def read_shader_run_artifact(
+async def read_shader_run_artifact(
     run_id: str,
     artifact_name: str,
     *,
@@ -88,9 +88,9 @@ def read_shader_run_artifact(
 ) -> png_to_shader_min.MinPublicArtifact:
     """从 scene_mvp Service 读取固定白名单 Artifact."""
     try:
-        return cast(
-            png_to_shader_min.MinPublicArtifact,
-            service.read_public_artifact(run_id, artifact_name),
-        )
+        artifact = service.read_public_artifact(run_id, artifact_name)
+        if inspect.isawaitable(artifact):
+            artifact = await artifact
+        return cast(png_to_shader_min.MinPublicArtifact, artifact)
     except (FileNotFoundError, ValueError) as exc:
         raise PublicArtifactNotFoundError("未找到运行 Artifact。") from exc

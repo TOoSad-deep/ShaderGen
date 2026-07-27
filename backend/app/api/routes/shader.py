@@ -160,6 +160,16 @@ async def generate_shader(
         min_service=service,
         locks=locks,
         progress=_progress_registry(request),
+        engine_rollout_service=getattr(
+            request.app.state,
+            "engine_rollout_service",
+            None,
+        ),
+        production_shadow=getattr(
+            request.app.state,
+            "production_shadow_coordinator",
+            None,
+        ),
     )
     try:
         return await execute_shader_generation(command, dependencies)
@@ -210,14 +220,26 @@ async def get_shader_run_artifact(
 ) -> Response:
     """下载 final-render、metrics 或 manifest 三种白名单产物."""
     service, _locks = _runtime(request)
+    rollout_service = getattr(request.app.state, "engine_rollout_service", None)
     if service is None:
         raise HTTPException(status_code=503, detail="scene_mvp 服务尚未就绪。")
     try:
-        artifact = read_shader_run_artifact(
-            str(run_id),
-            artifact_name,
-            service=service,
-        )
+        try:
+            artifact = await read_shader_run_artifact(
+                str(run_id),
+                artifact_name,
+                service=rollout_service or service,
+            )
+        except PublicArtifactNotFoundError:
+            if rollout_service is None:
+                raise
+            # canary 进程仍需读取切换前的 v1 父 run；fallback 只访问公开旧
+            # store，private child 使用另一根目录且不会被该 reader 解析。
+            artifact = await read_shader_run_artifact(
+                str(run_id),
+                artifact_name,
+                service=service,
+            )
     except (PublicArtifactNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail="未找到该运行产物。") from exc
     return Response(

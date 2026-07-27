@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from hashlib import sha256
 from typing import Any
 
+from shaderforge.program_spec.models import ExecutionReceipt
 from shaderforge.validation.models import ValidationResult
 
 
@@ -98,7 +99,12 @@ class RenderResult:
 
 @dataclass(frozen=True)
 class PreparedRenderResult:
-    """prepared program 的单次 uniform 绘制结果."""
+    """prepared program 的单次 uniform 绘制结果.
+
+    ``execution_receipt`` 只在成功 draw 后由真实 renderer 路径经可信
+    issuer 签发；fake/协议注入实现必须在测试内用显式 test-only issuer
+    自行签发，缺失时下游 attestation 一律 fail-closed。
+    """
 
     success: bool
     rgb_bytes: bytes | None
@@ -108,6 +114,7 @@ class PreparedRenderResult:
     console_errors: tuple[str, ...]
     duration_ms: float
     draw_error: str | None = None
+    execution_receipt: ExecutionReceipt | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """返回不内嵌 RGB/PNG 大字段的诊断字典."""
@@ -120,4 +127,9 @@ class PreparedRenderResult:
             "draw_error": self.draw_error,
             "rgb_size_bytes": len(self.rgb_bytes) if self.rgb_bytes else 0,
             "image_size_bytes": len(self.image_bytes) if self.image_bytes else 0,
+            "execution_receipt": (
+                self.execution_receipt.to_dict()
+                if self.execution_receipt is not None
+                else None
+            ),
         }

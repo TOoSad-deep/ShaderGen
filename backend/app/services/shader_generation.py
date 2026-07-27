@@ -5,19 +5,26 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import asdict, dataclass, is_dataclass
-from typing import Any, Literal, cast
+from typing import Any, Literal, Protocol, cast
 from uuid import UUID
 
 from backend.app.schemas.shader import (
     QualityPresetName,
+    ShaderEngineAttemptSummary,
+    ShaderEngineRunSummary,
     ShaderGraphShadowSummary,
     ShaderMinPipelineSummary,
     ShaderResponse,
+    ShaderShadowSubmissionSummary,
 )
 from backend.app.services.agent_process_store import (
     record_shader_generation_failure,
     record_shader_generation_success,
     start_shader_generation_run,
+)
+from backend.app.services.engine_rollout import (
+    EngineResponseContractFailure,
+    ParentRunFailure,
 )
 from backend.app.services.run_progress import RunProgressRegistry
 from backend.app.services.shader import (
@@ -44,6 +51,21 @@ class ShaderGenerationCommand:
     started_at: float
 
 
+class ProductionShadowSubmitter(Protocol):
+    """生成用例依赖的最小非阻塞 shadow 提交边界."""
+
+    def submit(
+        self,
+        *,
+        project_id: str,
+        parent_run_id: UUID | str,
+        image: bytes,
+        content_type: str,
+        instruction: str,
+    ) -> dict[str, Any]:
+        """提交一次非权威 shadow；实现不得等待队列容量."""
+
+
 @dataclass(frozen=True)
 class ShaderGenerationDependencies:
     """由 Backend 应用生命周期注入的生成用例依赖."""
@@ -52,6 +74,8 @@ class ShaderGenerationDependencies:
     min_service: Any | None
     locks: ProjectLockRegistry
     progress: RunProgressRegistry | None = None
+    production_shadow: ProductionShadowSubmitter | None = None
+    engine_rollout_service: Any | None = None
 
 
 class ShaderGenerationUseCaseError(RuntimeError):
@@ -213,6 +237,38 @@ def _scene_trace_events(trace: list[dict[str, Any]]) -> tuple[dict[str, Any], ..
     )
 
 
+def _legacy_authority_engine_run(
+    *,
+    run_id: UUID,
+    shadow_submission: dict[str, Any],
+) -> ShaderEngineRunSummary:
+    """为未进入 canary 协调器的旧权威路径补充只读执行来源."""
+    return ShaderEngineRunSummary(
+        policy_id=str(shadow_submission["policy_id"]),
+        policy_sha256=str(shadow_submission["policy_sha256"]),
+        configured_stage=str(shadow_submission["configured_stage"]),
+        stage=str(shadow_submission["effective_stage"]),
+        bucket=(
+            int(shadow_submission["bucket"])
+            if isinstance(shadow_submission.get("bucket"), int)
+            else None
+        ),
+        selected_attempt_id=str(run_id),
+        attempt_refs=[
+            ShaderEngineAttemptSummary(
+                attempt_id=str(run_id),
+                engine="shader_graph_v1",
+                representation="shader_document_v1",
+                status="succeeded",
+                failure_code=None,
+            )
+        ],
+        shadow_submission=ShaderShadowSubmissionSummary.model_validate(
+            shadow_submission
+        ),
+    )
+
+
 async def execute_shader_generation(
     command: ShaderGenerationCommand,
     dependencies: ShaderGenerationDependencies,
@@ -226,6 +282,7 @@ async def execute_shader_generation(
     run_started = False
     result: Any = None
     succeeded = False
+    terminal_stop_reason: str | None = None
 
     if progress is not None:
         try:
@@ -273,7 +330,10 @@ async def execute_shader_generation(
                     instruction=command.instruction,
                 )
                 run_started = True
-            if dependencies.min_service is None:
+            generation_service = (
+                dependencies.engine_rollout_service or dependencies.min_service
+            )
+            if generation_service is None:
                 raise RuntimeError("scene_mvp service 未就绪。")
 
             def publish(event: dict[str, Any], render: bytes | None) -> None:
@@ -290,7 +350,7 @@ async def execute_shader_generation(
                 run_id=str(run_id),
                 quality_preset=quality_preset,
                 instruction=command.instruction,
-                service=dependencies.min_service,
+                service=generation_service,
                 on_progress=publish if progress is not None else None,
             )
             succeeded = True
@@ -321,11 +381,104 @@ async def execute_shader_generation(
         ) from exc
     except ShaderGenerationUseCaseError:
         raise
+    except EngineResponseContractFailure as exc:
+        terminal_stop_reason = exc.code
+        contract_diagnostics = {
+            "failure_stage": "response_contract",
+            "failure_event": exc.code,
+            "failure_error_type": type(exc).__name__,
+            "contract_field": exc.field,
+            "backend_duration_ms": round(
+                (time.perf_counter() - command.started_at) * 1000,
+                2,
+            ),
+        }
+        if pool is not None and run_started:
+            await _record_failure_without_masking(
+                pool,
+                run_id=run_id,
+                project_id=project_id,
+                stop_reason=exc.code,
+                failure_stage="response_contract",
+                error=exc,
+                diagnostics=contract_diagnostics,
+            )
+        logger.error(
+            "shader.generate.engine_response_contract_failed run_id=%s "
+            "project_id=%s contract_field=%s",
+            run_id,
+            project_id,
+            exc.field,
+        )
+        raise _generation_error(
+            status_code=500,
+            message="Shader 引擎返回了无效的公开响应契约。",
+            code="response_contract_failed",
+            run_id=run_id,
+            stage="response_contract",
+            retryable=False,
+            stop_reason=exc.code,
+        ) from exc
+    except ParentRunFailure as exc:
+        terminal_stop_reason = exc.code
+        attempt_refs = [item.to_dict() for item in exc.attempt_refs]
+        rollout_diagnostics = {
+            "failure_stage": "engine_rollout",
+            "failure_event": exc.code,
+            "failure_error_type": type(exc).__name__,
+            "attempt_refs": attempt_refs,
+            "backend_duration_ms": round(
+                (time.perf_counter() - command.started_at) * 1000,
+                2,
+            ),
+        }
+        if progress is not None:
+            progress.publish(
+                str(run_id),
+                {
+                    "node": "engine_rollout",
+                    "phase": "engine_failed",
+                    "status": "failed",
+                    "failure_code": exc.code,
+                    "attempt_refs": attempt_refs,
+                },
+            )
+        if pool is not None and run_started:
+            await _record_failure_without_masking(
+                pool,
+                run_id=run_id,
+                project_id=project_id,
+                stop_reason=exc.code,
+                failure_stage="engine_rollout",
+                error=exc,
+                diagnostics=rollout_diagnostics,
+            )
+        logger.error(
+            "shader.generate.engine_rollout_failed run_id=%s project_id=%s "
+            "generation_mode=%s quality_preset=%s failure_code=%s "
+            "attempt_count=%s",
+            run_id,
+            project_id,
+            GENERATION_MODE,
+            quality_preset,
+            exc.code,
+            len(attempt_refs),
+        )
+        raise _generation_error(
+            status_code=502,
+            message="Shader 引擎执行失败，未发布父运行结果。",
+            code=exc.code,
+            run_id=run_id,
+            stage="engine_rollout",
+            retryable=exc.code
+            in {"direct_and_fallback_failed", "shader_graph_attempt_failed"},
+            stop_reason=exc.code,
+        ) from exc
     except Exception as exc:
         duration_ms = (time.perf_counter() - command.started_at) * 1000
-        is_timeout = (
-            isinstance(exc, TimeoutError) or "timeout" in type(exc).__name__.casefold()
-        )
+        # 只认标准 timeout 类型；异常类名里的字符串不能作为协议，否则业务异常
+        # 可能被误报为可重试的模型超时。
+        is_timeout = isinstance(exc, TimeoutError)
         stage = "model" if is_timeout else "pipeline"
         stop_reason = "model_timeout" if is_timeout else "internal_pipeline_error"
         diagnostics: dict[str, Any] = {
@@ -375,7 +528,9 @@ async def execute_shader_generation(
             progress.finish(
                 str(run_id),
                 "succeeded" if succeeded else "failed",
-                str(getattr(result, "stop_reason", "") or "") or None,
+                terminal_stop_reason
+                or str(getattr(result, "stop_reason", "") or "")
+                or None,
             )
 
     artifact_base = f"/api/shader/runs/{run_id}/artifacts"
@@ -387,6 +542,7 @@ async def execute_shader_generation(
         if result.renderer_path not in {
             "prepared_uniforms_v1",
             "compiled_graph_program_cache_v1",
+            "direct_program_spec_v1",
         }:
             raise ValueError("scene_mvp 返回了未知 Renderer 路径。")
         scene = _scene_value(result.scene)
@@ -397,12 +553,23 @@ async def execute_shader_generation(
             if isinstance(raw_shader_graph_shadow, dict)
             else None
         )
+        raw_engine = getattr(result, "engine", None)
+        raw_representation = getattr(result, "representation", None)
+        raw_engine_run = getattr(result, "engine_run", None)
+        engine_run = (
+            ShaderEngineRunSummary.model_validate(raw_engine_run)
+            if isinstance(raw_engine_run, dict)
+            else None
+        )
         response = ShaderResponse(
             project_id=project_id,
             run_id=run_id,
             glsl=str(result.glsl),
             generation_mode=GENERATION_MODE,
             quality_preset=quality_preset,
+            engine=raw_engine,
+            representation=raw_representation,
+            engine_run=engine_run,
             stop_reason=str(result.stop_reason),
             render_width=int(result.render_width),
             render_height=int(result.render_height),
@@ -460,6 +627,56 @@ async def execute_shader_generation(
             stop_reason=str(getattr(result, "stop_reason", "unknown")),
         ) from exc
 
+    # 只有权威 shader_graph_v1 已成功且公开响应契约已完整构造后才允许排队。
+    # submit 是同步 put_nowait；此处已离开 project lock，shadow 永不阻塞产品路径。
+    shadow_submission: dict[str, Any] | None = None
+    if (
+        dependencies.engine_rollout_service is None
+        and dependencies.production_shadow is not None
+    ):
+        try:
+            submitted = dependencies.production_shadow.submit(
+                project_id=str(project_id),
+                parent_run_id=run_id,
+                image=command.image,
+                content_type=command.content_type,
+                instruction=command.instruction,
+            )
+            if isinstance(submitted, dict):
+                shadow_submission = submitted
+                logger.info(
+                    "shader.shadow.submission parent_run_id=%s project_id=%s "
+                    "status=%s reason=%s attempt_id=%s bucket=%s",
+                    run_id,
+                    project_id,
+                    submitted.get("status"),
+                    submitted.get("reason"),
+                    submitted.get("attempt_id"),
+                    submitted.get("bucket"),
+                )
+        except Exception as exc:
+            logger.error(
+                "shader.shadow.submission_failed parent_run_id=%s project_id=%s "
+                "error_type=%s",
+                run_id,
+                project_id,
+                type(exc).__name__,
+            )
+    if shadow_submission is not None:
+        try:
+            response.engine = "shader_graph_v1"
+            response.representation = "shader_document_v1"
+            response.engine_run = _legacy_authority_engine_run(
+                run_id=run_id,
+                shadow_submission=shadow_submission,
+            )
+        except (KeyError, TypeError, ValueError):
+            logger.error(
+                "shader.engine_summary.invalid parent_run_id=%s project_id=%s",
+                run_id,
+                project_id,
+            )
+
     result_summary = {
         "generation_mode": GENERATION_MODE,
         "status": str(result.status),
@@ -499,6 +716,13 @@ async def execute_shader_generation(
         "final_render_url": f"{artifact_base}/final-render",
         "metrics_url": f"{artifact_base}/metrics",
         "manifest_url": f"{artifact_base}/manifest",
+        "engine": response.engine,
+        "representation": response.representation,
+        "engine_run": (
+            response.engine_run.model_dump(mode="json")
+            if response.engine_run is not None
+            else None
+        ),
     }
     if pool is not None:
         await _record_success_without_masking(

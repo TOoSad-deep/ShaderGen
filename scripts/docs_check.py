@@ -40,6 +40,7 @@ SHADERFORGE_PUBLIC_IMPORT_ROOTS = frozenset(
         "shaderforge.evaluation",
         "shaderforge.generation",
         "shaderforge.optimization",
+        "shaderforge.program_spec",
         "shaderforge.rendering",
         "shaderforge.store",
         "shaderforge.validation",

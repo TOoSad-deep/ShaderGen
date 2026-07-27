@@ -8,17 +8,19 @@
 Frontend React
   -> Backend FastAPI
   -> backend.app.services.shader_generation
-  -> agent.app.services.png_to_shader_min
-  -> png_to_shader_min LangGraph
-  -> ShaderGraph Author / typed layer patch
-  -> ShaderForge DSL / Compiler / bounded program cache / metric / optimizer
-  -> Artifact
+  -> 启动期冻结的 engine policy
+     ├─ disabled / production_shadow -> png_to_shader_min LangGraph
+     │                                -> ShaderGraph DSL / Compiler
+     └─ 已授权 canary / direct_default -> parent coordinator
+          ├─ direct child -> advisory LayerPlan / canonical ProgramSpec / WebGL1
+          └─ fresh fallback child -> 私有 png_to_shader_min LangGraph
+  -> 父 run 原子公开 final-render / metrics / manifest
 ```
 
-- `frontend/`：上传、配置、运行进度、服务端/客户端 Render 和 GLSL 展示。
+- `frontend/`：上传、配置、运行进度、服务端/客户端 Render 和 GLSL 展示；`frontend/src/runStages.ts` 把进度事件收敛为单一可测试的阶段视图模型，只展示后端真实字段。
 - `backend/`：HTTP 边界、进度注册、过程账本、生命周期和用例编排。
 - `src/agent/`：LangGraph、LLM Gateway、Prompt、Parser、State 和公共 Service。
-- `src/shaderforge/`：确定性 Scene、Shader 物化、WebGL1 渲染、复合评分、优化和 Artifact。
+- `src/shaderforge/`：确定性 Scene、Shader 物化、ProgramSpec、安全校验、WebGL1 渲染、复合评分、优化和 Artifact。
 - `src/nodelab/`：Pipeline 无关的节点 Harness，不依赖 Agent、Backend 或 ShaderForge。
 - `src/nodelab/http/`：同一命名空间下的独立 FastAPI transport，通过受信任 factory 注入 Pipeline Provider。
 
@@ -42,6 +44,58 @@ Node Lab 默认以空安全 Application 启动在端口 8090。产品 Backend �
 - `finalize` 直接固化权威 `shader-graph.json`、specialized WebGL1 GLSL 和 Render，不再为默认产品重复执行 MinScene shadow。
 - Graph recursion limit 按合法最坏路径推导；未知递归错误 fail-closed。
 - 完整拓扑、条件边和安全边界见 `src/agent/app/graphs/ARCHITECTURE.md`。
+
+## LayerPlan/direct GLSL shadow
+
+D088 新增独立离线 harness，用于比较“不提供 LayerPlan”与“只增加 advisory LayerPlan”的 direct GLSL Author。它不注册 LangGraph，不接 Backend/API、产品 `current_best`、公开 Artifact 或 evidence registry：
+
+```text
+参考图
+  ├─> Arm A: Initial/Refine GLSL Author ───────────────┐
+  └─> VisualAnalysis Author ─> advisory LayerPlan ─> Arm B
+                                                       │
+canonical ShaderProgramSpec ─> 安全校验 ─> WebGL1 prepare/draw
+                                                       │
+                              真实 Render/metric ─> arm-local current_best
+```
+
+LayerPlan 只帮助模型理解视觉分层，不能参与校验、评分或候选接受。`shaderforge.program_spec` 是唯一 ProgramSpec/LayerPlan 类型、规范化、哈希和 attestation 真相；模型只能返回语义字段，可信层绑定参考图、指令、模型、Prompt、实际生效采样身份（Gateway `effective_identity`，kimi 实际 temperature=1，缺有效身份 fail-closed）、角色、父 Spec、content_type、角色输入上下文（Refine 含 current_render 与评估上下文哈希）及结构修复 provenance。候选只有在 ProgramSpec 静态安全校验和真实 WebGL1 draw 后，才能由 Renderer 私有 signer 签发绑定具体 Spec/RGB/PNG/runtime 的 receipt；Runner 只有 verify-only capability。详细产物只写显式指定的本地私有目录（staging + 原子 rename、0700/0600、规范相对路径与 symlink 拒绝、`verify_shadow_run` 复验）。
+
+D090 在单 run 之上新增冻结 suite 层；D093 将默认协议升级为 `manifest_v2.yaml`/`gate_v2.yaml`。四张参考图、instruction、共享预算、两轮 `AB/BA` 顺序和判定阈值保持不变，v2 另绑定四个 Author Prompt、Schema、repair policy、输出/修复上限、Renderer contract 与 SafetyLimits，并把实现身份传入单 run config fingerprint、gate 和 suite report。`scripts/run_layerplan_glsl_shadow_suite.py` 默认拒绝真实模型，只有当前 v2 加显式 `--allow-live-model --output-root <私有目录>` 才会顺序运行；v1 只允许 `--verify` 历史复验。每个单 run 先经 `verify_shadow_run`，suite 再按同样本同轮的 `B-A` loss、顺序效应和 inconclusive 计负规则聚合，并以原子私有报告落盘。
+
+D094 的 v2 真实 suite 自动 gate 已通过。`scripts/run_layerplan_glsl_shadow_review.py` 只接受已递归复验的当前 v2 suite：以 suite hash + sample + round 确定匿名 A/B，公开 `reviewer/` 只含 reference/A/B 图片、静态页面和 template，真实 Arm/run 映射留在父目录私有文件；全部内容带 hash/size，递归 verifier 拒绝 symlink、额外文件、篡改和改名。只有同时存在 A/B current best 的 round 可评；不可配对 round 不伪造图片并继续进入偏好率分母。Agent 不生成投票，人工结果只能由 `A/B/tie` 完整提交。D096 的独立人工结果为 Arm B `5/8=0.625`，达到冻结 `0.5` 门槛；`layerplan_glsl_promotion_evidence.py` 已把 suite、8 个 run、盲评包与 canonical 人工结果组合为可离线递归复验的内容寻址私有 bundle，但 `f42aefb…` 仍位于 `/private/tmp`、未登记 durable，因此生产结论是 `no_go_pending_durable`。
+
+D095 已落地默认关闭的服务端 `ShaderEnginePolicyV1` 与 production-shadow coordinator：Backend 启动时从受信 YAML 冻结 policy，缺失等价于 `disabled/shader_graph_v1`，非法组合 fail-closed；稳定分桶只读取 project id，客户端不能选择 engine；`SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 对新 run 具有最高优先级。命中 `production_shadow` 时，权威 ShaderGraph 完成且 Backend 响应契约校验通过后，才在项目锁外非阻塞提交确定性 UUID5 direct child attempt；attempt 使用全新 direct runner/Playwright Renderer、独立预算与有界 timeout。队列满、失败、超时和 shutdown cancel 都不能改变 HTTP、产品 `current_best`、公开 Artifact 或 DB 成功；私有 LayerPlan/ProgramSpec/render/metric 以 staging + rename 写入独立 0700/0600 write-once 目录，递归 verifier 拒绝 symlink、额外文件、改名和篡改，该根不进入产品 Artifact 白名单。默认 disabled 不创建 worker/模型/Renderer/目录。
+
+`canary/direct_default` 不能只依赖 policy 内自报的
+`PromotionAuthorizationV1`。Backend 启动时还会读取显式
+`SHADERGEN_EVIDENCE_REGISTRY_PATH`，拒绝 symlink、重复 JSON key/evidence id，
+并要求授权逐字段匹配唯一的 durable promotion entry、不可变 URI/hash、目标
+stage 以及当前代码重算的 direct implementation identity；验证回执和 registry
+文件 hash 冻结进进程配置。当前 `docs/evidence/registry.json` 没有该 entry，
+所以当前真实配置必然 fail-closed。代码侧已经接入 canary/direct-default 的父
+run runtime：命中 direct 时创建确定性 UUID5 child，使用独立 Renderer、预算和
+write-once 私有 attempt；失败只以安全码记录并创建 fresh ShaderGraph fallback
+child。选中结果经过 manifest/hash 复验后才把三个公开 Artifact 原子登记到父 run，
+未选 child 永不进入公开 index。API/前端返回只读 `engine/representation/engine_run`
+discriminator，完整 LayerPlan、ProgramSpec 和失败上下文保持私有；同进程 reader
+仍可回退读取切换前的 v1 父 run。direct attempt 只向父进度流发布
+`direct_start/direct_completed/direct_failed` 安全事件，异常只暴露预声明失败码；
+两种 engine 都失败时，UseCase 保留 `ParentRunFailure` 的父失败码与安全
+`attempt_refs`，不得降级为 `internal_pipeline_error`。runtime 提供幂等
+`close/aclose` 生命周期契约，attempt-local 资源仍由每次协调执行的 `finally`
+关闭；选中 engine 的父响应在进入 API 前再经 strict schema 还原，字段漂移只记录
+安全字段路径并收敛为 `response_contract_failed`。完整父 run/child attempt、production shadow、
+fallback 与 manifest union 契约见
+`docs/superpowers/specs/2026-07-27-direct-glsl-production-rollout.md`。在 durable
+门禁完成前，生产 `png_to_shader_min` 的 12 节点拓扑与
+ShaderDocument/Compiler 权威路径不变。
+
+紧急回滚是上述 promotion 校验的唯一启动例外：
+`SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 仍要求 policy YAML 严格解析，但有效阶段先
+降为 `disabled`，启动不读取 promotion registry，也不要求验证回执；这样 registry
+或 durable 存储故障不能阻止旧引擎恢复。开关回到 `0` 后，配置的晋升 stage 必须
+重新通过全部授权校验。
 
 ## HTTP 与进度
 
@@ -70,6 +124,9 @@ Backend 当前启动 asyncpg 过程账本连接池，写入 `agent_runs`、`agen
 ## Artifact 与安全
 
 - 公开 Artifact 只允许 final render、metrics 和 manifest。
+- 默认产品 Artifact 根及 rollout 私有根都显式启用 0700/0600 权限；公开父 run
+  final bundle 逐文件与目录 fsync 后原子 rename，并在每次读取时复验文件集合、
+  内容与 symlink/替换边界。
 - 图片、完整 GLSL、编译器原文和模型原始响应不得进入普通日志。
 - 密钥只在服务端 `.env` 或部署 Secret 中；任何 `VITE_*` 都是公开前端配置。
 - 历史失败 benchmark、run 和人工证据不得覆盖或删除；当前代码不再提供旧 V1 benchmark 入口。

@@ -1,9 +1,18 @@
-import type { MinPipelineSummary } from "../api/shader";
+import type {
+  MinPipelineSummary,
+  ShaderEngineId,
+  ShaderEngineRunSummary,
+  ShaderRepresentation,
+} from "../api/shader";
+import { EngineRunSummary } from "./EngineRunSummary";
 
 interface SceneMvpSummaryProps {
   runId: string;
   stopReason?: string | null;
   minPipeline?: MinPipelineSummary | null;
+  engine?: ShaderEngineId | null;
+  representation?: ShaderRepresentation | null;
+  engineRun?: ShaderEngineRunSummary | null;
 }
 
 function formatCount(value: number | null | undefined): string {
@@ -34,7 +43,14 @@ function shortHash(value: string | null | undefined): string {
   return typeof value === "string" && value.length > 12 ? value.slice(0, 12) : value || "—";
 }
 
-export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSummaryProps) {
+export function SceneMvpSummary({
+  runId,
+  stopReason,
+  minPipeline,
+  engine,
+  representation,
+  engineRun,
+}: SceneMvpSummaryProps) {
   const trace = Array.isArray(minPipeline?.trace) ? minPipeline.trace : [];
   // 质量达标只来自后端 target_reached；缺省（旧响应）时不展示结论，避免误报。
   const targetReached =
@@ -45,6 +61,7 @@ export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSumm
       : null;
   const graphShadow = minPipeline?.shader_graph_shadow;
   const productGraph =
+    engine !== "direct_glsl_layerplan_v1" &&
     typeof minPipeline?.scene === "object" &&
     minPipeline.scene !== null &&
     (minPipeline.scene as Record<string, unknown>).schema_version === "shader_graph_v1"
@@ -140,6 +157,11 @@ export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSumm
             : ""}
         </p>
       ) : null}
+      <EngineRunSummary
+        engine={engine}
+        representation={representation}
+        engineRun={engineRun}
+      />
       {productGraph ? (
         <section className="shader-graph-shadow" aria-label="ShaderGraph 产品摘要">
           <div className="panel-header">
@@ -147,7 +169,8 @@ export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSumm
             <span>{productGraph.schema_version}</span>
           </div>
           <p>
-            当前 GLSL、渲染结果与 current_best 均由该 typed ShaderGraph 编译产生。
+            当前 GLSL、渲染结果与 current_best 均由该 typed ShaderGraph 编译产生；
+            下方 GLSL 与服务端最终 Render 是运行结束时冻结的 current_best 候选产物。
           </p>
           <details className="scene-mvp-details">
             <summary>图层检查器（{productLayers.length}）</summary>

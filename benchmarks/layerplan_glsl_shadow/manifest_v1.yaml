@@ -1,0 +1,44 @@
+# LayerPlan/direct GLSL shadow A/B 冻结样本 manifest（D086）。
+# 这是新候选空间的协议；只复用版本中立参考像素，不复用旧 V1 结论或入口。
+schema_version: layerplan_glsl_shadow_manifest_v1
+experiment_id: layerplan_glsl_shadow_ab_v1
+run_classification: independent_experiment
+report_schema_version: layerplan_glsl_shadow_ab_report_v1
+frozen_at: 2026-07-27
+rounds: 2
+arm_order_schedule:
+  - AB
+  - BA
+config:
+  direct_author_llm_budget: 8
+  compile_budget_per_arm: 8
+  draw_budget_per_arm: 8
+  refine_budget_per_arm: 2
+  plan_llm_budget: 2
+  canvas_width: null
+  canvas_height: null
+samples:
+  - sample_id: solid_circle
+    reference_path: images/solid_circle.png
+    reference_sha256: 7ed59045ada3434c126f70a60a079d75ebf461359e34165f6f56700c1d360ac8
+    reference_content_type: image/png
+    instruction: "复刻参考图的结构、颜色、高光与阴影。"
+    instruction_sha256: c4ea37b47714e353cecfdde5e34720da21a2f4de12ea060a42d35f31f486d994
+  - sample_id: ellipse_gradient
+    reference_path: images/ellipse_gradient.png
+    reference_sha256: 799877174ff433b4764877f2835e71c2b87a62487ae67edf55ad487a5bf9f1da
+    reference_content_type: image/png
+    instruction: "复刻参考图的结构、颜色、高光与阴影。"
+    instruction_sha256: c4ea37b47714e353cecfdde5e34720da21a2f4de12ea060a42d35f31f486d994
+  - sample_id: rimmed_disk
+    reference_path: images/rimmed_disk.png
+    reference_sha256: a50d8f24fd99f98225c9d859e036ac6830307e1c5f7ffd87522ff37109298b6a
+    reference_content_type: image/png
+    instruction: "复刻参考图的结构、颜色、高光与阴影。"
+    instruction_sha256: c4ea37b47714e353cecfdde5e34720da21a2f4de12ea060a42d35f31f486d994
+  - sample_id: pink_gel
+    reference_path: images/pink_gel.png
+    reference_sha256: 5f182a927055e607dc85261c7d035d45fe5cef4081f833a71858dbcafe184140
+    reference_content_type: image/png
+    instruction: "复刻参考图的结构、颜色、高光与阴影。"
+    instruction_sha256: c4ea37b47714e353cecfdde5e34720da21a2f4de12ea060a42d35f31f486d994

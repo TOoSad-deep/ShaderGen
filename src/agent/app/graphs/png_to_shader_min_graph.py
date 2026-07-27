@@ -76,7 +76,10 @@ def build_png_to_shader_min_graph(
     shader_graph_product: bool = False,
 ) -> Any:
     """装配可注入 Gateway、Artifact 和 Renderer 的 12 节点最小 Graph。."""
-    artifacts = artifact_store or LocalArtifactStore(DEFAULT_MIN_ARTIFACT_ROOT)
+    artifacts = artifact_store or LocalArtifactStore(
+        DEFAULT_MIN_ARTIFACT_ROOT,
+        restrictive_permissions=True,
+    )
     registry = renderer_registry or MinRendererRegistry(PlaywrightWebGL1Renderer)
     model_gateway = gateway or LangChainLLMGateway()
     nodes = (
@@ -142,7 +145,10 @@ def build_png_to_shader_min_graph(
     return graph.compile()
 
 
-png_to_shader_min_artifact_store = LocalArtifactStore(DEFAULT_MIN_ARTIFACT_ROOT)
+png_to_shader_min_artifact_store = LocalArtifactStore(
+    DEFAULT_MIN_ARTIFACT_ROOT,
+    restrictive_permissions=True,
+)
 png_to_shader_min_renderer_registry = MinRendererRegistry(PlaywrightWebGL1Renderer)
 png_to_shader_min_shader_graph_shadow = ShaderGraphShadowRunner(
     PlaywrightWebGL1Renderer

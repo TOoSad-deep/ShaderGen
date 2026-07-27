@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal, cast
 
 from agent.app.config.png_to_shader_min import (
@@ -374,6 +375,31 @@ def create_png_to_shader_min_service(
     )
 
 
+def create_isolated_png_to_shader_min_service(
+    artifact_root: Path,
+    *,
+    gateway: LLMGateway | None = None,
+    llm_budget: int | None = None,
+    refine_budget: int | None = None,
+) -> PngToShaderMinService:
+    """在独立根创建全新生产预算 Graph/Renderer/Artifact 组合根."""
+    return create_png_to_shader_min_service(
+        artifact_store=LocalArtifactStore(
+            artifact_root,
+            restrictive_permissions=True,
+        ),
+        gateway=gateway,
+        llm_budget=(
+            MIN_PIPELINE_CONFIG.max_llm_budget if llm_budget is None else llm_budget
+        ),
+        refine_budget=(
+            MIN_PIPELINE_CONFIG.max_refine_budget
+            if refine_budget is None
+            else refine_budget
+        ),
+    )
+
+
 default_png_to_shader_min_service = PngToShaderMinService(
     png_to_shader_min_graph,
     png_to_shader_min_artifact_store,
@@ -415,6 +441,7 @@ __all__ = [
     "MinQualityBudget",
     "PngToShaderMinResult",
     "PngToShaderMinService",
+    "create_isolated_png_to_shader_min_service",
     "create_png_to_shader_min_service",
     "default_png_to_shader_min_service",
     "generate_png_to_shader_min",
