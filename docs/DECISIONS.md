@@ -52,6 +52,7 @@
 | D084 | accepted | — | 实现隔离的 LayerPlan/direct GLSL shadow A/B harness；不接入生产 Graph、API 或 `current_best`。 |
 | D085 | accepted | — | 前端运行可观测性只展示后端可证明的阶段事实，不伪造 active node、完整时长或最终 provenance。 |
 | D086 | accepted | — | 冻结 LayerPlan shadow suite 的四样本、AB/BA 调度、预算指纹与预声明 gate；真实运行前 fail-closed 复验。 |
+| D087 | accepted | — | 首轮真实 LayerPlan suite 自动 gate 失败，保持生产 no-go；先修复 direct GLSL 契约遵循稳定性再重新冻结实验。 |
 
 ## D001 - SVG 是最终架构来源
 
@@ -681,3 +682,10 @@
 - 原因：单次无 seed、temperature=1 的 A/B 只能证明 harness 可运行，不能隔离顺序或服务端漂移；如果在看到结果后再选样本、预算、顺序或阈值，结论不可审计。旧 V1 benchmark 已退役，但其参考 PNG 是与候选表示无关的固定视觉输入；本决策只把四张像素以新路径和新 hash 链纳入 LayerPlan/direct GLSL 新候选空间，不恢复旧 manifest、runner、golden、Feature/DSL 结论或产品入口。
 - 影响：本步只交付冻结 manifest/gate、四张固定样本、严格加载器和无模型单测；真实模型调度、跨 run 聚合、suite 报告、人工盲评包与 evidence registry 登记在后续小步实现。生产 Graph、API、scorer、预算、ShaderDocument/Compiler、`current_best` 和 F09 状态不变；即使自动 gate 通过，没有人工偏好和 durable 跨环境证据也只能保持 no-go。
 - 实现更新（2026-07-27）：同一协议冻结后新增 `run_layerplan_glsl_shadow_suite.py` 与 suite service，按 manifest 顺序执行全部样本/轮次；每个 run 必须先通过原 D084 verifier 且与 sample/reference/instruction/config/order 精确绑定，随后才按配对 `B-A`、样本中位数、AB/BA 方向一致性和 inconclusive 计负聚合。suite 报告采用私有 staging + 原子 rename、0600/0700、内容寻址目录，并可递归复验全部引用 run；自动结论只可能是 `no_go_automatic_gate_failed` 或 `no_go_pending_human_and_durable`。人工盲评包、durable registry 与生产晋升仍未实现。
+
+## D087 - 首轮真实 LayerPlan suite 自动 gate 失败，生产保持 no-go
+
+- 日期：2026-07-27
+- 决策：接受 D086 冻结 suite `shadow-suite-43a0748fa395` 的自动结论 `not_supported`，生产决策为 `no_go_automatic_gate_failed`。本轮不生成晋升用人工盲评、不登记为 durable 证据、不修改 D070 ShaderDocument/Compiler、Graph、scorer、预算或 `current_best`。下一实验增量先提高 Arm A/B 共用 direct GLSL Initial/Refine/repair 对 `webgl1_static_no_texture_v1` 的遵循稳定性；不得放宽 Validator、静默修补越权 GLSL或把 LayerPlan 直接接入接受谓词。Prompt/repair/实现变化后必须升级版本并重新冻结 manifest/gate/实现身份，不得覆盖 v1 run。
+- 原因：报告与 8 个单 run 已递归复验，suite SHA-256 为 `43a0748fa39525b0c44106b2ffc323557e29fc1cb553300cb60408af39ee1075`。Arm B 在 5 个可比较 run 中 4 胜 1 负，成功率 `7/8` 高于 Arm A 的 `5/8`，AB/BA 可比较子集方向均有利于 B；但 `solid_circle`、`ellipse_gradient`、`pink_gel` 各至少一轮因 `glsl_renderer_contract_violation` 无法配对，inconclusive ratio=`0.75` 超过 `0.25`，只有 `rimmed_disk` 两轮可比较，改善样本比例=`0.25` 低于 `0.75`。该信号值得后续验证，但不能越过预声明 gate，也不能在无 seed、temperature=1 下宣称 LayerPlan 是唯一因果变量。
+- 影响：完整安全摘要写入 `docs/analysis/layerplan-shadow-suite-43a0748fa395-2026-07-27.md`；详细 Spec/GLSL/render 继续只留本地私有目录，durability 为 `local_private_not_registered`，不能支撑跨环境晋升。自动 gate 未通过，人工偏好阶段当前无晋升价值；先完成版本化契约稳定性改造和新冻结实验，再决定是否进入盲评与 durable evidence。
