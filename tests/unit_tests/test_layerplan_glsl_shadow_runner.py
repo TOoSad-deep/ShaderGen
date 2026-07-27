@@ -27,6 +27,7 @@ from agent.app.contracts.llm import (
 from agent.app.services.layerplan_glsl_shadow import (
     LayerPlanGlslShadowRunner,
     ShadowABConfig,
+    ShadowABConfigError,
     ShadowEvidenceError,
     is_strict_improvement,
     verify_shadow_run,
@@ -127,6 +128,11 @@ class _FakeGateway:
         initial_responses_b: list[str] | None = None,
         refine_responses_b: list[str] | None = None,
         repair_responses: list[str] | None = None,
+        usage: TokenUsage | None = TokenUsage(
+            input_tokens=10,
+            output_tokens=5,
+            total_tokens=15,
+        ),
     ) -> None:
         self._queues: dict[Any, list[str]] = {
             "plan": list(plan_responses or [json.dumps(_plan_payload())]),
@@ -140,6 +146,7 @@ class _FakeGateway:
             ),
             "repair": list(repair_responses or [_spec_payload(0.5)]),
         }
+        self._usage = usage
         self.calls: list[dict[str, Any]] = []
         self._last_text: str | None = None
 
@@ -180,7 +187,7 @@ class _FakeGateway:
             reasoning_content=None,
             model_ref="fake-shadow-model",
             latency_ms=1,
-            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+            usage=self._usage,
             effective_identity=EffectiveCallIdentity(
                 provider="fake",
                 model_ref="fake-shadow-model",
@@ -398,6 +405,22 @@ async def test_arm_budget_and_state_isolation() -> None:
 
 
 @pytest.mark.anyio
+async def test_missing_token_usage_remains_unknown_in_both_ledgers() -> None:
+    result = await _run(
+        _FakeGateway(usage=None),
+        _FakeRenderer(),
+        ShadowABConfig(refine_budget_per_arm=0),
+    )
+
+    arm_a, arm_b = result.arms
+    assert result.status == "ok"
+    assert arm_a.ledger.total_tokens is None
+    assert arm_b.ledger.total_tokens is None
+    assert arm_b.plan_ledger is not None
+    assert arm_b.plan_ledger.total_tokens is None
+
+
+@pytest.mark.anyio
 async def test_layer_plan_budget_exhausted_only_degrades_arm_b() -> None:
     gateway = _FakeGateway()
     renderer = _FakeRenderer()
@@ -416,6 +439,7 @@ async def test_layer_plan_budget_exhausted_only_degrades_arm_b() -> None:
     assert arm_b.ledger.llm_call_count == 0, "plan 失败不消耗 B 臂 Author 预算"
     assert arm_b.plan_ledger is not None
     assert arm_b.plan_ledger.llm_call_count == 0
+    assert arm_b.plan_ledger.total_tokens == 0, "零调用的 token 总量应保持精确 0"
     assert arm_b.current_best is None
 
 
@@ -798,6 +822,13 @@ def test_cli_parse_canvas() -> None:
         _parse_canvas("not-a-canvas")
 
 
+def test_shadow_config_rejects_canvas_above_renderer_contract() -> None:
+    oversized = shadow_service.MAX_CANVAS_SIDE + 1
+
+    with pytest.raises(ShadowABConfigError, match="Renderer 契约上限"):
+        ShadowABConfig(canvas_width=oversized, canvas_height=16)
+
+
 @pytest.mark.anyio
 async def test_tampered_author_identity_breaks_attestation() -> None:
     """spec_sha256 绑定 author_identity：篡改身份即 attestation 失配."""
@@ -835,6 +866,7 @@ async def test_direct_author_llm_budget_ceiling_identical_across_arms() -> None:
     assert result.status == "ok", "两臂都在 Initial 后耗尽 Author 预算，状态一致"
     for arm in result.arms:
         assert arm.ledger.llm_call_count == 1, "两臂 direct Author 调用上限一致"
+        assert arm.ledger.total_tokens == 15, "零调用的 Refine 不得污染已知 token 总量"
         refine_events = [e for e in arm.events if e["kind"] == "refine"]
         assert refine_events, "Refine 仍以相同剩余预算（0）尝试"
         assert refine_events[0]["error_code"] == "llm_budget_exhausted"
@@ -864,6 +896,19 @@ async def test_verify_shadow_run_roundtrip_and_permissions(tmp_path: Any) -> Non
             assert mode == 0o700, f"{path} 目录必须 0700"
         else:
             assert mode == 0o600, f"{path} 文件必须 0600"
+
+
+@pytest.mark.anyio
+async def test_verify_shadow_run_rejects_directory_name_not_bound_to_report(
+    tmp_path: Any,
+) -> None:
+    result = await _run(_FakeGateway(), _FakeRenderer())
+    run_dir = write_shadow_run(result, tmp_path)
+    renamed = tmp_path / "shadow-renamed000"
+    run_dir.rename(renamed)
+
+    with pytest.raises(ShadowEvidenceError, match="内容寻址身份不匹配"):
+        verify_shadow_run(renamed)
 
 
 @pytest.mark.anyio

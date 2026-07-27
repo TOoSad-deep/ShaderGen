@@ -53,6 +53,7 @@ from agent.app.nodes.layerplan_glsl_shadow.authors import (
     run_refine_glsl_author,
     run_visual_analysis_author,
 )
+from shaderforge.contracts import WEBGL1_STATIC_NO_TEXTURE_V1
 from shaderforge.evaluation import (
     MIN_SCENE_METRIC_VERSION,
     dominant_metric_component,
@@ -85,6 +86,7 @@ ARM_A: ArmId = "A"
 ARM_B: ArmId = "B"
 ARM_IDS: tuple[ArmId, ArmId] = (ARM_A, ARM_B)
 MAX_WORK_SIDE = 256
+MAX_CANVAS_SIDE = WEBGL1_STATIC_NO_TEXTURE_V1.max_long_side
 
 # 预算耗尽与失败归类的预声明 inconclusive code，查看结果前冻结，不得事后新增。
 INCONCLUSIVE_CODES = frozenset(
@@ -190,6 +192,14 @@ class ShadowABConfig:
                 raise ShadowABConfigError(f"{name} 必须是正整数或 None。")
         if (self.canvas_width is None) != (self.canvas_height is None):
             raise ShadowABConfigError("canvas_width 与 canvas_height 必须同时给出。")
+        if (
+            self.canvas_width is not None
+            and self.canvas_height is not None
+            and max(self.canvas_width, self.canvas_height) > MAX_CANVAS_SIDE
+        ):
+            raise ShadowABConfigError(
+                f"显式画布长边不得超过 Renderer 契约上限 {MAX_CANVAS_SIDE}。"
+            )
 
     def fingerprint(self) -> str:
         """返回冻结配置的内容寻址指纹."""
@@ -221,7 +231,7 @@ class ArmLedger:
 
     arm_id: ArmId
     llm_call_count: int = 0
-    total_tokens: int = 0
+    total_tokens: int | None = 0
     repair_count: int = 0
     compile_count: int = 0
     draw_count: int = 0
@@ -251,7 +261,7 @@ class PlanLedger:
     """VisualAnalysis/LayerPlan 的独立记账，不属于任一臂的 Author ledger."""
 
     llm_call_count: int = 0
-    total_tokens: int = 0
+    total_tokens: int | None = 0
     repair_count: int = 0
     wall_clock_ms: float = 0.0
 
@@ -390,6 +400,20 @@ def decode_reference(image_bytes: bytes) -> Image.Image:
 def is_strict_improvement(candidate_loss: float, incumbent_loss: float) -> bool:
     """Strict total-loss 严格改善；只读取真实 metric，绝不读取 LayerPlan."""
     return bool(np.isfinite(candidate_loss)) and candidate_loss < incumbent_loss
+
+
+def _accumulate_token_usage(
+    current_total: int | None,
+    observed_total: int | None,
+    *,
+    call_count: int,
+) -> int | None:
+    """聚合实际调用的完整 usage；零调用不改变既有总量."""
+    if call_count == 0:
+        return current_total
+    if current_total is None or observed_total is None:
+        return None
+    return current_total + observed_total
 
 
 def _program_cache_key(spec: ShaderProgramSpecV1) -> tuple[Any, ...]:
@@ -552,7 +576,11 @@ class LayerPlanGlslShadowRunner:
         )
         plan_ledger.wall_clock_ms += (self._clock() - started) * 1000.0
         plan_ledger.llm_call_count += result.call_count
-        plan_ledger.total_tokens += result.total_tokens or 0
+        plan_ledger.total_tokens = _accumulate_token_usage(
+            plan_ledger.total_tokens,
+            result.total_tokens,
+            call_count=result.call_count,
+        )
         plan_ledger.repair_count += 1 if result.repaired else 0
         arm.events.append(
             {
@@ -639,7 +667,11 @@ class LayerPlanGlslShadowRunner:
                 repaired = refine_result.repaired
             arm.ledger.wall_clock_ms += (self._clock() - started) * 1000.0
             arm.ledger.llm_call_count += call_count
-            arm.ledger.total_tokens += total_tokens or 0
+            arm.ledger.total_tokens = _accumulate_token_usage(
+                arm.ledger.total_tokens,
+                total_tokens,
+                call_count=call_count,
+            )
             arm.ledger.repair_count += 1 if repaired else 0
             if spec is None:
                 arm.ledger.rejected_candidates += 1
@@ -954,9 +986,12 @@ def shadow_run_id(result: ShadowABRunResult) -> str:
     identity/metric/执行顺序摘要；用其 canonical hash 后，不同实际结果会
     得到不同 run_id，完全相同的重复结果仍 write-once 拒绝覆盖。
     """
-    digest = sha256(
-        canonical_json(build_report_payload(result)).encode("utf-8")
-    ).hexdigest()
+    return _shadow_run_id_from_report_body(build_report_payload(result))
+
+
+def _shadow_run_id_from_report_body(report_body: Mapping[str, Any]) -> str:
+    """由不含文件清单/报告哈希的 canonical 报告主体推导 run id."""
+    digest = sha256(canonical_json(dict(report_body)).encode("utf-8")).hexdigest()
     return f"shadow-{digest[:12]}"
 
 
@@ -1188,6 +1223,17 @@ def verify_shadow_run(run_dir: Path) -> dict[str, Any]:
     if actual_report != report_sha256:
         raise ShadowEvidenceError("report_sha256 不匹配（报告可能被篡改）。")
     payload["report_sha256"] = report_sha256
+    report_body = {
+        key: value
+        for key, value in payload.items()
+        if key not in {"files", "report_sha256"}
+    }
+    expected_run_id = _shadow_run_id_from_report_body(report_body)
+    if run_dir.name != expected_run_id:
+        raise ShadowEvidenceError(
+            "shadow run 目录名与报告内容寻址身份不匹配："
+            f"expected={expected_run_id} actual={run_dir.name}"
+        )
     return payload
 
 

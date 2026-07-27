@@ -90,10 +90,12 @@ class _FakeGateway:
         *responses: str,
         with_identity: bool = True,
         identity: EffectiveCallIdentity | None = None,
+        usages: list[TokenUsage | None] | None = None,
     ) -> None:
         self._responses = list(responses)
         self._with_identity = with_identity
         self._identity = identity or _trusted_identity()
+        self._usages = list(usages) if usages is not None else None
         self.calls: list[tuple[list[BaseMessage], LLMCallOptions]] = []
 
     async def ainvoke(
@@ -103,13 +105,18 @@ class _FakeGateway:
     ) -> LLMResponse:
         self.calls.append((list(messages), options))
         text = self._responses.pop(0)
+        usage = (
+            self._usages.pop(0)
+            if self._usages is not None
+            else TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15)
+        )
         return LLMResponse(
             message=AIMessage(content=text),
             text=text,
             reasoning_content=None,
             model_ref="fake-shadow-model",
             latency_ms=1,
-            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+            usage=usage,
             effective_identity=self._identity if self._with_identity else None,
         )
 
@@ -800,6 +807,73 @@ async def test_visual_analysis_fails_closed_without_effective_identity() -> None
 
     assert result.error_code == "author_identity_unavailable"
     assert result.plan is None, "缺有效身份时绝不装配 unknown LayerPlan"
+
+
+@pytest.mark.anyio
+async def test_all_authors_fail_closed_when_trusted_identity_cannot_be_assembled() -> None:
+    """可信元数据越界不得从 Author helper 冒泡为未分类异常."""
+    invalid_content_type = "x" * 129
+    plan = await run_visual_analysis_author(
+        gateway=_FakeGateway(json.dumps(_plan_payload())),
+        reference_image=_IMAGE,
+        content_type=invalid_content_type,
+        remaining_calls=1,
+    )
+    initial = await run_initial_glsl_author(
+        gateway=_FakeGateway(json.dumps(_spec_payload())),
+        reference_image=_IMAGE,
+        content_type=invalid_content_type,
+        canvas_width=64,
+        canvas_height=64,
+        remaining_calls=1,
+    )
+    refine = await run_refine_glsl_author(
+        gateway=_FakeGateway(json.dumps(_spec_payload())),
+        reference_image=_IMAGE,
+        content_type=invalid_content_type,
+        current_render=_RENDER,
+        incumbent=_incumbent(),
+        remaining_calls=1,
+    )
+
+    assert plan.plan is None
+    assert initial.spec is None
+    assert refine.spec is None
+    assert {
+        plan.error_code,
+        initial.error_code,
+        refine.error_code,
+    } == {"author_identity_unavailable"}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "usages",
+    [
+        [None, TokenUsage(total_tokens=15)],
+        [TokenUsage(total_tokens=15), None],
+    ],
+)
+async def test_repair_token_total_stays_unknown_if_either_usage_is_missing(
+    usages: list[TokenUsage | None],
+) -> None:
+    gateway = _FakeGateway(
+        "{}",
+        json.dumps(_spec_payload()),
+        usages=usages,
+    )
+
+    result = await run_initial_glsl_author(
+        gateway=gateway,
+        reference_image=_IMAGE,
+        canvas_width=64,
+        canvas_height=64,
+        remaining_calls=2,
+    )
+
+    assert result.repaired is True
+    assert result.spec is not None
+    assert result.total_tokens is None
 
 
 @pytest.mark.anyio

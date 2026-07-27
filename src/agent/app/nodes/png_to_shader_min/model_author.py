@@ -60,6 +60,16 @@ def _response_total_tokens(response: LLMResponse) -> int | None:
     return sum(known) if known else None
 
 
+def _combine_token_totals(
+    first: int | None,
+    second: int | None,
+) -> int | None:
+    """仅在两次调用 usage 都完整时返回总量，任一缺失即保持未知."""
+    if first is None or second is None:
+        return None
+    return first + second
+
+
 def effective_llm_budget(value: object) -> int:
     """把任意输入预算限制在 YAML 配置的 run 级硬边界内."""
     if isinstance(value, bool):
@@ -206,8 +216,7 @@ async def invoke_min_author(
             )
         latency_ms += max(0, int(repaired.latency_ms))
         repaired_tokens = _response_total_tokens(repaired)
-        if repaired_tokens is not None:
-            total_tokens = (total_tokens or 0) + repaired_tokens
+        total_tokens = _combine_token_totals(total_tokens, repaired_tokens)
         try:
             value = parser(repaired.text)
         except ValueError as second_error:

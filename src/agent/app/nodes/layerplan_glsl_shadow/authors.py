@@ -55,6 +55,7 @@ from agent.app.nodes.png_to_shader_min.model_author import (
 )
 from agent.app.prompts.prompt_loader import load_prompt_definition
 from shaderforge.program_spec import (
+    ProgramSpecParseError,
     build_author_identity,
     build_layer_author_identity,
     canonical_json,
@@ -182,10 +183,8 @@ async def run_visual_analysis_author(
             # fail-closed：真实响应缺有效身份时绝不装配 "unknown" LayerPlan。
             error_code = AUTHOR_IDENTITY_UNAVAILABLE
         else:
-            plan = assemble_layer_plan(
-                result.value,
-                reference_sha256=sha256(reference_image).hexdigest(),
-                author_identity=build_layer_author_identity(
+            try:
+                author_identity = build_layer_author_identity(
                     model_ref=identity.model_ref,
                     prompt_version=VISUAL_ANALYSIS_PROMPT.version,
                     instruction_sha256=sha256(
@@ -194,13 +193,23 @@ async def run_visual_analysis_author(
                     reference_content_type=content_type,
                     sampling_params=_sampling_params(identity),
                     repair_context_sha256=result.repair_context_sha256,
-                ),
-                observations_ref=(
-                    sha256_hex_text(canonical_json(dict(observations)))
-                    if observations is not None
-                    else None
-                ),
-            )
+                )
+            except ProgramSpecParseError:
+                error_code = AUTHOR_IDENTITY_UNAVAILABLE
+            else:
+                try:
+                    plan = assemble_layer_plan(
+                        result.value,
+                        reference_sha256=sha256(reference_image).hexdigest(),
+                        author_identity=author_identity,
+                        observations_ref=(
+                            sha256_hex_text(canonical_json(dict(observations)))
+                            if observations is not None
+                            else None
+                        ),
+                    )
+                except ProgramSpecParseError:
+                    error_code = "author_output_invalid"
     return VisualAnalysisAuthorResult(
         plan,
         result.call_count,
@@ -276,9 +285,8 @@ async def run_initial_glsl_author(
             # fail-closed：真实响应缺有效身份时绝不装配 "unknown" Spec。
             error_code = AUTHOR_IDENTITY_UNAVAILABLE
         else:
-            spec = assemble_program_spec(
-                result.value,
-                author_identity=build_author_identity(
+            try:
+                author_identity = build_author_identity(
                     reference_sha256=sha256(reference_image).hexdigest(),
                     instruction_sha256=sha256(
                         user_instruction.encode("utf-8")
@@ -300,8 +308,17 @@ async def run_initial_glsl_author(
                         ),
                     ),
                     repair_context_sha256=result.repair_context_sha256,
-                ),
-            )
+                )
+            except ProgramSpecParseError:
+                error_code = AUTHOR_IDENTITY_UNAVAILABLE
+            else:
+                try:
+                    spec = assemble_program_spec(
+                        result.value,
+                        author_identity=author_identity,
+                    )
+                except ProgramSpecParseError:
+                    error_code = "author_output_invalid"
     return InitialGLSLAuthorResult(
         spec,
         result.call_count,
@@ -379,9 +396,8 @@ async def run_refine_glsl_author(
             # fail-closed：真实响应缺有效身份时绝不装配 "unknown" Spec。
             error_code = AUTHOR_IDENTITY_UNAVAILABLE
         else:
-            spec = assemble_program_spec(
-                result.value,
-                author_identity=build_author_identity(
+            try:
+                author_identity = build_author_identity(
                     reference_sha256=sha256(reference_image).hexdigest(),
                     instruction_sha256=sha256(
                         user_instruction.encode("utf-8")
@@ -405,8 +421,17 @@ async def run_refine_glsl_author(
                         ),
                     ),
                     repair_context_sha256=result.repair_context_sha256,
-                ),
-            )
+                )
+            except ProgramSpecParseError:
+                error_code = AUTHOR_IDENTITY_UNAVAILABLE
+            else:
+                try:
+                    spec = assemble_program_spec(
+                        result.value,
+                        author_identity=author_identity,
+                    )
+                except ProgramSpecParseError:
+                    error_code = "author_output_invalid"
     return RefineGLSLAuthorResult(
         spec,
         parent.spec_sha256 if spec is not None else None,
