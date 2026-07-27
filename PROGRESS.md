@@ -22,7 +22,7 @@
 - 已按 D086 完成冻结 LayerPlan shadow suite，并按 D087 完成首轮有效真实模型运行。正式 suite `shadow-suite-43a0748fa395` 与 8 个单 run 递归复验通过：Arm B 成功 `7/8`、Arm A `5/8`，5 个可比较 run 中 B 4 胜 1 负，AB/BA 子集方向均有利于 B；但 3/4 样本至少一轮因 `glsl_renderer_contract_violation` 无法配对，inconclusive ratio=`0.75`，只有 `rimmed_disk` 两轮可比较，improved sample ratio=`0.25`，自动 gate=`not_supported`，生产结论明确 no-go。报告 SHA-256 为 `43a0748fa39525b0c44106b2ffc323557e29fc1cb553300cb60408af39ee1075`，仍为 `local_private_not_registered`。首次配置失败 suite `4cd3b45d7644` 继续保留不覆盖。
 - 已按 D088 完成 direct GLSL 契约稳定性 v2：shadow Initial/Refine 改用独立 v2 Prompt 与 GLSL repair v2，生产 scene_mvp 和 VisualAnalysis 继续默认 repair v1。Author Parser 复用完整 `validate_program_spec_safety`，把安全违规收敛为最多 12 条 `code + line`，repair 上下文哈希绑定实际 repair Prompt 和安全 hints；不放宽 Validator、不静默改写 GLSL。shadow 编译失败事件不再保存原始 compiler log 或 Validator message，只记录存在性、日志哈希及安全类别。
 - 已按 D089/D090 完成冻结 v2 真实 suite `shadow-suite-d03e2224684b`：8 个 run 递归复验通过，improved ratio=`0.75`、inconclusive ratio=`0.25`、AB/BA 方向一致，自动 gate=`supported`。D092 人工盲评中 LayerPlan Arm B 获 `5/8=0.625` 偏好，人工 gate=`supported`；完整 suite、8 个 run、盲评包与 canonical 人工结果已组成并复验 `promotion-evidence-f42aefb52724`。该约 1.7 MB/210 文件 bundle 仍位于 `/private/tmp`、未登记 durable，生产结论为 `no_go_pending_durable`。ShaderGen 实验使用 `kimi:k3-256k`、temperature=1、`reasoning_effort=low`；代码子代理 high 不属于实验身份。
-- D091 默认关闭的 production-shadow scaffold 已接入 Backend：受信 policy 与 kill switch 启动时冻结，稳定 project 分桶只在 `production_shadow` 阶段非阻塞排队；每个 child attempt 使用独立 direct runner/Renderer/预算和 0700/0600 write-once 私有 Artifact。队列满、超时、失败与关闭 cancel 不改变 ShaderGraph 权威响应、DB、公开 Artifact 或产品 `current_best`；canary/direct-default authority 尚未接入。
+- D091 的替换 runtime 已完整接入但保持不可启用：production shadow 仍是有界非权威队列；`canary/direct_default` 只有在启动期 `PromotionAuthorizationV1` 与唯一 durable registry entry、当前实现 identity 全量匹配后才装配。父 run 在 Graph START 前稳定选 engine，direct 与 fresh ShaderGraph fallback 使用确定性 UUID5、独立 Renderer/cache/预算和 write-once private store；失败只写安全摘要，未选 child 不进入公开 index。选中结果才原子发布 v2 父 manifest/API discriminator，历史 v1 reader 与 kill switch 永久保留。当前真实 registry 无 durable entry，故实际生产仍只有 `shader_graph_v1`。
 
 ## 当前 active 功能
 
@@ -37,7 +37,7 @@
 - 参数优化继续评估 rotation/成组参数、typed layer patch 局部成熟和更大搜索；任何预算变化必须使用 ShaderGraph 候选空间重新建立证据。
 - 项目结构重构计划尚待确认，确认前不开始目录迁移；若未来启用 Memory，必须建立 scene_mvp 新契约、namespace 和迁移验收。
 - 由用户明确选择并授权私有 promotion bundle 的不可变目标介质（Git/Release/对象存储之一）；迁入后登记 registry 的 URI/size/hash，把 durability 从 `local_private_not_registered` 提升为 `durable`。
-- durable 完成后新增 canary ADR 与 `PromotionAuthorizationV1`，绑定 D090 suite、D092 人工结果、registry entry、当前 direct implementation identity 与最大比例；随后才实现/验收 direct-first child attempt、显式 old-engine fallback、父 manifest discriminator 和 server-side kill switch 演练。
+- durable 完成后新增 canary ADR 与 `PromotionAuthorizationV1`，绑定 D090 suite、D092 人工结果、registry entry、当前 direct implementation identity、最大比例和线上回滚阈值；代码侧 direct-first/fresh old fallback/父 manifest discriminator/kill switch 已完成，届时只允许在新 ADR 的比例与观测窗口内启用并演练，不再补签历史运行。
 
 ## 未解决缺口
 
@@ -54,7 +54,7 @@
 
 ## 当前验证基线
 
-- 2026-07-27 D091/D092 收口：人工 Arm B preference=`0.625`、gate=`supported`；`promotion-evidence-f42aefb52724`（manifest `f42aefb52724…`）离线递归 verify 通过，durability=`local_private_not_registered`。`make check` 全绿（620 个 Python 单测、docs-check、1 个 LangGraph validate、24 个前端 vitest、前端生产构建）；全量集成 22 passed/1 skipped；改动 Python 文件 Ruff 与 10 个核心源文件 strict mypy、`git diff --check` 通过。
+- 2026-07-27 D091 authority runtime 收口：`make check` 全绿（676 个 Python 单测、docs-check、1 个 LangGraph validate、32 个前端 vitest、前端生产构建）；真实 Chromium 全量集成 `22 passed, 1 skipped`，`make test-scene-mvp-ui` 通过；全仓 Python Ruff、14 个改动核心源文件 `mypy --strict`、`uv lock --check` 与 `git diff --check` 通过。Kimi Code high 终审提出的私有权限/atomic fsync、runtime close、direct progress、父失败语义、engine/representation、symlink/TOCTOU、strict 父响应、timeout 分类和默认产品 store 权限均已修复，定向复审为“无剩余 P0-P2”。真实 registry 仍无 durable entry，未上传证据且生产保持 old。
 - 2026-07-27 D089 v2 suite 冻结：`make check` 全绿（562 个 Python 单测、docs-check、1 个 LangGraph validate、21 个前端 vitest、前端生产构建）；新增 v2 fake LLM + 真实 Chromium 集成链通过，历史 v1 suite `43a0748fa395` 递归复验继续通过，v1 live guard 已验收拒绝。
 - 2026-07-27 D088 direct GLSL v2：`make check` 全绿（555 个 Python 单测、docs-check、1 个 LangGraph validate、21 个前端 vitest、前端生产构建）；v2 聚焦 97 个单测与 4 个改动源文件 `mypy --strict` 通过。
 - 2026-07-27 D086 suite 实现后：`make check` 全绿（552 个 Python 单测、docs-check、LangGraph validate（1 个 Graph）、21 个前端 vitest 单测、前端生产构建）；新增 17 个 suite 单测与 1 个 fake LLM + 真实 Chromium 2×2 集成测试通过；前端可观测性 `make test-scene-mvp-ui` 基线继续通过。
@@ -65,7 +65,7 @@
 ## 最近重要变更
 
 - 2026-07-27：按 D092 完成匿名人工盲评与私有 promotion bundle：LayerPlan Arm B 偏好 `5/8=0.625`，人工 gate=`supported`；自动 suite、8 个 run、盲评与人工结果合并为 `f42aefb…` 并离线递归验签。由于 bundle 尚未迁入用户授权的 durable 介质，生产保持 `no_go_pending_durable`。
-- 2026-07-27：按 D091 落地默认关闭的 production shadow/policy scaffold：稳定 project 分桶、独立 UUID5 attempt、fresh direct runner/Renderer、有界队列/超时/关闭、私有 write-once Artifact 和 kill switch 已接 Backend；所有失败均不改变旧 ShaderGraph 权威结果，canary authority 继续 fail-closed。
+- 2026-07-27：按 D091 完成不可达的生产替换 runtime：启动期 durable/identity 授权、稳定 engine 选择、direct child、fresh old fallback、父 v2 Artifact/API discriminator、历史 reader 和 kill switch 已贯通；当前 registry 无 durable entry，生产仍 old，未上传或登记私有 bundle。
 - 2026-07-27：按 D087 完成首轮有效 LayerPlan 真实 suite 并作 no-go 决策：8 个 run 全部递归复验，B 在可配对 run 中 4 胜 1 负且成功率高于 A，但 3/4 样本受 `glsl_renderer_contract_violation` 影响而 inconclusive，自动 gate 明确失败；不进入人工晋升盲评，生产路径不变，下一步先做版本化 direct GLSL 契约稳定性改进。
 - 2026-07-27：按 D085 完成前端运行可观测性并经多轮审计收口证据语义：新增 `frontend/src/runStages.ts` 单一可测试阶段视图模型与 vitest 单测，覆盖五态状态、阶段摘要、失败定位与真实计时；阶段只显示“预计下一节点（未确认开始）”，`author_source`/首轮 `selected_source` 均不冒充最终 provenance。轮询 single-flight、失败/连续 pending capped backoff、按 seq 去重；匹配 run_id 的稳定应用失败与 run 创建前的 `client_validation/request_validation` 才作为确定终态，计时与状态 live region 分离。生产 Graph/API/事件契约不变。
 - 2026-07-27：按 Codex 审查关闭安全与证据缺口：spec hash 绑定完整 author/repair 身份；receipt 拆成 Renderer 私有 signer 与公共 verify-only verifier，并强制绑定具体 Spec/PNG/runtime；ProgramSpec 拒绝宏循环绕过且 for 循环上限为 1024；renderer prepare/draw/legacy render 有界超时并安全重置；显式画布在 resize 前受限，可信装配异常收敛为安全 Author 结果，未知 token usage 不再伪装为 0，私有 evidence 拒绝路径穿越、任意 symlink 与 run 目录改名。生产 Graph/API/current_best 不变。

@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import stat
 import time
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -15,6 +17,7 @@ import pytest
 from fastapi import FastAPI
 
 import backend.app.main as backend_main
+import backend.app.services.production_shadow as production_shadow_module
 from backend.app.core.engine_policy import (
     ShaderEnginePolicyV1,
     disabled_shader_engine_policy,
@@ -160,6 +163,59 @@ async def _wait_for(path: Path) -> None:
             return
         await asyncio.sleep(0.01)
     raise AssertionError(f"等待 Artifact 超时：{path}")
+
+
+def test_private_file_write_is_fsynced_atomic_and_permission_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    staging = tmp_path / "staging"
+    staging.mkdir(mode=0o700)
+    data = b"private-shadow-artifact"
+    replace_calls: list[tuple[Path, Path]] = []
+    fsync_calls: list[int] = []
+    write_events: list[str] = []
+    original_replace = os.replace
+    original_fsync = os.fsync
+
+    def tracked_replace(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
+        source_path = Path(source)
+        target_path = Path(target)
+        assert source_path.parent == target_path.parent
+        assert source_path.name.startswith(f".{target_path.name}.")
+        assert source_path.suffix == ".tmp"
+        assert source_path.read_bytes() == data
+        assert stat.S_IMODE(source_path.stat().st_mode) == 0o600
+        assert write_events == ["fsync"]
+        write_events.append("replace")
+        replace_calls.append((source_path, target_path))
+        original_replace(source_path, target_path)
+
+    def tracked_fsync(descriptor: int) -> None:
+        fsync_calls.append(descriptor)
+        write_events.append("fsync")
+        original_fsync(descriptor)
+
+    monkeypatch.setattr(production_shadow_module.os, "replace", tracked_replace)
+    monkeypatch.setattr(production_shadow_module.os, "fsync", tracked_fsync)
+
+    digest = production_shadow_module._write_private_file(
+        staging,
+        "private/current-best/render.png",
+        data,
+    )
+    target = staging / "private/current-best/render.png"
+
+    assert digest == sha256(data).hexdigest()
+    assert len(replace_calls) == 1
+    assert replace_calls[0][1] == target
+    assert len(fsync_calls) >= 2
+    assert write_events == ["fsync", "replace", "fsync"]
+    assert target.read_bytes() == data
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert stat.S_IMODE(target.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(target.parent.parent.stat().st_mode) == 0o700
+    assert not list(staging.rglob("*.tmp"))
 
 
 @pytest.mark.anyio

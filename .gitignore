@@ -177,6 +177,7 @@ output/benchmarks/
 output/node-lab/
 output/png-to-shader/
 output/png-to-shader-shadow/
+output/png-to-shader-rollout-private/
 output/playwright/*.log
 output/playwright/*.snapshot.txt
 

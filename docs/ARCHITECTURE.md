@@ -8,11 +8,13 @@
 Frontend React
   -> Backend FastAPI
   -> backend.app.services.shader_generation
-  -> agent.app.services.png_to_shader_min
-  -> png_to_shader_min LangGraph
-  -> ShaderGraph Author / typed layer patch
-  -> ShaderForge DSL / Compiler / bounded program cache / metric / optimizer
-  -> Artifact
+  -> 启动期冻结的 engine policy
+     ├─ disabled / production_shadow -> png_to_shader_min LangGraph
+     │                                -> ShaderGraph DSL / Compiler
+     └─ 已授权 canary / direct_default -> parent coordinator
+          ├─ direct child -> advisory LayerPlan / canonical ProgramSpec / WebGL1
+          └─ fresh fallback child -> 私有 png_to_shader_min LangGraph
+  -> 父 run 原子公开 final-render / metrics / manifest
 ```
 
 - `frontend/`：上传、配置、运行进度、服务端/客户端 Render 和 GLSL 展示；`frontend/src/runStages.ts` 把进度事件收敛为单一可测试的阶段视图模型，只展示后端真实字段。
@@ -65,7 +67,35 @@ D090 的 v2 真实 suite 自动 gate 已通过。`scripts/run_layerplan_glsl_sha
 
 D091 已落地默认关闭的服务端 `ShaderEnginePolicyV1` 与 production-shadow coordinator：Backend 启动时从受信 YAML 冻结 policy，缺失等价于 `disabled/shader_graph_v1`，非法组合 fail-closed；稳定分桶只读取 project id，客户端不能选择 engine；`SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 对新 run 具有最高优先级。命中 `production_shadow` 时，权威 ShaderGraph 完成且 Backend 响应契约校验通过后，才在项目锁外非阻塞提交确定性 UUID5 direct child attempt；attempt 使用全新 direct runner/Playwright Renderer、独立预算与有界 timeout。队列满、失败、超时和 shutdown cancel 都不能改变 HTTP、产品 `current_best`、公开 Artifact 或 DB 成功；私有 LayerPlan/ProgramSpec/render/metric 以 staging + rename 写入独立 0700/0600 write-once 目录，递归 verifier 拒绝 symlink、额外文件、改名和篡改，该根不进入产品 Artifact 白名单。默认 disabled 不创建 worker/模型/Renderer/目录。
 
-`canary/direct_default` 必须携带声明自动/人工 supported、durability=durable 的完整晋升授权；当前没有接入其执行 authority，也未修改 HTTP/Frontend discriminator。完整父 run/child attempt、production shadow、fallback 与 manifest union 契约见 `docs/superpowers/specs/2026-07-27-direct-glsl-production-rollout.md`。在 durable 门禁完成前，生产 `png_to_shader_min` 的 12 节点拓扑与 ShaderDocument/Compiler 权威路径不变。
+`canary/direct_default` 不能只依赖 policy 内自报的
+`PromotionAuthorizationV1`。Backend 启动时还会读取显式
+`SHADERGEN_EVIDENCE_REGISTRY_PATH`，拒绝 symlink、重复 JSON key/evidence id，
+并要求授权逐字段匹配唯一的 durable promotion entry、不可变 URI/hash、目标
+stage 以及当前代码重算的 direct implementation identity；验证回执和 registry
+文件 hash 冻结进进程配置。当前 `docs/evidence/registry.json` 没有该 entry，
+所以当前真实配置必然 fail-closed。代码侧已经接入 canary/direct-default 的父
+run runtime：命中 direct 时创建确定性 UUID5 child，使用独立 Renderer、预算和
+write-once 私有 attempt；失败只以安全码记录并创建 fresh ShaderGraph fallback
+child。选中结果经过 manifest/hash 复验后才把三个公开 Artifact 原子登记到父 run，
+未选 child 永不进入公开 index。API/前端返回只读 `engine/representation/engine_run`
+discriminator，完整 LayerPlan、ProgramSpec 和失败上下文保持私有；同进程 reader
+仍可回退读取切换前的 v1 父 run。direct attempt 只向父进度流发布
+`direct_start/direct_completed/direct_failed` 安全事件，异常只暴露预声明失败码；
+两种 engine 都失败时，UseCase 保留 `ParentRunFailure` 的父失败码与安全
+`attempt_refs`，不得降级为 `internal_pipeline_error`。runtime 提供幂等
+`close/aclose` 生命周期契约，attempt-local 资源仍由每次协调执行的 `finally`
+关闭；选中 engine 的父响应在进入 API 前再经 strict schema 还原，字段漂移只记录
+安全字段路径并收敛为 `response_contract_failed`。完整父 run/child attempt、production shadow、
+fallback 与 manifest union 契约见
+`docs/superpowers/specs/2026-07-27-direct-glsl-production-rollout.md`。在 durable
+门禁完成前，生产 `png_to_shader_min` 的 12 节点拓扑与
+ShaderDocument/Compiler 权威路径不变。
+
+紧急回滚是上述 promotion 校验的唯一启动例外：
+`SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 仍要求 policy YAML 严格解析，但有效阶段先
+降为 `disabled`，启动不读取 promotion registry，也不要求验证回执；这样 registry
+或 durable 存储故障不能阻止旧引擎恢复。开关回到 `0` 后，配置的晋升 stage 必须
+重新通过全部授权校验。
 
 ## HTTP 与进度
 
@@ -94,6 +124,9 @@ Backend 当前启动 asyncpg 过程账本连接池，写入 `agent_runs`、`agen
 ## Artifact 与安全
 
 - 公开 Artifact 只允许 final render、metrics 和 manifest。
+- 默认产品 Artifact 根及 rollout 私有根都显式启用 0700/0600 权限；公开父 run
+  final bundle 逐文件与目录 fsync 后原子 rename，并在每次读取时复验文件集合、
+  内容与 symlink/替换边界。
 - 图片、完整 GLSL、编译器原文和模型原始响应不得进入普通日志。
 - 密钥只在服务端 `.env` 或部署 Secret 中；任何 `VITE_*` 都是公开前端配置。
 - 历史失败 benchmark、run 和人工证据不得覆盖或删除；当前代码不再提供旧 V1 benchmark 入口。

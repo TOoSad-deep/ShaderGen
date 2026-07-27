@@ -43,7 +43,7 @@ def _authorization_yaml(
   durable_evidence_uri: s3://shadergen-evidence/d090/report.json
   durable_evidence_sha256: {"d" * 64}
   durability_status: durable
-  direct_implementation_identity: git:0123456789abcdef
+  direct_implementation_identity: {"e" * 64}
   max_canary_percent: {max_canary_percent}
   approved_at: 2026-07-27T10:00:00+08:00
   adr_id: ADR-091
@@ -97,9 +97,7 @@ def test_loads_canonical_policy_and_hash_is_yaml_order_independent(tmp_path) -> 
     first_path.write_text(_policy_yaml(), encoding="utf-8")
     first = load_shader_engine_policy(first_path)
     payload = first.model_dump(mode="json")
-    second = ShaderEnginePolicyV1.model_validate(
-        dict(reversed(list(payload.items())))
-    )
+    second = ShaderEnginePolicyV1.model_validate(dict(reversed(list(payload.items()))))
     assert shader_engine_policy_sha256(first) == shader_engine_policy_sha256(second)
     assert len(shader_engine_policy_sha256(first)) == 64
 
@@ -278,11 +276,19 @@ def test_kill_switch_rejects_ambiguous_value() -> None:
 
 def test_backend_settings_freezes_policy_and_kill_switch(monkeypatch, tmp_path) -> None:
     path = tmp_path / "policy.yaml"
-    path.write_text(_policy_yaml(), encoding="utf-8")
+    path.write_text(
+        _policy_yaml(
+            stage="production_shadow",
+            shadow_percent=10,
+            canary_percent=0,
+            authorization="null\n",
+        ),
+        encoding="utf-8",
+    )
     monkeypatch.setenv("SHADERGEN_ENGINE_POLICY_PATH", str(path))
     monkeypatch.setenv("SHADERGEN_DIRECT_GLSL_KILL_SWITCH", "1")
     settings = BackendSettings.from_env(load_environment=False)
-    assert settings.engine_policy.stage == "canary"
+    assert settings.engine_policy.stage == "production_shadow"
     assert settings.engine_policy_resolution.effective_stage == "disabled"
     assert len(settings.engine_policy_sha256) == 64
 

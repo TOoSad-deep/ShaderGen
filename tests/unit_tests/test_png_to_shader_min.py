@@ -12,7 +12,10 @@ from agent.app.contracts.png_to_shader_min import (
     apply_min_author_patch,
     summarize_min_author_patch,
 )
-from agent.app.graphs.png_to_shader_min_graph import build_png_to_shader_min_graph
+from agent.app.graphs.png_to_shader_min_graph import (
+    build_png_to_shader_min_graph,
+    png_to_shader_min_artifact_store,
+)
 from agent.app.graphs.png_to_shader_min_routing import (
     route_after_base,
     route_after_feature,
@@ -61,6 +64,10 @@ def _pink_orb_png() -> bytes:
     buffer = BytesIO()
     image.save(buffer, format="PNG")
     return buffer.getvalue()
+
+
+def test_default_product_artifact_store_uses_restrictive_permissions() -> None:
+    assert png_to_shader_min_artifact_store.restrictive_permissions is True
 
 
 class _FakeRenderer:

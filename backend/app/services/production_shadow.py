@@ -14,6 +14,7 @@ import logging
 import os
 import shutil
 import stat
+import tempfile
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -140,10 +141,36 @@ def _canonical_json(payload: Mapping[str, Any]) -> str:
 
 
 def _write_private_file(root: Path, relative: str, data: bytes) -> str:
-    path = root.joinpath(*PurePosixPath(relative).parts)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
-    os.chmod(path, 0o600)
+    """在 attempt staging 内以 0600 临时文件原子替换目标文件."""
+    normalized = _strict_relative(relative)
+    path = root.joinpath(*PurePosixPath(normalized).parts)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    current = path.parent
+    while current != root:
+        os.chmod(current, 0o700)
+        current = current.parent
+
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    temporary_path = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as temporary_file:
+            os.fchmod(temporary_file.fileno(), 0o600)
+            temporary_file.write(data)
+            temporary_file.flush()
+            os.fsync(temporary_file.fileno())
+        os.replace(temporary_path, path)
+        os.chmod(path, 0o600)
+        directory_descriptor = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        temporary_path.unlink(missing_ok=True)
     return sha256(data).hexdigest()
 
 

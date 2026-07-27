@@ -427,6 +427,9 @@ export function App() {
             runId={runResult.run_id}
             stopReason={runResult.stop_reason}
             minPipeline={runResult.min_pipeline}
+            engine={runResult.engine}
+            representation={runResult.representation}
+            engineRun={runResult.engine_run}
           />
         ) : null}
 

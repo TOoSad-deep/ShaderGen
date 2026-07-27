@@ -7,6 +7,46 @@ from pydantic import BaseModel, ConfigDict, Field
 
 GenerationMode = Literal["scene_mvp"]
 QualityPresetName = Literal["fast", "balanced", "high", "manual"]
+ShaderEngineId = Literal["shader_graph_v1", "direct_glsl_layerplan_v1"]
+ShaderRepresentation = Literal["shader_document_v1", "shader_program_spec_v1"]
+
+
+class ShaderEngineAttemptSummary(BaseModel):
+    """父 run 可公开的单个 child attempt 安全引用."""
+
+    attempt_id: str
+    engine: ShaderEngineId
+    representation: ShaderRepresentation
+    status: Literal["succeeded", "failed"]
+    failure_code: str | None = None
+
+
+class ShaderShadowSubmissionSummary(BaseModel):
+    """production shadow 的非权威提交结果；不代表 attempt 执行成功."""
+
+    model_config = ConfigDict(extra="allow")
+
+    status: str
+    reason: str
+    attempt_id: str | None = None
+
+
+class ShaderEngineRunSummary(BaseModel):
+    """父 run 的 policy、attempt 与 fallback 安全摘要."""
+
+    model_config = ConfigDict(extra="allow")
+
+    policy_id: str
+    policy_sha256: str
+    configured_stage: str
+    stage: str
+    bucket: int | None = None
+    selected_attempt_id: str
+    attempt_refs: list[ShaderEngineAttemptSummary] = Field(default_factory=list)
+    fallback_from: ShaderEngineId | None = None
+    fallback_reason: str | None = None
+    promotion_authorization_sha256: str | None = None
+    shadow_submission: ShaderShadowSubmissionSummary | None = None
 
 
 class ShaderGraphShadowSummary(BaseModel):
@@ -48,7 +88,11 @@ class ShaderMinPipelineSummary(BaseModel):
     report_schema_version: str
     patch_candidate_draw_budget: int
     patch_evidence: list[dict[str, Any]] = Field(default_factory=list)
-    renderer_path: Literal["prepared_uniforms_v1", "compiled_graph_program_cache_v1"]
+    renderer_path: Literal[
+        "prepared_uniforms_v1",
+        "compiled_graph_program_cache_v1",
+        "direct_program_spec_v1",
+    ]
     target_mae: float
     target_loss: float
     target_reached: bool
@@ -68,6 +112,9 @@ class ShaderResponse(BaseModel):
     glsl: str
     generation_mode: GenerationMode
     quality_preset: QualityPresetName
+    engine: ShaderEngineId | None = None
+    representation: ShaderRepresentation | None = None
+    engine_run: ShaderEngineRunSummary | None = None
     stop_reason: str | None = None
     render_width: int | None = None
     render_height: int | None = None

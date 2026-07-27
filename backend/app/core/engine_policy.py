@@ -39,15 +39,6 @@ Identifier = Annotated[
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$",
     ),
 ]
-ImplementationIdentity = Annotated[
-    str,
-    StringConstraints(
-        strip_whitespace=True,
-        min_length=1,
-        max_length=256,
-        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:@/+~-]{0,255}$",
-    ),
-]
 Sha256Text = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 DurableUri = Annotated[
     str,
@@ -126,7 +117,7 @@ class PromotionAuthorizationV1(_FrozenPolicyModel):
     durable_evidence_uri: DurableUri
     durable_evidence_sha256: Sha256Text
     durability_status: Literal["durable"]
-    direct_implementation_identity: ImplementationIdentity
+    direct_implementation_identity: Sha256Text
     max_canary_percent: int = Field(ge=1, le=100, strict=True)
     approved_at: datetime
     adr_id: Annotated[

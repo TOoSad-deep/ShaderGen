@@ -13,7 +13,10 @@ disabled
 
 它不是立即切换授权。D092 已确认自动与人工 gate 通过，但 durable 证据仍为
 pending；在 durable 完成前，代码最多落地 policy、隔离的 production shadow 和
-fail-closed 的 canary guard，`shader_graph_v1` 继续是唯一权威输出。
+fail-closed 的 canary runtime，`shader_graph_v1` 继续是唯一实际生产权威输出。
+截至 2026-07-27，父 run/direct child/fresh old fallback/原子 v2 manifest、历史
+v1 reader 和前端 discriminator 均已实现；真实 registry 尚无 durable promotion
+entry，因此这些 authority 分支只能由测试回执验收，实际启动仍 fail-closed。
 
 ## 2. 不变语义
 
@@ -51,6 +54,7 @@ promotion_authorization: null # canary/direct_default 时必须存在
 
 ```text
 SHADERGEN_ENGINE_POLICY_PATH=
+SHADERGEN_EVIDENCE_REGISTRY_PATH=
 SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1
 ```
 
@@ -63,6 +67,35 @@ SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1
 - 客户端请求、`VITE_*`、HTTP header、query 或 instruction 均不能覆盖 engine；
 - policy canonical SHA-256 进入 run config fingerprint、过程账本、进度摘要和
   final manifest。
+
+policy 的 Pydantic 解析只证明字段形状合法，不签发生产权限。`canary` 或
+`direct_default` 启动时必须再用 `SHADERGEN_EVIDENCE_REGISTRY_PATH` 指向的受信
+registry 校验 `PromotionAuthorizationV1`：
+
+- registry 必须是非 symlink 的单一 JSON object，拒绝重复 JSON key 和重复
+  `evidence_id`；
+- 被引用 entry 必须是 `layerplan_glsl_promotion_evidence`、`durable/passed`；
+- D090 suite hash、自动 gate、递归 verifier 版本/结果、人工 manifest/result
+  hash、人工 preference/gate、目标 stage 必须逐字段完全一致；
+- entry 必须且只能有一个 `promotion_evidence_bundle` Artifact，availability 只
+  接受 `release/object_store`，并声明 `immutability_status=immutable`；其 URI 和
+  SHA-256 必须与授权完全一致；
+- 授权、registry summary 和当前代码重算的 direct implementation identity
+  SHA-256 必须三方完全一致。
+
+成功结果形成只读验证回执，绑定 authorization canonical hash、registry 文件
+hash、entry、stage、URI/hash 和 implementation identity，并冻结进
+`BackendSettings`。缺 registry/entry、`partial`、本地路径、字段漂移或回执与
+policy 不一致均使 Backend 启动 fail-closed。启动期不联网抓取私有 Artifact；
+可信登记流程必须在签发授权前完成上传后的独立内容复验，registry 负责固化其
+不可变 URI/hash。
+
+kill switch 是 promotion runtime verification 的唯一启动例外。Backend 必须先严格
+解析 policy YAML 和 `SHADERGEN_DIRECT_GLSL_KILL_SWITCH`；当后者为 `1` 时，有效
+stage 在启动期直接冻结为 `disabled`，可跳过 registry 读取和 promotion 验证回执，
+避免 registry/对象存储事故反过来阻止紧急回滚。该例外不允许容忍未知 policy 字段、
+非法阶段/比例/授权结构或含糊 kill switch 值。开关恢复为 `0` 后，configured
+`canary/direct_default` 必须重新通过完整 durable/identity/stage 校验。
 
 ### 3.2 稳定分桶
 
@@ -104,6 +137,9 @@ attempt 在 START 前冻结：
 
 child attempt 不得覆盖父 run 或其他 attempt 的目录。只有父协调器能在验证
 attempt manifest 后，把被选结果原子发布到父 run 的三个公开白名单 Artifact。
+rollout private store 显式使用 restrictive 权限模式，direct 与 fresh old
+ShaderGraph child 的 base/project/run/index/嵌套目录均为 0700、普通文件均为
+0600；不得借此粗暴改变历史 public `LocalArtifactStore` 的默认权限。
 
 ## 5. 四个阶段
 
@@ -156,9 +192,11 @@ attempt manifest 后，把被选结果原子发布到父 run 的三个公开白�
 - kill switch 生效后，所有新父 run 立即回到 old engine；已经启动的 attempt
   按其冻结身份结束，结果带旧 policy snapshot，不在中途换 engine。
 
-## 6. Direct Graph 契约
+## 6. Direct engine 契约
 
-direct engine 复用现有 12 个节点名称和路由拓扑，使用独立 node factory：
+本轮生产 runtime 复用 D084/D090 已验收的单 engine Arm B 内核，不把第二种表示
+塞入现有 LangGraph，也不修改 12 节点拓扑。以下是 direct 阶段与原 Graph 职责的
+对照，不表示注册了同名 LangGraph node：
 
 | 节点 | direct 职责 |
 |---|---|
@@ -167,14 +205,16 @@ direct engine 复用现有 12 个节点名称和路由拓扑，使用独立 node
 | author_initial | 独立生成 LayerPlan；参考图 + advisory plan 生成 ProgramSpec |
 | materialize_shader | canonical safety 与 program identity，不编译 ShaderDocument |
 | render_and_evaluate | 真实 prepare/draw/receipt/metric，形成不可变 direct snapshot |
-| optimize_base | 只优化可信 `tunable_manifest` 中的基础 uniform |
-| optimize_feature | 只优化 direct uniform block；不得访问 DSL layer/node 参数 |
+| optimize_base | 当前版本不调用，ledger 记录为无独立 optimizer |
+| optimize_feature | 当前版本不调用，且永不访问 DSL layer/node 参数 |
 | author_refine | 参考图 + incumbent render/metric + advisory plan 生成新 ProgramSpec |
 | finalize | 固化 ProgramSpec/GLSL/render/metric/direct manifest |
-| 三个 decide 节点 | 沿用预算与 strict current_best 路由语义 |
+| 三个 decide 节点 | 由 bounded runner 执行等价预算停止与 strict incumbent 语义 |
 
-首个 production shadow 若 direct uniform optimizer 尚未实现，必须以版本化 no-op
-明确记录并重新冻结预算；不得调用 ShaderGraph 参数优化器假装等价。
+当前 direct 内核没有调用 ShaderGraph 的 layer/node 参数优化器，也不把其能力
+冒充 direct uniform optimizer；它只使用冻结的 Initial/Refine、compile/draw 与
+strict incumbent 预算，config fingerprint 和 ledger 显式记录该事实。未来新增
+direct uniform optimizer 必须升级实现身份并重新走证据与授权。
 
 Direct snapshot 至少绑定：
 
@@ -213,7 +253,13 @@ Direct snapshot 至少绑定：
 API/前端只新增只读 discriminator 与安全摘要，不允许客户端选 engine。公开白名单
 仍为 final-render、metrics、manifest；完整 LayerPlan、ProgramSpec、Prompt、repair
 上下文和失败源码保持私有。前端标签按 discriminator 显示“ShaderGraph DSL”或
-“Direct Program”，不能把 LayerPlan 名称冒充 GLSL 执行来源。
+ “Direct Program”，不能把 LayerPlan 名称冒充 GLSL 执行来源。
+
+父发布器在落盘前必须拒绝非法 engine/representation 配对，并要求
+`engine_run.selected_engine/selected_representation` 与顶层 discriminator 完全
+一致。公开 final bundle 的本地读取/幂等复验不得先跟随 symlink 再检查：使用 pinned
+directory fd、`O_NOFOLLOW`、普通文件 `fstat` 和读取前后 inode/mtime/ctime 复核；
+仍以 Artifact 根由单一服务进程独占为部署前提。
 
 ## 8. 自动回滚
 

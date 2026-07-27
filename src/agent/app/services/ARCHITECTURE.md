@@ -5,6 +5,10 @@
 - Service 组合 Graph、`LLMGateway`、`LocalArtifactStore` 和 run 级 Renderer registry。
 - `generate_png_to_shader_min()` 接收简单 Python 参数并返回稳定 dataclass，不向 Backend 暴露 LangChain 类型。
 - `read_public_artifact()` 只接受 `final-render`、`metrics`、`manifest` 白名单名。
+- `create_isolated_png_to_shader_min_service()` 只供已授权 rollout 的 fresh
+  ShaderGraph child 使用：绑定独立 private `LocalArtifactStore`、Renderer registry
+  和生产预算，不复用公开组合根的可变 cache；private store 显式启用 restrictive
+  权限，所有 rollout attempt 文件/新建子目录分别为 0600/0700。
 - Graph 正常终止由 `finalize` 关闭 Renderer，Service `finally` 对越过 Graph 的异常执行幂等兜底。
 - 默认组合根执行 ShaderGraph 产品 Node，并通过同一 `MinRendererRegistry` 持有 run-scoped 有界 program cache；Prepared handle 不进入 State。显式 legacy Builder 才可注入非权威 `ShaderGraphShadowRunner`。
 - Backend 只依赖本包公共接口；Agent Service 不持有数据库连接池。
@@ -23,11 +27,17 @@
 - 只有同时存在 A/B `current_best` 的 round 生成图片；不可配对 round 只在 package manifest 记录 schedule index 与安全原因，不伪造候选、不进入公开页面。人工 JSON 必须完整覆盖全部可评项且 choice 只允许 `A/B/tie`；偏好率分母仍是 manifest 预定的全部 round，tie 与不可评项均不计 Arm B 胜。
 - package 采用同根 staging + 原子 rename、0700/0600、write-once；每个文件记录 SHA-256/size，manifest 另绑定自身 canonical payload。`verify_blind_review_package()` 先递归复验原 suite，再拒绝盲评树的 symlink、额外文件/目录、改名、权限或内容漂移；`evaluate_blind_review()` 只有在 suite/package 全部通过后才读取人工 JSON，输出只保留 reviewer alias hash。Agent 不得生成或代填人工选择。
 
-## layerplan_glsl_direct.py（D091 单 engine 内核，尚非产品权威）
+## layerplan_glsl_direct.py（D091 单 engine 内核，受 policy 选择）
 
 - `LayerPlanGlslDirectRunner` 只运行 VisualAnalysis LayerPlan + direct Initial/Refine，不运行 A/B 对照 Arm A。它与 shadow Arm B 共同调用 `LayerPlanGlslShadowRunner.execute_layerplan_direct_arm()`，因此 canonical safety、真实 Renderer receipt、metric、program cache、预算与 strict incumbent 选择只有一份实现。
 - `LayerPlanGlslDirectConfig` 独立冻结 plan/direct/repair/compile/draw/refine 预算和 implementation identity；`DirectAttemptResult` 是不可变内存结果，保留 canonical LayerPlan、ProgramSpec、render bytes、receipt 与完整 metric，供后续私有 attempt Artifact 使用。`to_safe_summary()` 只暴露 engine/representation/hash、loss、状态、安全失败码与 ledger，不含 GLSL、LayerPlan 正文、Prompt、render bytes 或原始错误。
-- 本模块不装配 LangGraph、不注册 Backend/API、不写产品 Artifact，也不更新 D070 `current_best`。它只是 production shadow/coordinator 的复用内核；canary authority 仍受 D091 人工、durable 与 PromotionAuthorization 门禁阻止。
+- 本模块本身不装配 LangGraph、不注册 Backend/API、不写产品 Artifact，也不更新
+  D070 `current_best`；production shadow 和已授权 rollout runtime 均从 Backend
+  组合根调用它。`engine_rollout_artifacts.py` 负责 public/private store 隔离，
+  只有父协调器可把被选 child 的三个白名单文件原子发布为
+  `png_to_shader_manifest_v2`；发布前强制 engine/representation 合法配对且与
+  `engine_run.selected_representation` 一致。当前真实 registry 缺 durable entry，因此该
+  canary runtime 已实现但不会在实际启动中取得 authority。
 
 ## layerplan_glsl_promotion_evidence.py（D092 私有晋升证据，非 registry）
 
