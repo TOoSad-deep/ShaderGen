@@ -27,6 +27,8 @@ nodelab.http -> nodelab.runner
 
 `nodelab` 不依赖 FastAPI、Backend、LangGraph 编译图、具体 LLM Gateway、Agent Node 或 ShaderForge。领域 Artifact hydration、模型门禁、Renderer、数据库与 Memory 生命周期由 Pipeline Executor 注入。
 
+当前产品适配位于 `agent.app.nodes.png_to_shader_min.node_lab`，受信任 factory 位于 `agent.app.services.node_lab`，均不属于本目录。Provider 显式登记 `scene_mvp` 的 12 个生产 Node，并把参考图、目标 RGB、候选 Render 和 `ShaderGraphCandidateSnapshot` 投影为 Lab Artifact/JSON 快照；执行前再校验指纹并恢复生产对象。Service 组合根负责选择具体 Gateway，Node 只依赖中立 LLM 契约。AI-off 模型 binding 强制耗尽可用模型预算，real binding 继续要求双重授权。该适配不编译或修改 Graph，也不恢复旧 V1 Provider、Fixture 或 benchmark。
+
 ## 安全与证据
 
 - 标识符使用受限格式；State、请求、响应和 Fixture 只接受有界 JSON-safe 数据。

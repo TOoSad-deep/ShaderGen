@@ -1,9 +1,16 @@
 import type {
+  NodeLabArtifact,
   NodeLabEffectMode,
   NodeLabExecutionMode,
   NodeLabNodeDescriptor,
   NodeLabStepSummary,
 } from "../../api/nodeLab";
+import {
+  formatArtifactOption,
+  getArtifactCandidates,
+  getArtifactFieldSelection,
+  updateArtifactInputField,
+} from "../../utils/nodeLabInputs";
 
 interface NodeInspectorProps {
   node: NodeLabNodeDescriptor | null;
@@ -11,6 +18,7 @@ interface NodeInspectorProps {
   busy: boolean;
   executing: boolean;
   steps: NodeLabStepSummary[];
+  artifacts: NodeLabArtifact[];
   exampleId: string;
   executionMode: NodeLabExecutionMode;
   effectMode: NodeLabEffectMode;
@@ -45,6 +53,7 @@ export function NodeInspector({
   busy,
   executing,
   steps,
+  artifacts,
   exampleId,
   executionMode,
   effectMode,
@@ -68,6 +77,24 @@ export function NodeInspector({
   onExecute,
 }: NodeInspectorProps) {
   const activeExample = node?.input_examples.find((example) => example.example_id === exampleId);
+
+  let parsedInputs: Record<string, unknown> | null = null;
+  if (!inputsError) {
+    try {
+      const value = JSON.parse(inputsText);
+      if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+        parsedInputs = value as Record<string, unknown>;
+      }
+    } catch {
+      parsedInputs = null;
+    }
+  }
+
+  function handleSelectArtifact(field: string, artifactId: string) {
+    if (!artifactId || !parsedInputs) return;
+    const next = updateArtifactInputField(inputsText, field, artifactId);
+    if (next !== null) onInputsTextChange(next);
+  }
 
   return (
     <section className="node-lab-editor" aria-label="节点执行配置">
@@ -189,6 +216,62 @@ export function NodeInspector({
               <span>副作用：{node.side_effects.join(", ") || "无"}</span>
               {activeExample?.base_step_node_id ? <span>父节点：{activeExample.base_step_node_id}</span> : null}
             </div>
+
+            {activeExample && Object.keys(activeExample.artifact_inputs).length > 0 ? (
+              <div className="node-lab-artifact-inputs">
+                <h3>Artifact 输入</h3>
+                {Object.entries(activeExample.artifact_inputs).map(([field, kind]) => {
+                  const candidates = getArtifactCandidates(kind, artifacts);
+                  const value = parsedInputs?.[field];
+                  const { selectedArtifactId, isKnown } = getArtifactFieldSelection(
+                    value,
+                    candidates,
+                  );
+                  const disabled =
+                    busy || !hasRun || Boolean(inputsError) || candidates.length === 0;
+                  let placeholderLabel: string;
+                  if (!hasRun) {
+                    placeholderLabel = "请先创建 LabRun";
+                  } else if (inputsError) {
+                    placeholderLabel = "JSON 非法，无法同步";
+                  } else if (candidates.length === 0) {
+                    placeholderLabel = `无 ${kind} Artifact`;
+                  } else {
+                    placeholderLabel = "请选择或保留当前值";
+                  }
+                  return (
+                    <label key={field} className="node-lab-block-label node-lab-artifact-input">
+                      <span>
+                        {field} <small>({kind})</small>
+                      </span>
+                      <select
+                        aria-label={`选择 ${field} 的 Artifact`}
+                        value={selectedArtifactId}
+                        disabled={disabled}
+                        onChange={(event) => handleSelectArtifact(field, event.target.value)}
+                      >
+                        <option value="">{placeholderLabel}</option>
+                        {candidates.map((artifact) => (
+                          <option key={artifact.artifact_id} value={artifact.artifact_id}>
+                            {formatArtifactOption(artifact)}
+                          </option>
+                        ))}
+                      </select>
+                      {!inputsError && candidates.length > 1 ? (
+                        <small className="node-lab-hint">
+                          检测到 {candidates.length} 个 {kind} Artifact，请从下拉选择。
+                        </small>
+                      ) : null}
+                      {!inputsError && candidates.length === 1 && !isKnown ? (
+                        <small className="node-lab-hint">
+                          已自动匹配 {kind} Artifact，也可手动修改 JSON。
+                        </small>
+                      ) : null}
+                    </label>
+                  );
+                })}
+              </div>
+            ) : null}
 
             <div className="node-lab-json-editor">
               <div className="node-lab-json-toolbar">

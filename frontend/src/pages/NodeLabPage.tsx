@@ -24,6 +24,12 @@ import {
   type NodeLabStep,
   type NodeLabStepSummary,
 } from "../api/nodeLab";
+import { resolveRecommendedBaseStepId } from "../utils/nodeLabBaseStep";
+import {
+  fillArtifactInputs,
+  materializeExampleInputs,
+  type ArtifactEquivalenceContext,
+} from "../utils/nodeLabInputs";
 import { ArtifactPanel } from "../components/nodelab/ArtifactPanel";
 import { LabOnboarding } from "../components/nodelab/LabOnboarding";
 import { LabStatusBar, type NodeLabConnection } from "../components/nodelab/LabStatusBar";
@@ -94,6 +100,15 @@ export function NodeLabPage() {
   const [discoveryAttempt, setDiscoveryAttempt] = useState(0);
   const busy = busyAction !== null;
 
+  const allArtifacts = useMemo(
+    () =>
+      uploadedArtifacts.filter(
+        (artifact, index, items) =>
+          items.findIndex((candidate) => candidate.artifact_id === artifact.artifact_id) === index,
+      ),
+    [uploadedArtifacts],
+  );
+
   const selectedNode = nodes.find((node) => node.node_id === selectedNodeId) ?? null;
   const selectedStep = selectedStepId ? stepDetails[selectedStepId] ?? null : null;
   const stepLoading = Boolean(selectedStepId) && !selectedStep;
@@ -112,6 +127,28 @@ export function NodeLabPage() {
       return reason instanceof Error ? reason.message : "节点输入不是合法 JSON。";
     }
   }, [inputsText]);
+
+  /** 上传/执行产生 Artifact 后，仅对当前仍为空的占位字段做增量填充；不覆盖手写非占位值。 */
+  useEffect(() => {
+    if (!selectedNode) return;
+    const example = selectedNode.input_examples.find((item) => item.example_id === exampleId);
+    const mapping = example?.artifact_inputs ?? {};
+    if (Object.keys(mapping).length === 0) return;
+    setInputsText((current) => {
+      try {
+        const parsed = parseObject(current, "节点输入");
+        const context: ArtifactEquivalenceContext = {
+          baseStep: baseStepId ? stepDetails[baseStepId] ?? null : null,
+        };
+        const { inputs: filled } = fillArtifactInputs(parsed, mapping, allArtifacts, context);
+        const next = pretty(filled);
+        return next === current ? current : next;
+      } catch {
+        return current;
+      }
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allArtifacts, baseStepId, stepDetails]);
 
   useEffect(() => {
     let cancelled = false;
@@ -146,18 +183,49 @@ export function NodeLabPage() {
     setDiscoveryAttempt((attempt) => attempt + 1);
   }
 
-  useEffect(() => {
-    if (!selectedNode) return;
-    const example = selectedNode.input_examples[0];
-    const mode = example?.execution_mode ?? defaultMode(selectedNode);
-    setExecutionMode(mode);
-    setExampleId(example?.example_id ?? "");
-    setFixtureId(example?.fixture_id ?? selectedNode.default_fixture_ids[0] ?? "");
+  /** 统一物化示例输入：普通字段用 example.inputs 默认值，artifact 字段按当前 Run Artifact 候选填充，
+   * 并根据示例的 base_step_node_id 自动选择推荐父步骤。
+   *
+   * 对存在多个 Artifact 的 kind，会先按 sha256 判断是否为内容等价副本；
+   * 等价副本优先选择父 Step State 中已引用的 ID，无法证明等价时保留占位符由用户选择。 */
+  function applyNodeExample(
+    node: NodeLabNodeDescriptor | null,
+    nextExampleId: string,
+    artifacts: NodeLabArtifact[],
+    nextSteps: NodeLabStepSummary[],
+    nextStepDetails: Record<string, NodeLabStep> = stepDetails,
+  ) {
+    if (!node) return;
+    const example =
+      node.input_examples.find((item) => item.example_id === nextExampleId) ??
+      node.input_examples[0];
+    if (!example) return;
+    const nextBaseStepId = resolveRecommendedBaseStepId(example.base_step_node_id, nextSteps);
+    const context: ArtifactEquivalenceContext = {
+      baseStep: nextBaseStepId ? nextStepDetails[nextBaseStepId] ?? null : null,
+    };
+    setExampleId(example.example_id);
+    setExecutionMode(example.execution_mode ?? defaultMode(node));
+    setEffectMode(example.effect_mode ?? "lab_commit");
+    setFixtureId(example.fixture_id ?? node.default_fixture_ids[0] ?? "");
     setMockArtifactId("");
     setAllowModelCall(false);
     setPreviewOnly(false);
-    setEffectMode(example?.effect_mode ?? "lab_commit");
-    setInputsText(pretty(example?.inputs ?? {}));
+    setBaseStepId(nextBaseStepId);
+    setInputsText(materializeExampleInputs(example, artifacts, context));
+  }
+
+  useEffect(() => {
+    if (!selectedNode) return;
+    applyNodeExample(
+      selectedNode,
+      selectedNode.input_examples[0]?.example_id ?? "",
+      allArtifacts,
+      steps,
+      stepDetails,
+    );
+    // 只在切换 Node 时重置示例输入；allArtifacts 变化由上方增量 effect 处理。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedNode]);
 
   useEffect(() => {
@@ -181,13 +249,7 @@ export function NodeLabPage() {
   }, [run?.lab_run_id, selectedStepId, stepDetails]);
 
   function applyExample(nextExampleId: string) {
-    setExampleId(nextExampleId);
-    const example = selectedNode?.input_examples.find((item) => item.example_id === nextExampleId);
-    if (!example) return;
-    setExecutionMode(example.execution_mode);
-    setEffectMode(example.effect_mode);
-    setFixtureId(example.fixture_id ?? "");
-    setInputsText(pretty(example.inputs));
+    applyNodeExample(selectedNode, nextExampleId, allArtifacts, steps, stepDetails);
   }
 
   async function withBusy(action: NodeLabBusyAction, task: () => Promise<void>) {
@@ -202,7 +264,7 @@ export function NodeLabPage() {
     }
   }
 
-  function selectRun(
+  async function selectRun(
     nextRun: NodeLabRun,
     nextSteps: NodeLabStepSummary[] = [],
     nextArtifacts: NodeLabArtifact[] = [],
@@ -210,10 +272,32 @@ export function NodeLabPage() {
     setRun(nextRun);
     setResumeRunId(nextRun.lab_run_id);
     setSteps(nextSteps);
-    setStepDetails({});
     setSelectedStepId(nextSteps.at(-1)?.step_id ?? null);
-    setBaseStepId(nextSteps.at(-1)?.step_id ?? "");
     setUploadedArtifacts(nextArtifacts);
+
+    // 逐个容忍 Step 详情加载失败：失败时降级为空详情（父 State 优先匹配退化为
+    // 等价组内确定性选择），但绝不能中止，否则 base_step_id 会残留上一个 Run 的 Step。
+    let loadedDetails: Record<string, NodeLabStep> = {};
+    if (nextSteps.length > 0) {
+      const results = await Promise.allSettled(
+        nextSteps.map((step) => getNodeLabStep(nextRun.lab_run_id, step.step_id)),
+      );
+      const failures: string[] = [];
+      results.forEach((result, index) => {
+        if (result.status === "fulfilled") {
+          loadedDetails[result.value.step_id] = result.value;
+        } else {
+          failures.push(nextSteps[index]?.step_id ?? "unknown");
+        }
+      });
+      if (failures.length > 0) {
+        setError(`部分 Step 详情加载失败（${failures.length} 个），父 State 匹配已降级。`);
+      }
+    }
+    setStepDetails(loadedDetails);
+
+    // 创建/恢复 LabRun 后，基于新 Run 的 Artifact、Steps 与 Step Details 重新物化当前示例输入和 base_step。
+    applyNodeExample(selectedNode, exampleId, nextArtifacts, nextSteps, loadedDetails);
   }
 
   async function handleCreateRun() {
@@ -222,7 +306,7 @@ export function NodeLabPage() {
         projectId.trim() || null,
         parseObject(initialStateText, "初始 State"),
       );
-      selectRun(created);
+      await selectRun(created);
     });
   }
 
@@ -238,7 +322,7 @@ export function NodeLabPage() {
         listNodeLabSteps(id),
         listNodeLabArtifacts(id),
       ]);
-      selectRun(loadedRun, loadedSteps, loadedArtifacts);
+      await selectRun(loadedRun, loadedSteps, loadedArtifacts);
     });
   }
 
@@ -290,11 +374,6 @@ export function NodeLabPage() {
       setUploadedArtifacts((current) => [...current, artifact]);
     });
   }
-
-  const allArtifacts = uploadedArtifacts.filter(
-    (artifact, index, items) =>
-      items.findIndex((candidate) => candidate.artifact_id === artifact.artifact_id) === index,
-  );
 
   return (
     <main className="node-lab-app">
@@ -357,6 +436,7 @@ export function NodeLabPage() {
               busy={busy}
               executing={busyAction === "execute"}
               steps={steps}
+              artifacts={allArtifacts}
               exampleId={exampleId}
               executionMode={executionMode}
               effectMode={effectMode}

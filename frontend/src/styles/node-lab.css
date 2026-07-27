@@ -721,6 +721,49 @@
   font-size: 10px;
 }
 
+.node-lab-artifact-inputs {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--nl-border);
+  border-radius: 5px;
+  padding: 10px;
+  background: var(--nl-bg);
+}
+
+.node-lab-artifact-inputs h3 {
+  margin: 0;
+  color: var(--nl-text-dim);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.node-lab-artifact-input {
+  margin: 0;
+}
+
+.node-lab-artifact-input select {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--nl-border-strong);
+  border-radius: 4px;
+  padding: 0 9px;
+  background: var(--nl-panel);
+  color: var(--nl-text);
+  font-family: var(--nl-mono);
+  font-size: 12px;
+}
+
+.node-lab-artifact-input select:disabled {
+  background: var(--nl-bg);
+  color: var(--nl-text-faint);
+}
+
+.node-lab-artifact-input .node-lab-hint {
+  color: var(--nl-info);
+}
+
 .node-lab-json-editor {
   display: grid;
   gap: 5px;
@@ -848,8 +891,10 @@
 .node-lab-output-scroll {
   display: grid;
   align-content: start;
+  grid-auto-rows: max-content;
   gap: 4px;
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding: 12px;
 }

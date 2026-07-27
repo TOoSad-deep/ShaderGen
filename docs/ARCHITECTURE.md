@@ -28,7 +28,7 @@ Backend 只能通过 `agent.app.services.*` 调用 Agent。Agent 不持有数据
 
 Node Lab 默认以空安全 Application 启动在端口 8090。产品 Backend 不注册 `/api/lab/v1/*`；前端 `/lab` 通过 `VITE_NODE_LAB_API_BASE_URL` 连接独立服务。节点、Fixture、capability、suite、资源与副作用门禁只能由进程启动时的 `NODELAB_APPLICATION_FACTORY=module:callable` 注入，HTTP 客户端不能提交 import path 或 manifest path。
 
-当前实现只保留通用 `nodelab`、`nodelab.http` 独立 transport 和工作台，不恢复已退役的 PNG-to-Shader V1 Graph、专用 Adapter、benchmark manifest 或运行脚本。详细边界见 `src/nodelab/ARCHITECTURE.md`、`src/nodelab/http/ARCHITECTURE.md` 和 `docs/NODE_LAB_GUIDE.md`。
+当前实现保留通用 `nodelab`、`nodelab.http` 独立 transport 和工作台，并在 `agent.app.nodes.png_to_shader_min.node_lab` 提供当前 `scene_mvp` 12 节点的显式 Provider/Executor；`agent.app.services.node_lab` 作为受信任 factory 组合根选择具体 Gateway。生产侧适配以不透明 Artifact ID hydration 图片、目标 RGB 和 Render，以带指纹的 JSON 快照恢复 `ShaderGraphCandidateSnapshot`，不让通用 Harness 反向依赖 Agent/ShaderForge，也不让 Node 反向依赖 LLM 实现；模型节点的 AI-off fallback 与真实调用使用不同 binding，真实调用继续经过服务端与请求双重门禁。已退役的 PNG-to-Shader V1 Adapter、benchmark manifest、Fixture 和运行脚本不恢复。详细边界见 `src/nodelab/ARCHITECTURE.md`、`src/nodelab/http/ARCHITECTURE.md` 和 `docs/NODE_LAB_GUIDE.md`。
 
 ## scene_mvp Graph
 

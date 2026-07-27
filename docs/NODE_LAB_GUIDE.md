@@ -32,6 +32,43 @@ NODELAB_APPLICATION_FACTORY=my_project.node_lab:create_application make dev-node
 
 Factory 模块及其 Node/Provider 必须安装在服务进程中。客户端不能提交 import path、manifest path 或文件系统路径。
 
+## 测试当前 scene_mvp 节点
+
+仓库已提供当前 `png_to_shader_min` 12 节点的显式 Provider/Executor factory。先停止正在运行的空服务，再执行：
+
+```bash
+NODELAB_APPLICATION_FACTORY=agent.app.services.node_lab:create_application \
+make dev-node-lab
+make dev-frontend
+```
+
+健康检查应返回 `pipeline_id=scene_mvp`、`node_count=12`：
+
+```bash
+curl -s http://127.0.0.1:8090/api/lab/v1/health
+curl -s http://127.0.0.1:8090/api/lab/v1/nodes
+```
+
+在 `http://127.0.0.1:5173/lab` 中按以下顺序操作：
+
+1. 新建 LabRun，`project_id` 可使用 `node-lab-local`。
+2. 在 Artifact 面板上传参考 PNG，kind 使用 `reference_png`。
+3. 选择 `initialize_run`，Node Inspector 会依据示例中的 `artifact_inputs` 映射自动把 `source_artifact_id` 填充为上传的 `reference_png` Artifact ID；若同 kind 存在多个 Artifact，则从下拉选择器手动选取。默认示例使用 `fast`、`llm_budget=0`、`refine_budget=0`。
+4. 执行后续节点时，Node Inspector 会根据示例的 `base_step_node_id` 自动把 `base_step_id` 选为对应父节点的最新成功 Step；`perceive_target` / `author_initial` / `author_refine` 的 `source_artifact_id`、`render_and_evaluate` / `optimize_base` / `optimize_feature` 的 `target_rgb_artifact_id` 也会按当前 LabRun 的 Artifact 自动填充或下拉选择。没有匹配父步骤时保持 Root State。
+5. 依次检查 Output、State Diff、DAG、Artifact 和 `next_action`。路由节点只给出建议动作，不会替用户自动执行整个 Graph。
+
+`deterministic` 模式下，`author_initial` 强制采用感知 fallback，`author_refine` 只保留 `current_best`，不会调用模型。真实模型只对这两个模型节点开放，并且必须同时满足：
+
+```bash
+NODELAB_APPLICATION_FACTORY=agent.app.services.node_lab:create_application \
+NODELAB_REAL_MODEL_ENABLED=true \
+make dev-node-lab
+```
+
+请求侧还必须选择 `real`、打开 `allow_model_call`，并在 State 中保留正的 `llm_budget`；Gateway 密钥仍只从服务端 `.env` 读取。
+
+Provider 不把图片、目标 RGB、Render 或生产领域对象直接写入 Lab State：参考图使用不透明 Artifact ID，目标 RGB 使用 NPY Artifact，`current_best` 使用带文档/GLSL 指纹和 Render Artifact ID 的可复验快照。执行时才恢复生产对象并直接调用当前生产 Node。旧 V1 Adapter、Fixture、manifest 和 benchmark 入口没有恢复。
+
 ## 环境变量
 
 ```text
