@@ -5,6 +5,16 @@ import {
   type MinRunProgressEvent,
   type MinRunProgressSnapshot,
 } from "../api/shader";
+import {
+  buildRunViewModel,
+  formatClock,
+  formatMetric,
+  formatMs,
+  formatTraceDetails,
+  isTerminalRunStatus,
+  nodeLabel,
+  type BudgetView,
+} from "../runStages";
 
 interface MinRunLivePanelProps {
   runId: string;
@@ -12,124 +22,33 @@ interface MinRunLivePanelProps {
   events: MinRunProgressEvent[];
   snapshot: MinRunProgressSnapshot | null;
   status: string;
+  /** 后端登记运行的 ISO 时刻；缺省时计时只能按本地观察口径展示。 */
+  startedAt?: string | null;
+  /** 进度轮询中断等传输层问题提示；不代表服务端运行状态。 */
+  progressNotice?: string | null;
 }
 
-interface NodeView {
-  id: string;
-  label: string;
-  state: "pending" | "running" | "completed" | "failed";
-  visits: number;
-  lastDurationMs: number | null;
-  nextAction: string | null;
-  stopReason: string | null;
-}
-
-// 与 src/agent/app/graphs/png_to_shader_min_graph.py 的 12 个节点一一对应。
-const MIN_GRAPH_NODES: Array<{ id: string; label: string }> = [
-  { id: "initialize_run", label: "初始化运行" },
-  { id: "perceive_target", label: "感知目标图" },
-  { id: "author_initial", label: "初始 Scene 生成" },
-  { id: "materialize_shader", label: "物化 GLSL" },
-  { id: "render_and_evaluate", label: "渲染与评估" },
-  { id: "decide_after_render", label: "渲染后决策" },
-  { id: "optimize_base", label: "基础参数优化" },
-  { id: "decide_after_base", label: "基础优化后决策" },
-  { id: "optimize_feature", label: "特性优化" },
-  { id: "decide_after_feature", label: "特性优化后决策" },
-  { id: "author_refine", label: "模型修订" },
-  { id: "finalize", label: "固化产物" },
-];
-
-const NODE_LABELS = new Map(MIN_GRAPH_NODES.map((node) => [node.id, node.label]));
-
-const STOP_REASON_LABELS: Record<string, string> = {
-  continue: "继续",
-  target_loss_reached: "达到目标损失",
-  render_budget_exhausted: "渲染预算用尽",
-  render_failed: "渲染失败",
-  bounded_mvp_complete: "有界流程完成",
-};
-
-const TRACE_DETAIL_KEYS = new Set(["phase", "status", "message"]);
-
-function nodeLabel(id: string): string {
-  return NODE_LABELS.get(id) ?? id;
-}
-
-function formatMs(value: number | null | undefined): string {
-  return typeof value === "number" && Number.isFinite(value)
-    ? `${Math.round(value)} ms`
-    : "—";
-}
-
-function formatMetric(value: number | null | undefined): string {
-  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(4) : "—";
-}
-
-function formatClock(seconds: number): string {
-  const minutes = Math.floor(seconds / 60);
-  const rest = Math.floor(seconds % 60);
-  return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
-}
-
-function formatDetailValue(value: unknown): string {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return Number.isInteger(value) ? String(value) : value.toFixed(4);
-  }
-  if (typeof value === "boolean") return value ? "是" : "否";
-  if (value === null || value === undefined) return "—";
-  return String(value);
-}
-
-function buildNodeViews(events: MinRunProgressEvent[]): NodeView[] {
-  const views = MIN_GRAPH_NODES.map((node) => ({
-    id: node.id,
-    label: node.label,
-    state: "pending" as NodeView["state"],
-    visits: 0,
-    lastDurationMs: null as number | null,
-    nextAction: null as string | null,
-    stopReason: null as string | null,
-  }));
-  const byId = new Map(views.map((view) => [view.id, view]));
-  for (const event of events) {
-    const view = byId.get(event.node);
-    if (!view) continue;
-    view.visits += 1;
-    view.state = event.status === "failed" ? "failed" : "completed";
-    view.lastDurationMs =
-      typeof event.duration_ms === "number" ? event.duration_ms : null;
-    if (event.next_action) {
-      view.nextAction = event.next_action;
-      view.stopReason = event.stop_reason ?? null;
-    }
-  }
-  // 最新事件只说明该节点已完成；当前执行节点是路由指向或顺序上的下一个。
-  const last = events[events.length - 1];
-  if (last) {
-    const nextId = last.next_action ?? nextSequentialNodeId(last.node);
-    const current = nextId ? byId.get(nextId) : undefined;
-    if (current && last.node !== "finalize") current.state = "running";
-  }
-  return views;
-}
-
-function nextSequentialNodeId(nodeId: string): string | null {
-  const index = MIN_GRAPH_NODES.findIndex((node) => node.id === nodeId);
-  if (index < 0 || index + 1 >= MIN_GRAPH_NODES.length) return null;
-  return MIN_GRAPH_NODES[index + 1].id;
-}
-
-function BudgetMeter(props: { label: string; used?: number; budget?: number }) {
-  const used = typeof props.used === "number" ? props.used : 0;
-  const budget = typeof props.budget === "number" ? props.budget : undefined;
-  const ratio = budget && budget > 0 ? Math.min(1, used / budget) : 0;
+function BudgetMeter({ view }: { view: BudgetView }) {
+  // used 缺失时必须保持“—”，进度条 indeterminate，不得按 0 渲染。
+  const ratio =
+    view.used !== null && view.budget && view.budget > 0
+      ? Math.min(1, view.used / view.budget)
+      : null;
+  const usedLabel = view.used ?? "—";
   return (
     <div className="budget-meter">
-      <span>{props.label}</span>
-      <progress value={ratio} max={1} />
+      <span>{view.label}</span>
+      {ratio !== null ? (
+        <progress
+          value={ratio}
+          max={1}
+          aria-label={`${view.label}预算用量 ${usedLabel} / ${view.budget ?? "未知"}`}
+        />
+      ) : (
+        <progress aria-label={`${view.label}预算用量未知`} />
+      )}
       <strong>
-        {used} / {budget ?? "—"}
+        {usedLabel} / {view.budget ?? "—"}
       </strong>
     </div>
   );
@@ -141,91 +60,129 @@ export function MinRunLivePanel({
   events,
   snapshot,
   status,
+  startedAt = null,
+  progressNotice = null,
 }: MinRunLivePanelProps) {
-  const nodeViews = useMemo(() => buildNodeViews(events), [events]);
-  const budgets = snapshot?.budgets ?? null;
-  const counters = snapshot?.counters ?? null;
-  const best = snapshot?.best ?? null;
-  const renderSeq =
-    typeof snapshot?.render_seq === "number" && snapshot.render_seq > 0
-      ? snapshot.render_seq
-      : null;
   const feedRef = useRef<HTMLOListElement | null>(null);
   const [mountedAt] = useState(() => Date.now() / 1000);
   const [nowSeconds, setNowSeconds] = useState(() => Date.now() / 1000);
+  const terminal = isTerminalRunStatus(status);
 
   useEffect(() => {
+    // 终态冻结为历史记录，不再走客户端时钟。
+    if (terminal) return;
     const timer = window.setInterval(() => {
       setNowSeconds(Date.now() / 1000);
     }, 1000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [terminal]);
 
   useEffect(() => {
     const feed = feedRef.current;
     if (feed) feed.scrollTop = feed.scrollHeight;
   }, [events.length]);
 
-  const lastElapsed = events.length
-    ? (events[events.length - 1].elapsed_ms ?? 0)
-    : 0;
-  // 运行中用客户端时钟计时；终态冻结在最后一个事件的服务端 elapsed_ms。
-  const elapsedSeconds =
-    status === "running" || status === "pending"
-      ? Math.max(0, nowSeconds - mountedAt)
-      : lastElapsed / 1000;
-
-  const targetLoss = budgets?.target_loss;
-  const bestLoss = best?.loss;
-  const targetReached =
-    typeof bestLoss === "number" && typeof targetLoss === "number"
-      ? bestLoss <= targetLoss
-      : null;
+  const vm = useMemo(
+    () =>
+      buildRunViewModel({
+        events,
+        snapshot,
+        status,
+        startedAt,
+        nowSeconds,
+        mountedAtSeconds: mountedAt,
+      }),
+    [events, snapshot, status, startedAt, nowSeconds, mountedAt],
+  );
 
   return (
     <div className="min-live-panel" aria-label="scene_mvp 运行过程">
       <div className="min-live-head">
-        <span className={`min-live-status is-${status}`}>
-          {status === "running"
-            ? "运行中"
-            : status === "succeeded"
-              ? "已完成"
-              : status === "failed"
-                ? "失败"
-                : "等待服务端登记"}
+        <span
+          className={`min-live-status is-${vm.status}`}
+          role="status"
+          aria-live="polite"
+        >
+          {vm.statusLabel}
         </span>
         <span>run_id: {runId}</span>
-        <span>已运行 {formatClock(elapsedSeconds)}</span>
+        <span>
+          {vm.timing.elapsedLabel}{" "}
+          {vm.timing.elapsedSeconds === null
+            ? "—"
+            : formatClock(vm.timing.elapsedSeconds)}
+        </span>
+        {vm.timing.startedAtLabel ? <span>开始 {vm.timing.startedAtLabel}</span> : null}
       </div>
+
+      {vm.nextStageLabel ? (
+        <p className="min-live-hint">预计下一节点：{vm.nextStageLabel}（未确认开始）</p>
+      ) : null}
+      {vm.statusHint ? <p className="min-live-hint">{vm.statusHint}</p> : null}
+      {progressNotice ? (
+        <p className="min-live-hint is-warning" role="alert">
+          {progressNotice}
+        </p>
+      ) : null}
+      {vm.failure ? (
+        <p className="min-live-failure" role="alert">
+          失败于「{vm.failure.stageLabel}」
+          {vm.failure.summary ? `：${vm.failure.summary}` : ""}
+          {vm.failure.stopReasonLabel ? `（${vm.failure.stopReasonLabel}）` : ""}
+        </p>
+      ) : null}
+      {vm.initialAuthorSourceLabel ? (
+        <p className="min-live-basis">
+          Initial Author 输出来源：{vm.initialAuthorSourceLabel}
+          {vm.refineCount ? `；本 run 记录 ${vm.refineCount} 次模型修订` : ""}
+          。该字段不代表最终 current_best provenance；候选基于参考图约束生成并经真实
+          渲染/评分选择，最终 GLSL 与 Render 来自冻结 current_best 的 typed
+          ShaderGraph 编译产物。
+        </p>
+      ) : null}
 
       <div className="min-live-grid">
         <section className="min-live-timeline" aria-label="节点时间线">
-          <h3>节点时间线</h3>
+          <h3>
+            节点时间线（{vm.completedStageCount}/{vm.stages.length}）
+            {vm.unknownEventCount > 0 ? ` · ${vm.unknownEventCount} 个未知节点事件` : ""}
+          </h3>
           <ol>
-            {nodeViews.map((view) => (
-              <li key={view.id} className={`is-${view.state}`}>
+            {vm.stages.map((stage) => (
+              <li key={stage.id} className={`is-${stage.state}`}>
                 <span className="node-dot" aria-hidden="true" />
                 <span className="node-label">
-                  {view.label}
-                  {view.visits > 1 ? ` ×${view.visits}` : ""}
+                  {stage.label}
+                  {stage.visits > 1 ? ` ×${stage.visits}` : ""}
                 </span>
                 <span className="node-meta">
-                  {view.state === "running" ? (
-                    <em>执行中</em>
-                  ) : view.state === "completed" ? (
-                    formatMs(view.lastDurationMs)
-                  ) : view.state === "failed" ? (
+                  {stage.state === "completed" ? (
+                    <>
+                      {formatMs(stage.lastDurationMs)}
+                      {stage.lastElapsedMs !== null ? (
+                        <span className="node-cumulative">
+                          累计 {formatClock(stage.lastElapsedMs / 1000)}
+                        </span>
+                      ) : null}
+                    </>
+                  ) : stage.state === "failed" ? (
                     <em>失败</em>
                   ) : (
                     "待执行"
                   )}
                 </span>
-                {view.nextAction ? (
+                {stage.summary && stage.state !== "pending" ? (
+                  <span className="node-summary">
+                    {stage.summary}
+                    {stage.details ? (
+                      <span className="node-summary-details">{stage.details}</span>
+                    ) : null}
+                  </span>
+                ) : null}
+                {stage.nextAction ? (
                   <span className="node-route">
-                    → {nodeLabel(view.nextAction)}
-                    {view.stopReason
-                      ? `（${STOP_REASON_LABELS[view.stopReason] ?? view.stopReason}）`
-                      : ""}
+                    → {stage.nextActionLabel}
+                    {stage.stopReasonLabel ? `（${stage.stopReasonLabel}）` : ""}
                   </span>
                 ) : null}
               </li>
@@ -236,38 +193,26 @@ export function MinRunLivePanel({
         <section className="min-live-side">
           <div className="min-live-budgets" aria-label="预算用量">
             <h3>预算用量</h3>
-            <BudgetMeter
-              label="渲染 draw"
-              used={counters?.render_count}
-              budget={budgets?.render_budget}
-            />
-            <BudgetMeter
-              label="LLM 调用"
-              used={counters?.llm_call_count}
-              budget={budgets?.llm_budget}
-            />
-            <BudgetMeter
-              label="模型修订"
-              used={counters?.refine_count}
-              budget={budgets?.refine_budget}
-            />
+            {vm.budgets.map((budget) => (
+              <BudgetMeter key={budget.id} view={budget} />
+            ))}
           </div>
 
           <div className="min-live-quality" aria-label="质量进度">
-            <h3>质量进度</h3>
+            <h3>质量进度（current_best）</h3>
             <div className="quality-row">
               <span>best loss</span>
-              <strong className={targetReached === true ? "is-reached" : ""}>
-                {formatMetric(bestLoss)}
+              <strong className={vm.quality.targetReached === true ? "is-reached" : ""}>
+                {formatMetric(vm.quality.bestLoss)}
               </strong>
-              <span>目标 {formatMetric(targetLoss)}</span>
+              <span>目标 {formatMetric(vm.quality.targetLoss)}</span>
             </div>
             <div className="quality-row">
               <span>best MAE</span>
-              <strong>{formatMetric(best?.mae)}</strong>
-              <span>目标 {formatMetric(budgets?.target_mae)}</span>
+              <strong>{formatMetric(vm.quality.bestMae)}</strong>
+              <span>目标 {formatMetric(vm.quality.targetMae)}</span>
             </div>
-            {targetReached === true ? (
+            {vm.quality.targetReached === true ? (
               <p className="target-status is-reached">已达到目标损失</p>
             ) : null}
           </div>
@@ -280,12 +225,14 @@ export function MinRunLivePanel({
                 {referenceUrl ? <img src={referenceUrl} alt="参考图" /> : <div className="empty">未上传</div>}
               </figure>
               <figure>
-                <figcaption>current_best{renderSeq ? ` #${renderSeq}` : ""}</figcaption>
-                {renderSeq ? (
+                <figcaption>
+                  current_best 实时帧{vm.renderSeq ? `（刷新 #${vm.renderSeq}）` : ""}
+                </figcaption>
+                {vm.renderSeq ? (
                   <img
-                    key={renderSeq}
-                    src={resolveMinRunRenderUrl(runId, renderSeq)}
-                    alt="运行中最新渲染帧"
+                    key={vm.renderSeq}
+                    src={resolveMinRunRenderUrl(runId, vm.renderSeq)}
+                    alt="运行中最新渲染帧（current_best 实时帧）"
                   />
                 ) : (
                   <div className="empty">等待首次渲染</div>
@@ -297,7 +244,7 @@ export function MinRunLivePanel({
       </div>
 
       <section className="min-live-feed-section" aria-label="事件流">
-        <h3>事件流（{events.length}）</h3>
+        <h3>事件流（{vm.eventCount}）</h3>
         <ol className="min-live-feed" ref={feedRef}>
           {events.length === 0 ? (
             <li className="feed-empty">等待第一个节点事件...</li>
@@ -310,25 +257,20 @@ export function MinRunLivePanel({
                   </strong>
                   <span className={`trace-status is-${event.status}`}>{event.status}</span>
                   <span>{formatMs(event.duration_ms)}</span>
+                  {typeof event.elapsed_ms === "number" ? (
+                    <span>累计 {formatClock(event.elapsed_ms / 1000)}</span>
+                  ) : null}
                   {event.next_action ? (
                     <span className="node-route">→ {nodeLabel(event.next_action)}</span>
                   ) : null}
                 </div>
                 {Array.isArray(event.trace)
                   ? event.trace.map((item, index) => {
-                      const details = Object.entries(item).filter(
-                        ([key]) => !TRACE_DETAIL_KEYS.has(key),
-                      );
+                      const details = formatTraceDetails(item);
                       return (
                         <p key={`${event.seq}-${index}`} className="feed-message">
                           {typeof item.message === "string" ? item.message : ""}
-                          {details.length ? (
-                            <span className="feed-details">
-                              {details
-                                .map(([key, value]) => `${key}=${formatDetailValue(value)}`)
-                                .join(" · ")}
-                            </span>
-                          ) : null}
+                          {details ? <span className="feed-details">{details}</span> : null}
                         </p>
                       );
                     })

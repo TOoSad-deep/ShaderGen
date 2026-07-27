@@ -87,14 +87,18 @@ require_snapshot_text '事件流'
 require_snapshot_text '初始化运行'
 require_snapshot_text '感知目标图'
 require_snapshot_text '渲染与评估'
-require_snapshot_text '执行中'
+require_snapshot_text '预计下一节点'
+require_snapshot_text '已观察'
 require_snapshot_text '实时渲染'
+require_snapshot_text 'current_best 实时帧'
 "$PWCLI" -s="$SESSION" screenshot --filename "$ARTIFACT_DIR/scene-mvp-live.png" --full-page >/dev/null
 sleep 26
 
 # 第一轮：target_reached=true，质量达标
 require_text 'scene_mvp 最小管线'
 require_text '质量达标'
+require_text 'Initial Author 输出来源'
+require_text 'Graph 事件累计'
 require_text '服务端最终 Render'
 require_text '0.0800'
 require_text '0.1200'

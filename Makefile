@@ -47,6 +47,7 @@ check:
 	uv run pytest tests/unit_tests
 	uv run python scripts/docs_check.py
 	uv run langgraph validate
+	npm --prefix frontend run test
 	npm --prefix frontend run build
 
 docs-check:
@@ -104,7 +105,7 @@ help:
 	@echo 'dev-backend                  - run FastAPI backend on port 8088'
 	@echo 'dev-node-lab                 - run standalone Node Lab on port 8090'
 	@echo 'dev-frontend                 - run Vite frontend'
-	@echo 'check                        - run unit tests, LangGraph validation, frontend build'
+	@echo 'check                        - run unit tests, LangGraph validation, frontend unit tests and build'
 	@echo 'docs-check                   - verify harness docs and architecture boundaries'
 	@echo 'test-memory-postgres         - verify Shader Memory against PostgreSQL'
 	@echo 'test-scene-mvp-ui             - verify the scene_mvp pipeline summary in isolated Chromium'

@@ -14,6 +14,7 @@ import {
   type ShaderApiFailure,
   type ShaderResponse,
 } from "./api/shader";
+import { isTerminalRunStatus, nextPollDelayMs } from "./runStages";
 import { FailureDetails } from "./components/FailureDetails";
 import { MinRunLivePanel } from "./components/MinRunLivePanel";
 import { SceneMvpSummary } from "./components/SceneMvpSummary";
@@ -36,10 +37,21 @@ interface LiveMinRun {
   events: MinRunProgressEvent[];
   snapshot: MinRunProgressSnapshot | null;
   status: string;
+  startedAt: string | null;
 }
 
-const MIN_RUN_POLL_INTERVAL_MS = 1200;
-const MIN_RUN_MAX_POLL_FAILURES = 3;
+// 运行观察器：POST 结算后仍按 capped backoff 轮询，直到服务端终态、
+// 服务端明确失败、新 run 或页面卸载；停止浏览器等待从来不是服务端取消。
+interface RunObserver {
+  runId: string;
+  stopped: boolean;
+  deadlineMs: number;
+  request: AbortController | null;
+}
+
+const PROGRESS_REQUEST_TIMEOUT_MS = 10_000;
+const PROGRESS_OBSERVATION_GRACE_MS = 5 * 60 * 1000;
+
 const DEFAULT_REQUEST_TIMEOUT_MS: Record<QualityPreset, number> = {
   fast: 4 * 60 * 1000,
   balanced: 7 * 60 * 1000,
@@ -84,8 +96,10 @@ export function App() {
   const [dragActive, setDragActive] = useState(false);
   const [copied, setCopied] = useState(false);
   const [liveRun, setLiveRun] = useState<LiveMinRun | null>(null);
+  const [progressNotice, setProgressNotice] = useState("");
   const copyTimerRef = useRef<number | null>(null);
   const activeGenerationRef = useRef<ActiveGenerationRequest | null>(null);
+  const runObserverRef = useRef<RunObserver | null>(null);
 
   useEffect(() => () => {
     if (imageUrl) URL.revokeObjectURL(imageUrl);
@@ -99,9 +113,20 @@ export function App() {
       window.clearTimeout(active.timeoutId);
       active.controller.abort();
     }
+    const observer = runObserverRef.current;
+    if (observer) {
+      observer.stopped = true;
+      observer.request?.abort();
+    }
   }, []);
 
   function clearRunOutput() {
+    const observer = runObserverRef.current;
+    if (observer) {
+      observer.stopped = true;
+      observer.request?.abort();
+    }
+    runObserverRef.current = null;
     setGlsl("");
     setRunResult(null);
     setCompatibility(null);
@@ -110,6 +135,7 @@ export function App() {
     setRequestStopNotice("");
     setCopied(false);
     setLiveRun(null);
+    setProgressNotice("");
   }
 
   async function handleFile(file: File) {
@@ -144,39 +170,93 @@ export function App() {
     activeGenerationRef.current = active;
 
     const runId = newClientRunId();
-    let pollStopped = false;
+    // 新 run 取代旧观察器；观察不是取消，旧 run 面板随 clearRunOutput 一起清掉。
+    if (runObserverRef.current) {
+      runObserverRef.current.stopped = true;
+      runObserverRef.current.request?.abort();
+    }
+    const observer: RunObserver = {
+      runId,
+      stopped: false,
+      deadlineMs: Date.now() + timeoutMs + PROGRESS_OBSERVATION_GRACE_MS,
+      request: null,
+    };
+    runObserverRef.current = observer;
     let pollFailures = 0;
+    let pendingReads = 0;
     let lastSeq = 0;
 
     const mergeProgress = (data: MinRunProgressResponse) => {
+      // 旧观察请求可能在上传新图片或启动新 run 后才返回；不得覆盖新面板。
+      if (observer.stopped || runObserverRef.current !== observer) return;
       lastSeq = Math.max(lastSeq, data.latest_seq ?? 0);
       setLiveRun((current) => {
         const base = current?.runId === runId ? current.events : [];
         const seen = new Set(base.map((event) => event.seq));
+        const mergedEvents = [
+          ...base,
+          ...data.events.filter((event) => !seen.has(event.seq)),
+        ].sort((left, right) => left.seq - right.seq);
         return {
           runId,
-          events: [...base, ...data.events.filter((event) => !seen.has(event.seq))],
+          events: mergedEvents,
           snapshot: data.snapshot ?? current?.snapshot ?? null,
           status: data.status,
+          startedAt: data.started_at ?? current?.startedAt ?? null,
         };
       });
     };
 
+    // capped backoff 轮询：失败后继续重连，只有终态/新 run/卸载才停止。
     const pollProgress = async () => {
-      if (pollStopped) return;
-      try {
-        mergeProgress(await fetchMinRunProgress(runId, lastSeq));
-        pollFailures = 0;
-      } catch {
-        pollFailures += 1;
+      if (observer.stopped || runObserverRef.current !== observer) return;
+      if (Date.now() >= observer.deadlineMs) {
+        observer.stopped = true;
+        setProgressNotice(
+          "已达到本次进度观察上限；这不代表服务端任务已取消，可通过 Run ID 检查后端状态。",
+        );
+        return;
       }
-      if (!pollStopped && pollFailures < MIN_RUN_MAX_POLL_FAILURES) {
-        window.setTimeout(() => void pollProgress(), MIN_RUN_POLL_INTERVAL_MS);
+      const pollController = new AbortController();
+      observer.request = pollController;
+      const pollTimeoutId = window.setTimeout(
+        () => pollController.abort(),
+        PROGRESS_REQUEST_TIMEOUT_MS,
+      );
+      try {
+        const data = await fetchMinRunProgress(runId, lastSeq, pollController.signal);
+        if (observer.stopped || runObserverRef.current !== observer) return;
+        mergeProgress(data);
+        pollFailures = 0;
+        pendingReads = data.status === "pending" ? pendingReads + 1 : 0;
+        setProgressNotice("");
+        if (isTerminalRunStatus(data.status)) {
+          observer.stopped = true;
+          return;
+        }
+      } catch {
+        if (observer.stopped || runObserverRef.current !== observer) return;
+        pollFailures += 1;
+        pendingReads = 0;
+        // 传输层中断不等于运行失败；观察循环会按退避继续重连。
+        setProgressNotice(
+          "进度轮询中断，正在按退避重连；这不代表服务端运行失败，结果以最终状态为准。",
+        );
+      } finally {
+        window.clearTimeout(pollTimeoutId);
+        if (observer.request === pollController) observer.request = null;
+      }
+      if (!observer.stopped && runObserverRef.current === observer) {
+        window.setTimeout(
+          () => void pollProgress(),
+          nextPollDelayMs(Math.max(pollFailures, pendingReads)),
+        );
       }
     };
 
-    setLiveRun({ runId, events: [], snapshot: null, status: "pending" });
+    setLiveRun({ runId, events: [], snapshot: null, status: "pending", startedAt: null });
     window.setTimeout(() => void pollProgress(), 500);
+    let definitiveFailure = false;
     try {
       const result = await generateShader(selectedFile, {
         runId,
@@ -189,22 +269,36 @@ export function App() {
     } catch (reason) {
       if (active.stopKind === "user") {
         setRequestStopNotice(
-          "已停止等待本次响应；这里只中止了浏览器请求，服务端任务可能仍在运行。",
+          "已停止等待本次响应；这里只中止了浏览器请求，服务端任务可能仍在运行，下方进度会继续观察到终态。",
         );
       } else if (active.stopKind === "timeout") {
         setRequestStopNotice(
-          `浏览器等待超过 ${Math.round(active.timeoutMs / 60_000)} 分钟，已停止等待响应；这不代表服务端任务已取消。`,
+          `浏览器等待超过 ${Math.round(active.timeoutMs / 60_000)} 分钟，已停止等待响应；这不代表服务端任务已取消，下方进度会继续观察到终态。`,
         );
       } else if (active.stopKind !== "unmount") {
-        if (reason instanceof ShaderApiError) setApiFailure(reason.failure);
+        if (reason instanceof ShaderApiError) {
+          setApiFailure(reason.failure);
+          // 只有明确且不可重试的 4xx 请求拒绝才视为确定失败；
+          // 代理 5xx/超时仍可能对应一个正在服务端执行的 run。
+          definitiveFailure =
+            reason.failure.status >= 400 &&
+            reason.failure.status < 500 &&
+            ![408, 425, 429].includes(reason.failure.status) &&
+            reason.failure.retryable !== true;
+          if (!definitiveFailure) {
+            setProgressNotice(
+              "生成响应失败，但服务端运行状态尚未确认；下方进度会继续观察。",
+            );
+          }
+        }
         setError(reason instanceof Error ? reason.message : "生成失败。");
       }
     } finally {
-      pollStopped = true;
-      try {
-        mergeProgress(await fetchMinRunProgress(runId, lastSeq));
-      } catch {
-        // 收尾轮询失败不影响主流程。
+      // 不再额外发起并发“收尾 GET”；单飞观察循环负责读取终态，
+      // 避免较旧 snapshot/status 晚返回后覆盖较新结果。
+      if (definitiveFailure) {
+        observer.stopped = true;
+        observer.request?.abort();
       }
       window.clearTimeout(active.timeoutId);
       if (activeGenerationRef.current === active) {
@@ -317,11 +411,14 @@ export function App() {
         {apiFailure ? <FailureDetails message={error} failure={apiFailure} /> : null}
         {liveRun ? (
           <MinRunLivePanel
+            key={liveRun.runId}
             runId={liveRun.runId}
             referenceUrl={imageUrl}
             events={liveRun.events}
             snapshot={liveRun.snapshot}
             status={liveRun.status}
+            startedAt={liveRun.startedAt}
+            progressNotice={progressNotice || null}
           />
         ) : null}
         {runResult ? (

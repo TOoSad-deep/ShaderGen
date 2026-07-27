@@ -147,7 +147,8 @@ export function SceneMvpSummary({ runId, stopReason, minPipeline }: SceneMvpSumm
             <span>{productGraph.schema_version}</span>
           </div>
           <p>
-            当前 GLSL、渲染结果与 current_best 均由该 typed ShaderGraph 编译产生。
+            当前 GLSL、渲染结果与 current_best 均由该 typed ShaderGraph 编译产生；
+            下方 GLSL 与服务端最终 Render 是运行结束时冻结的 current_best 候选产物。
           </p>
           <details className="scene-mvp-details">
             <summary>图层检查器（{productLayers.length}）</summary>

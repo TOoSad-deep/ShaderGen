@@ -200,10 +200,12 @@ export interface MinRunProgressResponse {
 export async function fetchMinRunProgress(
   runId: string,
   after = 0,
+  signal?: AbortSignal,
 ): Promise<MinRunProgressResponse> {
   const query = after > 0 ? `?after=${Math.floor(after)}` : "";
   const response = await apiFetch(
     `/api/shader/runs/${encodeURIComponent(runId)}/progress${query}`,
+    { signal },
   );
   if (!response.ok) {
     throw await readError(response, "读取运行进度失败。");

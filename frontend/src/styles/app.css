@@ -641,6 +641,36 @@ body {
   color: #b91c1c;
 }
 
+.min-live-status.is-unknown {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.min-live-hint {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.min-live-hint.is-warning {
+  color: #b45309;
+}
+
+.min-live-failure {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.min-live-basis {
+  margin: 0;
+  color: #334155;
+  font-size: 12px;
+}
+
 .min-live-grid {
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
@@ -667,11 +697,6 @@ body {
   font-size: 13px;
 }
 
-.min-live-timeline li.is-running {
-  background: #eff6ff;
-  color: #1e40af;
-}
-
 .min-live-timeline li.is-completed {
   color: #0f172a;
 }
@@ -693,10 +718,6 @@ body {
   background: #15803d;
 }
 
-.min-live-timeline li.is-running .node-dot {
-  background: #1d4ed8;
-}
-
 .min-live-timeline li.is-failed .node-dot {
   background: #b91c1c;
 }
@@ -712,7 +733,7 @@ body {
 }
 
 .node-meta em {
-  color: #1d4ed8;
+  color: inherit;
   font-style: normal;
 }
 
@@ -721,6 +742,27 @@ body {
   padding-left: 16px;
   color: #64748b;
   font-size: 12px;
+}
+
+.node-cumulative {
+  margin-left: 6px;
+  color: #64748b;
+}
+
+.node-summary {
+  width: 100%;
+  padding-left: 16px;
+  color: #334155;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.node-summary-details {
+  display: block;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
 }
 
 .min-live-side {
@@ -906,5 +948,32 @@ body {
 
   .min-live-grid {
     grid-template-columns: 1fr;
+  }
+
+  .min-live-head {
+    gap: 8px;
+    font-size: 11px;
+  }
+
+  .render-pair {
+    grid-template-columns: 1fr;
+  }
+
+  .render-pair .empty {
+    min-height: 120px;
+  }
+
+  .min-live-timeline li {
+    align-items: flex-start;
+  }
+
+  .node-meta {
+    margin-left: 0;
+    width: 100%;
+    padding-left: 16px;
+  }
+
+  .budget-meter {
+    grid-template-columns: 64px minmax(0, 1fr) auto;
   }
 }

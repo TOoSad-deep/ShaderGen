@@ -15,7 +15,7 @@ Frontend React
   -> Artifact
 ```
 
-- `frontend/`：上传、配置、运行进度、服务端/客户端 Render 和 GLSL 展示。
+- `frontend/`：上传、配置、运行进度、服务端/客户端 Render 和 GLSL 展示；`frontend/src/runStages.ts` 把进度事件收敛为单一可测试的阶段视图模型，只展示后端真实字段。
 - `backend/`：HTTP 边界、进度注册、过程账本、生命周期和用例编排。
 - `src/agent/`：LangGraph、LLM Gateway、Prompt、Parser、State 和公共 Service。
 - `src/shaderforge/`：确定性 Scene、Shader 物化、ProgramSpec、安全校验、WebGL1 渲染、复合评分、优化和 Artifact。
