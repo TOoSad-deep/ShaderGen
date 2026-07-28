@@ -10,8 +10,9 @@ Frontend React
   -> direct_default（无 policy 文件时的默认值）
      -> direct child
         -> VisualAnalysis Author -> advisory LayerPlan
-        -> Initial/Refine direct GLSL Author
-        -> canonical ShaderProgramSpecV1
+        -> Initial Layered Author / 单 Layer Refine Patch
+        -> canonical LayeredShaderSpecV1
+        -> 确定性 Layer Compiler -> ShaderProgramSpecV1
         -> 静态校验 -> WebGL1 prepare/draw -> metric
      -> direct 失败时 fresh direct child（最多重试一次）
         -> 独立 Runner / Renderer / cache / 预算 / 私有 Store
@@ -35,10 +36,17 @@ Backend 只能通过 `agent.app.services.*` 调用 Agent。Agent 不持有数据
 Direct engine 使用三个有界 Author：
 
 1. VisualAnalysis 读取参考图和 instruction，生成 advisory `LayerPlanV1`。
-2. Initial 生成 `ShaderProgramSpecV1`。
-3. Refine 根据参考图、当前 Render、metric 和可信 incumbent 生成新候选。
+2. Initial 生成与 Plan 层一一对应的 `LayeredShaderSpecV1`。
+3. Compiler 确定性生成 Renderer 消费的完整 `ShaderProgramSpecV1`。
+4. Refine 根据参考图、当前 Render、metric 和可信 incumbent，只返回一个
+   `LayerPatchV1`；应用后重新编译和整图验收。
 
-LayerPlan 不参与安全校验、评分或接受判断。模型只返回语义字段；`shaderforge.program_spec` 负责 canonical 类型、身份绑定、规范化和哈希。候选必须通过 WebGL1 静态规则并真实 prepare/draw，只有 Renderer receipt 绑定的像素和 metric 可以更新 attempt-local `current_best`。
+LayerPlan 不直接参与安全校验、评分或接受判断，但其稳定 Layer ID 会贯通到
+Layered Spec 和 Patch。模型只维护 Layer 级语义；`shaderforge.layered_spec`
+负责 Layer 哈希、Patch 和编译，`shaderforge.program_spec` 负责最终执行契约
+与 attestation。候选必须通过 WebGL1 静态规则并真实 prepare/draw，只有
+Renderer receipt 绑定的像素和整图 metric 可以更新 attempt-local
+`current_best`。
 
 Direct 成功时：
 
@@ -47,7 +55,8 @@ Direct 成功时：
 - `min_pipeline.scene=null`
 - `renderer_path=direct_program_spec_v1`
 
-完整 LayerPlan、ProgramSpec、Prompt、Render bytes 和原始错误只保存在私有 attempt 边界。
+完整 LayerPlan、Layered Spec、编译后 ProgramSpec、Prompt、Render bytes 和
+原始错误只保存在私有 attempt 边界。
 
 ## ShaderGraph engine
 

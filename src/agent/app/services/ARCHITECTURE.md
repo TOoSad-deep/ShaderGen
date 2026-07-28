@@ -4,9 +4,13 @@
 
 ## Direct
 
-- `layerplan_glsl_direct.py` 运行 VisualAnalysis LayerPlan 和 direct Initial/Refine。
+- `layerplan_glsl_direct.py` 运行 VisualAnalysis LayerPlan、Layered Initial、
+  单 Layer Refine Patch 和确定性 ProgramSpec 编译。
 - Runner 共用 canonical ProgramSpec safety、真实 Renderer receipt、metric、预算和 strict incumbent 选择。
-- 结果中的 LayerPlan、ProgramSpec、Render 和原始错误留在私有 attempt；公开摘要只含安全状态、身份和指标。
+- 结果中的 LayerPlan、Layered Spec、编译后 ProgramSpec、Render 和原始错误
+  留在私有 attempt；公开摘要只含安全状态、身份和指标。
+- 失败 attempt 可保存脱敏的阶段、静态规则类别和行号；不保存模型原始输出、
+  GLSL 或编译日志正文。
 - Service 不注册 LangGraph，也不发布 parent Artifact。
 
 ## ShaderGraph engine

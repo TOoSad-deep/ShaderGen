@@ -114,6 +114,30 @@ def test_numeric_hazards_and_warnings_are_classified() -> None:
     assert result.to_dict()["valid"] is False
 
 
+@pytest.mark.parametrize("divisor", ["0", "0.0", ".0", "00.00"])
+def test_literal_zero_divisor_is_rejected(divisor: str) -> None:
+    shader = VALID_SHADER.replace(
+        "vec2 p = v_uv - vec2(0.5);",
+        f"vec2 p = v_uv / {divisor};",
+    )
+
+    result = validate_shader(shader)
+
+    assert {item.code for item in result.errors} == {"literal_divide_by_zero"}
+
+
+@pytest.mark.parametrize("divisor", ["0.5", "0.35", ".25", "10.0"])
+def test_nonzero_decimal_divisor_is_not_misclassified(divisor: str) -> None:
+    shader = VALID_SHADER.replace(
+        "vec2 p = v_uv - vec2(0.5);",
+        f"vec2 p = v_uv / {divisor};",
+    )
+
+    result = validate_shader(shader)
+
+    assert result.valid
+
+
 def test_constant_reversed_smoothsteps_are_repaired_with_inverse_intent() -> None:
     shader = VALID_SHADER.replace(
         "float mask = 1.0 - smoothstep(0.29, 0.31, length(p));",

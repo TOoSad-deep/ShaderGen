@@ -1,6 +1,7 @@
 # Nodes 架构
 
-当前只有 `png_to_shader_min/` 产品 Node 命名空间，包含 `scene_mvp` 的 12 节点运行时、ShaderGraph 产品运行时与 Model Author helper。
+当前产品 Node 有两个命名空间：`png_to_shader_min/` 承载 ShaderGraph，
+`layered_direct/` 承载默认 direct 的 Layered Initial/Refine Author helper。
 
 - Node 通过构造参数接收 `agent.app.contracts.llm.LLMGateway`，不得直接依赖 provider 实现。
 - 产品 Initial 生成完整 `ShaderDocument`；Refine 只从 `current_best.document` 派生一个绑定 base hash 的 typed layer patch。
@@ -8,6 +9,9 @@
 - Patch trace 只允许 operation、layer id、节点类型集合、SHA-256、metric delta、拒绝原因和耗时。
 - Node 不决定全局流程，不持有数据库连接，不原地修改 State。
 - Prompt 从 `app/prompts/` 加载，结构化输出由 `app/parsers/png_to_shader_min.py` 解析。
+- Layered direct 的严格模型输出 adapter 位于
+  `app/contracts/layered_direct_glsl.py`；Initial 返回完整 Layered Spec，
+  Refine 只返回一个绑定父对象和目标 Layer hash 的 replace-layer Patch。
 - Renderer、Evaluator、Optimizer 和 Store 只通过 ShaderForge typed 子包公共入口使用。
 - `shader_graph_runtime.py` 沿用现有 12 节点拓扑：感知阶段直接产出 ShaderDocument fallback（`fallback_shader_graph`），产品热路径不再经过 MinScene 中间转换；模型文档与 fallback 都经真实 Compiler/Renderer 仲裁。参数优化按稳定 node/layer block 工作，结构 Patch 每轮只分配一个 raw draw 并严格回滚。
 - `current_best` 使用冻结 `ShaderGraphCandidateSnapshot`，Prepared handle 只保存在 `MinRendererRegistry` 的 run-scoped program cache。`finalize` 输出权威 `shader-graph.json`、specialized WebGL1 GLSL、Render、metrics 和 manifest。

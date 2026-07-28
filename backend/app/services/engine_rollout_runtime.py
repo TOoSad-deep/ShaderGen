@@ -25,8 +25,8 @@ from agent.app.services.layerplan_glsl_direct import (
     LayerPlanGlslDirectConfig,
     create_owned_layerplan_glsl_direct_runner,
 )
-from agent.app.services.layerplan_glsl_shadow_suite import (
-    current_direct_glsl_implementation_identity,
+from agent.app.services.layerplan_glsl_direct import (
+    current_layered_direct_glsl_implementation_identity as current_direct_glsl_implementation_identity,
 )
 from agent.app.services.png_to_shader_min import (
     MIN_QUALITY_BUDGETS,
@@ -459,6 +459,16 @@ def _private_program_spec(result: DirectAttemptResult) -> dict[str, Any] | None:
     }
 
 
+def _private_layered_shader_spec(
+    result: DirectAttemptResult,
+) -> dict[str, Any] | None:
+    """返回最佳候选的 canonical Layered 作者表示，仅写私有 attempt."""
+    best = result.current_best
+    if best is None:
+        return None
+    return best.layered_spec.to_dict()
+
+
 def _claim_private_attempt(
     *,
     store: LocalArtifactStore,
@@ -504,6 +514,9 @@ def _write_private_failure(
             "status": "failed",
             "failure_code": failure_code,
             "safe_summary": result.to_safe_summary() if result is not None else None,
+            "diagnostics": (
+                result.to_private_diagnostics() if result is not None else []
+            ),
         },
     )
 
@@ -521,6 +534,10 @@ def _write_private_direct_attempt(
         raise EngineAttemptFailure("direct_attempt_inconclusive")
     run = store.resolve_run(str(context.attempt_id))
     run.write_json("private/layer-plan.json", _private_layer_plan(result))
+    run.write_json(
+        "private/layered-shader-spec.json",
+        _private_layered_shader_spec(result),
+    )
     run.write_json("private/program-spec.json", _private_program_spec(result))
     run.write_text("private/shader.frag", best.spec.fragment_source)
     run.write_bytes("private/render.png", best.png_bytes, content_type="image/png")
@@ -542,10 +559,14 @@ def _write_private_direct_attempt(
             "attempt_index": context.attempt_index,
             "engine": context.engine,
             "representation": context.representation,
+            "authoring_representation": "layered_shader_spec_v1",
             "artifact_scope": context.artifact_scope,
+            "layered_spec_sha256": (best.layered_spec.layered_spec_sha256),
+            "compiled_spec_sha256": best.spec.spec_sha256,
             "safe_summary": result.to_safe_summary(),
             "files": [
                 "layer-plan.json",
+                "layered-shader-spec.json",
                 "program-spec.json",
                 "shader.frag",
                 "render.png",

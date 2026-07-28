@@ -279,7 +279,11 @@ def validate_shader(
         (r"\bwhile\s*\(", "unbounded_loop", "V1 禁止 while 循环。"),
         (r"\bdo\s*\{", "unbounded_loop", "V1 禁止 do/while 循环。"),
         (r"\bfor\s*\(\s*;\s*;", "unbounded_loop", "V1 禁止无条件 for 循环。"),
-        (r"/\s*(?:0+(?:\.0*)?|\.0+)\b", "literal_divide_by_zero", "存在字面量除零。"),
+        (
+            r"/\s*(?:0+(?:\.0+)?|\.0+)(?![0-9.])",
+            "literal_divide_by_zero",
+            "存在字面量除零。",
+        ),
         (
             r"\bnormalize\s*\(\s*vec[234]\s*\(\s*0(?:\.0+)?\s*\)\s*\)",
             "normalize_zero",

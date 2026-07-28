@@ -1,51 +1,160 @@
 """LayerPlan + direct GLSL 的单 engine attempt 执行内核.
 
 本模块只负责一次隔离的 direct attempt：生成 advisory ``LayerPlanV1``，
-执行 direct Initial/Refine，并复用 shadow Arm B 已验证的 canonical safety、
-真实 Renderer receipt、metric、严格 incumbent 选择与预算语义。它不运行
-Arm A，不写 Artifact，也不接 Graph、Backend/API 或产品 ``current_best``。
+执行 Layered Initial/单 Layer Refine、确定性编译为 ``ShaderProgramSpecV1``，
+再走 canonical safety、真实 Renderer receipt、metric 与严格 incumbent 选择。
+它不运行 shadow A/B、不写 Artifact，也不接 Graph 或 Backend/API。
 """
 
 from __future__ import annotations
 
 import itertools
+import json
+import re
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 from typing import Any, Literal
 
 import numpy as np
 from PIL import Image
 
-from agent.app.contracts.layerplan_glsl_shadow import LayerPlanV1
+from agent.app.contracts.layered_direct_glsl import (
+    layer_patch_json_schema,
+    layered_shader_spec_json_schema,
+)
+from agent.app.contracts.layerplan_glsl_shadow import (
+    LayerPlanV1,
+    layer_plan_json_schema,
+)
 from agent.app.contracts.llm import LLMGateway
 from agent.app.llms.gateway import LangChainLLMGateway
+from agent.app.nodes.layered_direct.authors import (
+    DEFAULT_LAYER_PATCH_MAX_OUTPUT_TOKENS,
+    DEFAULT_LAYERED_INITIAL_MAX_OUTPUT_TOKENS,
+    DIRECT_LAYERED_INITIAL_PROMPT,
+    DIRECT_LAYERED_REFINE_PROMPT,
+    DIRECT_LAYERED_REPAIR_PROMPT,
+    ValidatedLayeredIncumbent,
+    run_initial_layered_glsl_author,
+    run_refine_layered_glsl_author,
+)
+from agent.app.nodes.layerplan_glsl_shadow.authors import (
+    DEFAULT_PLAN_MAX_OUTPUT_TOKENS,
+    VISUAL_ANALYSIS_PROMPT,
+    run_visual_analysis_author,
+)
+from agent.app.nodes.png_to_shader_min.model_author import MAX_STRUCTURED_ATTEMPTS
 from agent.app.services.layerplan_glsl_shadow import (
     ARM_B,
     INCONCLUSIVE_CODES,
     REQUESTED_SAMPLING_PARAMS,
     ArmLedger,
-    ArmResult,
-    LayerPlanGlslShadowRunner,
     PlanLedger,
     ShadowABConfig,
-    ShadowCandidate,
     ShadowRenderer,
     border_background,
     decode_reference,
     derive_canvas,
 )
-from shaderforge.evaluation import MIN_SCENE_METRIC_VERSION
+from shaderforge.contracts import WEBGL1_STATIC_NO_TEXTURE_V1
+from shaderforge.evaluation import (
+    MIN_SCENE_METRIC_VERSION,
+    dominant_metric_component,
+    evaluate_min_scene,
+    summarize_spatial_residual,
+)
+from shaderforge.layered_spec import (
+    LAYER_PATCH_V1_SCHEMA_VERSION,
+    LAYERED_COMPILER_VERSION,
+    LAYERED_SHADER_SPEC_V1_SCHEMA_VERSION,
+    LayeredShaderSpecV1,
+    LayeredSpecError,
+    apply_layer_patch,
+    compile_layered_shader,
+)
 from shaderforge.program_spec import (
+    TRUSTED_VALIDATOR_VERSION,
+    AttestationError,
+    ShaderProgramSpecV1,
     TrustedReceiptVerifier,
     canonical_json,
+    is_executable,
+    issue_attestation,
+    process_receipt_verifier,
 )
-from shaderforge.rendering import PlaywrightWebGL1Renderer
+from shaderforge.rendering import (
+    PlaywrightWebGL1Renderer,
+    RendererUnavailableError,
+    ShaderPreparationError,
+)
+from shaderforge.validation import ProgramSpecSafetyLimits, validate_program_spec_safety
 
 DIRECT_ATTEMPT_RESULT_SCHEMA_VERSION = "direct_glsl_attempt_result_v1"
 DIRECT_ENGINE_ID = "direct_glsl_layerplan_v1"
 DIRECT_REPRESENTATION = "shader_program_spec_v1"
+LAYERED_AUTHORING_REPRESENTATION = LAYERED_SHADER_SPEC_V1_SCHEMA_VERSION
+LAYERED_IMPLEMENTATION_IDENTITY_SCHEMA_VERSION = "direct_layered_glsl_implementation_v1"
+LAYERED_PARSER_POLICY_VERSION = "direct_layered_author_parser_v1"
+
+
+def current_layered_direct_glsl_implementation_identity() -> dict[str, Any]:
+    """返回当前产品 Layered direct GLSL 的稳定运行契约身份."""
+    prompts = {}
+    for role, prompt in (
+        ("visual_analysis", VISUAL_ANALYSIS_PROMPT),
+        ("layered_initial", DIRECT_LAYERED_INITIAL_PROMPT),
+        ("layered_refine", DIRECT_LAYERED_REFINE_PROMPT),
+        ("layered_repair", DIRECT_LAYERED_REPAIR_PROMPT),
+    ):
+        prompts[role] = {
+            "name": prompt.name,
+            "version": prompt.version,
+            "prompt_sha256": sha256(prompt.prompt.encode("utf-8")).hexdigest(),
+        }
+    body: dict[str, Any] = {
+        "schema_version": LAYERED_IMPLEMENTATION_IDENTITY_SCHEMA_VERSION,
+        "parser_policy_version": LAYERED_PARSER_POLICY_VERSION,
+        "layered_compiler_version": LAYERED_COMPILER_VERSION,
+        "authoring_representation": LAYERED_AUTHORING_REPRESENTATION,
+        "execution_representation": DIRECT_REPRESENTATION,
+        "layered_spec_schema_version": LAYERED_SHADER_SPEC_V1_SCHEMA_VERSION,
+        "layer_patch_schema_version": LAYER_PATCH_V1_SCHEMA_VERSION,
+        "trusted_validator_version": TRUSTED_VALIDATOR_VERSION,
+        "layer_plan_json_schema_sha256": sha256(
+            canonical_json(layer_plan_json_schema()).encode("utf-8")
+        ).hexdigest(),
+        "layered_spec_json_schema_sha256": sha256(
+            canonical_json(layered_shader_spec_json_schema()).encode("utf-8")
+        ).hexdigest(),
+        "layer_patch_json_schema_sha256": sha256(
+            canonical_json(layer_patch_json_schema()).encode("utf-8")
+        ).hexdigest(),
+        "author_limits": {
+            "plan_max_output_tokens": DEFAULT_PLAN_MAX_OUTPUT_TOKENS,
+            "layered_initial_max_output_tokens": (
+                DEFAULT_LAYERED_INITIAL_MAX_OUTPUT_TOKENS
+            ),
+            "layer_patch_max_output_tokens": DEFAULT_LAYER_PATCH_MAX_OUTPUT_TOKENS,
+            "max_structured_attempts": MAX_STRUCTURED_ATTEMPTS,
+        },
+        "prompts": prompts,
+        "renderer_contract_id": WEBGL1_STATIC_NO_TEXTURE_V1.contract_id,
+        "renderer_contract_sha256": sha256(
+            canonical_json(WEBGL1_STATIC_NO_TEXTURE_V1.to_dict()).encode("utf-8")
+        ).hexdigest(),
+        "program_spec_safety_limits": asdict(ProgramSpecSafetyLimits()),
+    }
+    normalized = json.loads(canonical_json(body))
+    if not isinstance(
+        normalized, dict
+    ):  # pragma: no cover - canonical object invariant
+        raise TypeError("layered implementation identity must be an object")
+    normalized["identity_sha256"] = sha256(
+        canonical_json(normalized).encode("utf-8")
+    ).hexdigest()
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -192,6 +301,25 @@ class DirectEngineIdentity:
 
 
 @dataclass(frozen=True)
+class DirectCandidate:
+    """一次成功 draw 的 Layered 源表示与编译后 ProgramSpec 不可变快照."""
+
+    layered_spec: LayeredShaderSpecV1
+    spec: ShaderProgramSpecV1
+    role: Literal["initial", "refine"]
+    sequence: int
+    rgb_bytes: bytes
+    png_bytes: bytes
+    mae: float
+    loss: float
+    metrics: dict[str, Any]
+    residual_summary: dict[str, Any]
+    parent_layered_spec_sha256: str | None
+    patched_layer_id: str | None
+    provenance: str = "model_generated_layered_direct_glsl"
+
+
+@dataclass(frozen=True)
 class DirectAttemptResult:
     """一次 direct attempt 的不可变内存结果.
 
@@ -213,10 +341,11 @@ class DirectAttemptResult:
     canvas_width: int
     canvas_height: int
     layer_plan: LayerPlanV1 | None
-    current_best: ShadowCandidate | None
-    candidates: tuple[ShadowCandidate, ...]
+    current_best: DirectCandidate | None
+    candidates: tuple[DirectCandidate, ...]
     plan_ledger: DirectPlanLedger
     direct_ledger: DirectLedger
+    private_diagnostics: tuple[dict[str, Any], ...] = ()
 
     def to_safe_summary(self) -> dict[str, Any]:
         """返回可直接 ``json.dumps`` 的安全摘要，不暴露私有执行内容."""
@@ -248,6 +377,7 @@ class DirectAttemptResult:
             ),
             "current_best": (
                 {
+                    "layered_spec_sha256": (best.layered_spec.layered_spec_sha256),
                     "spec_sha256": best.spec.spec_sha256,
                     "source_sha256": best.spec.source_sha256,
                     "binding_sha256": best.spec.binding_sha256,
@@ -268,6 +398,7 @@ class DirectAttemptResult:
                     "mae": best.mae,
                     "role": best.role,
                     "sequence": best.sequence,
+                    "patched_layer_id": best.patched_layer_id,
                 }
                 if best is not None
                 else None
@@ -277,11 +408,66 @@ class DirectAttemptResult:
             "direct_ledger": self.direct_ledger.to_dict(),
         }
 
+    def to_private_diagnostics(self) -> list[dict[str, Any]]:
+        """返回仅供私有 attempt 使用的脱敏阶段诊断."""
+        return [dict(item) for item in self.private_diagnostics]
 
-def _safe_failure_codes(arm: ArmResult) -> tuple[str, ...]:
+
+def _safe_compile_diagnostics(compile_result: Any) -> dict[str, object]:
+    """把 Renderer 编译诊断收敛为不含源码或原始日志的摘要."""
+
+    def log_hash(value: str) -> str | None:
+        return sha256(value.encode("utf-8")).hexdigest() if value else None
+
+    return {
+        "success": bool(compile_result.success),
+        "vertex_log_present": bool(compile_result.vertex_log),
+        "fragment_log_present": bool(compile_result.fragment_log),
+        "link_log_present": bool(compile_result.link_log),
+        "vertex_log_sha256": log_hash(compile_result.vertex_log),
+        "fragment_log_sha256": log_hash(compile_result.fragment_log),
+        "link_log_sha256": log_hash(compile_result.link_log),
+        "static_violation_categories": [
+            {"code": item.code, "line": item.line}
+            for item in compile_result.static_validation.violations
+            if item.severity == "error"
+        ][:12],
+    }
+
+
+def _accumulate_token_usage(
+    current_total: int | None,
+    observed_total: int | None,
+    *,
+    call_count: int,
+) -> int | None:
+    if call_count == 0:
+        return current_total
+    if current_total is None or observed_total is None:
+        return None
+    return current_total + observed_total
+
+
+def _program_cache_key(spec: ShaderProgramSpecV1) -> tuple[Any, ...]:
+    schema_signature = tuple(
+        sorted((item.name, item.type) for item in spec.uniform_schema)
+    )
+    return (
+        spec.source_sha256,
+        schema_signature,
+        spec.canvas.width,
+        spec.canvas.height,
+        spec.renderer_contract_id,
+    )
+
+
+def _safe_failure_codes(
+    events: list[dict[str, Any]],
+    failure_code: str | None,
+) -> tuple[str, ...]:
     """把内部错误收敛为预声明安全码，绝不泄露 provider/validator 原文."""
     codes: list[str] = []
-    for event in arm.events:
+    for event in events:
         if event.get("ok") is not False:
             continue
         raw = event.get("error_code")
@@ -293,13 +479,66 @@ def _safe_failure_codes(arm: ArmResult) -> tuple[str, ...]:
             code = "author_output_invalid"
         if code not in codes:
             codes.append(code)
-    if arm.inconclusive_code is not None and arm.inconclusive_code not in codes:
-        codes.insert(0, arm.inconclusive_code)
+    if failure_code is not None and failure_code not in codes:
+        codes.insert(0, failure_code)
     return tuple(codes)
 
 
+def _private_diagnostic_events(
+    events: list[dict[str, Any]],
+) -> tuple[dict[str, Any], ...]:
+    """只保留稳定错误码、规则类别和行号，不泄露源码或 provider 原文."""
+    diagnostics: list[dict[str, Any]] = []
+    for event in events:
+        if event.get("ok") is not False:
+            continue
+        item: dict[str, Any] = {
+            "sequence": event.get("sequence"),
+            "kind": event.get("kind"),
+            "error_code": event.get("error_code"),
+        }
+        violations = event.get("violations")
+        if isinstance(violations, list):
+            item["violation_codes"] = [
+                str(code) for code in violations if isinstance(code, str)
+            ][:16]
+        compile_diagnostics = event.get("diagnostics")
+        if isinstance(compile_diagnostics, dict):
+            categories = compile_diagnostics.get("static_violation_categories")
+            if isinstance(categories, list):
+                item["static_violation_categories"] = [
+                    {
+                        "code": category.get("code"),
+                        "line": category.get("line"),
+                    }
+                    for category in categories
+                    if isinstance(category, dict)
+                ][:16]
+            for key in (
+                "vertex_log_sha256",
+                "fragment_log_sha256",
+                "link_log_sha256",
+            ):
+                value = compile_diagnostics.get(key)
+                if isinstance(value, str):
+                    item[key] = value
+        detail = event.get("detail")
+        if isinstance(detail, str) and re.fullmatch(r"[a-z0-9_]{1,128}", detail):
+            item["detail"] = detail
+        diagnostics.append(item)
+    return tuple(diagnostics)
+
+
+def _normalize_author_failure(error_code: str | None) -> str:
+    if error_code in INCONCLUSIVE_CODES:
+        return str(error_code)
+    if isinstance(error_code, str) and error_code.startswith("llm_"):
+        return "llm_invocation_failed"
+    return "author_output_invalid"
+
+
 class LayerPlanGlslDirectRunner:
-    """只运行 LayerPlan + direct Initial/Refine 的隔离单 engine runner."""
+    """运行 LayerPlan、Layered Initial/Refine 与完整 ProgramSpec 渲染."""
 
     def __init__(
         self,
@@ -312,12 +551,170 @@ class LayerPlanGlslDirectRunner:
     ) -> None:
         """注入 attempt-local Gateway、Renderer、预算与 receipt 信任根."""
         self._config = config
-        self._engine = LayerPlanGlslShadowRunner(
-            gateway=gateway,
-            renderer=renderer,
-            config=config.to_shadow_config(),
-            clock=clock,
-            receipt_issuer=receipt_issuer,
+        self._gateway = gateway
+        self._renderer = renderer
+        self._clock = clock
+        self._receipt_issuer = receipt_issuer or process_receipt_verifier()
+
+    async def _render_candidate(
+        self,
+        *,
+        layered_spec: LayeredShaderSpecV1,
+        compiled_spec: ShaderProgramSpecV1,
+        role: Literal["initial", "refine"],
+        sequence: int,
+        parent_layered_spec_sha256: str | None,
+        patched_layer_id: str | None,
+        target_rgb: np.ndarray,
+        background: tuple[float, float, float],
+        ledger: ArmLedger,
+        events: list[dict[str, Any]],
+        program_cache: dict[tuple[Any, ...], Any],
+    ) -> DirectCandidate | None:
+        """校验、真实 draw、签发 attestation 并计算整图指标."""
+        started = self._clock()
+
+        def reject(error_code: str, **extra: Any) -> None:
+            ledger.rejected_candidates += 1
+            events.append(
+                {
+                    "sequence": sequence,
+                    "kind": role,
+                    "ok": False,
+                    "error_code": error_code,
+                    "layered_spec_sha256": layered_spec.layered_spec_sha256,
+                    "spec_sha256": compiled_spec.spec_sha256,
+                    **extra,
+                }
+            )
+
+        static_result = validate_program_spec_safety(compiled_spec)
+        if not static_result.valid:
+            reject(
+                "static_validation_failed",
+                violations=[item.code for item in static_result.violations],
+            )
+            return None
+
+        cache_key = _program_cache_key(compiled_spec)
+        prepared = program_cache.get(cache_key)
+        cache_hit = prepared is not None
+        if prepared is not None:
+            ledger.cache_hits += 1
+        else:
+            if ledger.compile_count >= self._config.compile_budget:
+                reject("compile_budget_exhausted")
+                return None
+            ledger.compile_count += 1
+            uniform_schema = {
+                item.name: item.type for item in compiled_spec.uniform_schema
+            }
+            try:
+                prepared = await self._renderer.prepare(
+                    compiled_spec.fragment_source,
+                    compiled_spec.canvas.width,
+                    compiled_spec.canvas.height,
+                    uniform_schema,
+                )
+            except ShaderPreparationError as exc:
+                ledger.wall_clock_ms += (self._clock() - started) * 1000.0
+                reject(
+                    "compile_or_link_failed",
+                    diagnostics=_safe_compile_diagnostics(exc.compile_result),
+                )
+                return None
+            except (RendererUnavailableError, ValueError, OSError) as exc:
+                ledger.wall_clock_ms += (self._clock() - started) * 1000.0
+                reject("renderer_unavailable", detail=type(exc).__name__)
+                return None
+            program_cache[cache_key] = prepared
+
+        try:
+            if ledger.draw_count >= self._config.draw_budget:
+                reject("draw_budget_exhausted")
+                return None
+            ledger.draw_count += 1
+            draw = await prepared.render_uniforms(
+                dict(compiled_spec.uniform_values),
+                capture_png=True,
+                receipt_spec_sha256=compiled_spec.spec_sha256,
+            )
+            ledger.wall_clock_ms += (self._clock() - started) * 1000.0
+            if not draw.success or draw.rgb_bytes is None or draw.image_bytes is None:
+                reject("draw_failed", draw_error=draw.draw_error)
+                return None
+        except (RendererUnavailableError, ValueError, OSError) as exc:
+            ledger.wall_clock_ms += (self._clock() - started) * 1000.0
+            reject("renderer_unavailable", detail=type(exc).__name__)
+            return None
+
+        receipt = draw.execution_receipt
+        if receipt is None:
+            reject("static_validation_failed", detail="receipt_missing")
+            return None
+        required_runtime = ("browser_version", "gl_version", "glsl_version")
+        if (
+            sha256(draw.rgb_bytes).hexdigest() != receipt.rgb_sha256
+            or receipt.png_sha256 is None
+            or sha256(draw.image_bytes).hexdigest() != receipt.png_sha256
+            or any(not receipt.runtime_metadata.get(key) for key in required_runtime)
+        ):
+            reject("static_validation_failed", detail="receipt_pixel_mismatch")
+            return None
+        try:
+            attested = compiled_spec.with_attestation(
+                issue_attestation(
+                    compiled_spec,
+                    receipt=receipt,
+                    static_ok=True,
+                    issuer=self._receipt_issuer,
+                )
+            )
+        except AttestationError as exc:
+            reject("static_validation_failed", detail=exc.code)
+            return None
+        if not is_executable(attested, issuer=self._receipt_issuer):
+            reject("static_validation_failed", detail="attestation_mismatch")
+            return None
+
+        rendered = (
+            np.frombuffer(draw.rgb_bytes, dtype=np.uint8)
+            .reshape(compiled_spec.canvas.height, compiled_spec.canvas.width, 3)
+            .astype(np.float32)
+            / 255.0
+        )
+        metric = evaluate_min_scene(target_rgb, rendered, background)
+        residual_summary = summarize_spatial_residual(target_rgb, rendered)
+        residual_summary["dominant_metric_component"] = dominant_metric_component(
+            metric
+        )
+        events.append(
+            {
+                "sequence": sequence,
+                "kind": role,
+                "ok": True,
+                "layered_spec_sha256": layered_spec.layered_spec_sha256,
+                "spec_sha256": attested.spec_sha256,
+                "patched_layer_id": patched_layer_id,
+                "loss": metric.total_loss,
+                "mae": metric.global_mae,
+                "validator_version": TRUSTED_VALIDATOR_VERSION,
+                "cache_hit": cache_hit,
+            }
+        )
+        return DirectCandidate(
+            layered_spec=layered_spec,
+            spec=attested,
+            role=role,
+            sequence=sequence,
+            rgb_bytes=draw.rgb_bytes,
+            png_bytes=draw.image_bytes,
+            mae=metric.global_mae,
+            loss=metric.total_loss,
+            metrics=metric.to_dict(),
+            residual_summary=residual_summary,
+            parent_layered_spec_sha256=parent_layered_spec_sha256,
+            patched_layer_id=patched_layer_id,
         )
 
     async def run(
@@ -343,31 +740,229 @@ class LayerPlanGlslDirectRunner:
         target_rgb = np.asarray(image, dtype=np.float32) / 255.0
         background = border_background(target_rgb)
         sequence_counter = itertools.count(1)
-        arm = ArmResult(
-            arm_id=ARM_B,
-            status="inconclusive",
-            inconclusive_code=None,
-            ledger=ArmLedger(ARM_B),
-            layer_plan_sha256=None,
-        )
-        layer_plan = await self._engine.execute_layerplan_direct_arm(
-            arm,
-            next_sequence=lambda: next(sequence_counter),
+        plan_ledger = PlanLedger()
+        ledger = ArmLedger(ARM_B)
+        events: list[dict[str, Any]] = []
+        candidates: list[DirectCandidate] = []
+        current_best: DirectCandidate | None = None
+        failure_code: str | None = None
+
+        plan_sequence = next(sequence_counter)
+        remaining_plan_calls = config.plan_llm_budget - plan_ledger.llm_call_count
+        plan_started = self._clock()
+        plan_result = await run_visual_analysis_author(
+            gateway=self._gateway,
             reference_image=reference_image,
             content_type=content_type,
-            instruction=instruction,
-            canvas_width=canvas_width,
-            canvas_height=canvas_height,
-            target_rgb=target_rgb,
-            background=background,
+            user_instruction=instruction,
+            remaining_calls=remaining_plan_calls,
         )
-        plan_ledger = arm.plan_ledger
-        assert plan_ledger is not None
-        failure_code = arm.inconclusive_code if arm.status != "ok" else None
+        plan_ledger.wall_clock_ms += (self._clock() - plan_started) * 1000.0
+        plan_ledger.llm_call_count += plan_result.call_count
+        plan_ledger.total_tokens = _accumulate_token_usage(
+            plan_ledger.total_tokens,
+            plan_result.total_tokens,
+            call_count=plan_result.call_count,
+        )
+        plan_ledger.repair_count += 1 if plan_result.repaired else 0
+        layer_plan = plan_result.plan
+        events.append(
+            {
+                "sequence": plan_sequence,
+                "kind": "visual_analysis",
+                "ok": layer_plan is not None,
+                "error_code": plan_result.error_code,
+                "repaired": plan_result.repaired,
+                "call_count": plan_result.call_count,
+            }
+        )
+        if layer_plan is None:
+            failure_code = "layer_plan_generation_failed"
+        else:
+            program_cache: dict[tuple[Any, ...], Any] = {}
+            try:
+                initial_sequence = next(sequence_counter)
+                remaining = config.direct_author_llm_budget - ledger.llm_call_count
+                started = self._clock()
+                initial = await run_initial_layered_glsl_author(
+                    gateway=self._gateway,
+                    reference_image=reference_image,
+                    content_type=content_type,
+                    user_instruction=instruction,
+                    layer_plan=layer_plan,
+                    canvas_width=canvas_width,
+                    canvas_height=canvas_height,
+                    remaining_calls=remaining,
+                )
+                ledger.wall_clock_ms += (self._clock() - started) * 1000.0
+                ledger.llm_call_count += initial.call_count
+                ledger.total_tokens = _accumulate_token_usage(
+                    ledger.total_tokens,
+                    initial.total_tokens,
+                    call_count=initial.call_count,
+                )
+                ledger.repair_count += 1 if initial.repaired else 0
+                if initial.layered_spec is None:
+                    ledger.rejected_candidates += 1
+                    failure_code = _normalize_author_failure(initial.error_code)
+                    events.append(
+                        {
+                            "sequence": initial_sequence,
+                            "kind": "initial",
+                            "ok": False,
+                            "error_code": failure_code,
+                            "detail": initial.error_code,
+                            "repaired": initial.repaired,
+                            "call_count": initial.call_count,
+                        }
+                    )
+                else:
+                    try:
+                        compiled = compile_layered_shader(initial.layered_spec)
+                    except LayeredSpecError as exc:
+                        ledger.rejected_candidates += 1
+                        failure_code = "static_validation_failed"
+                        events.append(
+                            {
+                                "sequence": initial_sequence,
+                                "kind": "initial",
+                                "ok": False,
+                                "error_code": failure_code,
+                                "detail": exc.code,
+                            }
+                        )
+                    else:
+                        candidate = await self._render_candidate(
+                            layered_spec=initial.layered_spec,
+                            compiled_spec=compiled,
+                            role="initial",
+                            sequence=initial_sequence,
+                            parent_layered_spec_sha256=None,
+                            patched_layer_id=None,
+                            target_rgb=target_rgb,
+                            background=background,
+                            ledger=ledger,
+                            events=events,
+                            program_cache=program_cache,
+                        )
+                        if candidate is None:
+                            failure_code = str(
+                                events[-1].get("error_code", "no_valid_candidate")
+                            )
+                        else:
+                            candidates.append(candidate)
+                            current_best = candidate
+                            ledger.accepted_candidates += 1
+
+                if current_best is not None:
+                    failure_code = None
+                    for _ in range(config.refine_budget):
+                        refine_sequence = next(sequence_counter)
+                        remaining = (
+                            config.direct_author_llm_budget - ledger.llm_call_count
+                        )
+                        started = self._clock()
+                        refine = await run_refine_layered_glsl_author(
+                            gateway=self._gateway,
+                            reference_image=reference_image,
+                            current_render=current_best.png_bytes,
+                            content_type=content_type,
+                            user_instruction=instruction,
+                            incumbent=ValidatedLayeredIncumbent(
+                                layered_spec=current_best.layered_spec,
+                                compiled_program_spec=current_best.spec,
+                                mae=current_best.mae,
+                                loss=current_best.loss,
+                                metrics=dict(current_best.metrics),
+                                residual_summary=dict(current_best.residual_summary),
+                            ),
+                            layer_plan=layer_plan,
+                            remaining_calls=remaining,
+                        )
+                        ledger.wall_clock_ms += (self._clock() - started) * 1000.0
+                        ledger.llm_call_count += refine.call_count
+                        ledger.total_tokens = _accumulate_token_usage(
+                            ledger.total_tokens,
+                            refine.total_tokens,
+                            call_count=refine.call_count,
+                        )
+                        ledger.repair_count += 1 if refine.repaired else 0
+                        if refine.patch is None or refine.author_identity is None:
+                            ledger.rejected_candidates += 1
+                            refine_failure = _normalize_author_failure(
+                                refine.error_code
+                            )
+                            events.append(
+                                {
+                                    "sequence": refine_sequence,
+                                    "kind": "refine",
+                                    "ok": False,
+                                    "error_code": refine_failure,
+                                    "detail": refine.error_code,
+                                    "repaired": refine.repaired,
+                                    "call_count": refine.call_count,
+                                }
+                            )
+                            continue
+                        parent_layered_spec_sha256 = (
+                            current_best.layered_spec.layered_spec_sha256
+                        )
+                        try:
+                            refined_layered = apply_layer_patch(
+                                current_best.layered_spec,
+                                refine.patch,
+                                refine.author_identity,
+                            )
+                            refined_compiled = compile_layered_shader(refined_layered)
+                        except LayeredSpecError as exc:
+                            ledger.rejected_candidates += 1
+                            events.append(
+                                {
+                                    "sequence": refine_sequence,
+                                    "kind": "refine",
+                                    "ok": False,
+                                    "error_code": "author_output_invalid",
+                                    "detail": exc.code,
+                                }
+                            )
+                            continue
+                        candidate = await self._render_candidate(
+                            layered_spec=refined_layered,
+                            compiled_spec=refined_compiled,
+                            role="refine",
+                            sequence=refine_sequence,
+                            parent_layered_spec_sha256=(parent_layered_spec_sha256),
+                            patched_layer_id=refine.patch.target_layer_id,
+                            target_rgb=target_rgb,
+                            background=background,
+                            ledger=ledger,
+                            events=events,
+                            program_cache=program_cache,
+                        )
+                        if candidate is None:
+                            continue
+                        candidates.append(candidate)
+                        if candidate.loss < current_best.loss:
+                            current_best = candidate
+                            ledger.accepted_candidates += 1
+                        else:
+                            ledger.rejected_candidates += 1
+            finally:
+                for prepared in program_cache.values():
+                    try:
+                        await prepared.close()
+                    except Exception:  # noqa: BLE001 - 释放失败不掩盖结论
+                        pass
+
+        status: Literal["ok", "inconclusive"] = (
+            "ok" if current_best is not None else "inconclusive"
+        )
+        if status == "inconclusive" and failure_code is None:
+            failure_code = "no_valid_candidate"
         return DirectAttemptResult(
-            status=arm.status,
+            status=status,
             failure_code=failure_code,
-            safety_failure_codes=_safe_failure_codes(arm),
+            safety_failure_codes=_safe_failure_codes(events, failure_code),
             identity=DirectEngineIdentity(
                 implementation_identity_sha256=(config.implementation_identity_sha256)
             ),
@@ -379,10 +974,11 @@ class LayerPlanGlslDirectRunner:
             canvas_width=canvas_width,
             canvas_height=canvas_height,
             layer_plan=layer_plan,
-            current_best=arm.current_best,
-            candidates=tuple(arm.candidates),
+            current_best=current_best,
+            candidates=tuple(candidates),
             plan_ledger=DirectPlanLedger.from_mutable(plan_ledger),
-            direct_ledger=DirectLedger.from_mutable(arm.ledger),
+            direct_ledger=DirectLedger.from_mutable(ledger),
+            private_diagnostics=_private_diagnostic_events(events),
         )
 
 
@@ -428,6 +1024,9 @@ __all__ = [
     "DIRECT_ATTEMPT_RESULT_SCHEMA_VERSION",
     "DIRECT_ENGINE_ID",
     "DIRECT_REPRESENTATION",
+    "LAYERED_AUTHORING_REPRESENTATION",
+    "LAYERED_IMPLEMENTATION_IDENTITY_SCHEMA_VERSION",
+    "DirectCandidate",
     "DirectAttemptResult",
     "DirectEngineIdentity",
     "DirectLedger",
@@ -436,4 +1035,5 @@ __all__ = [
     "LayerPlanGlslDirectRunner",
     "OwnedLayerPlanGlslDirectRunner",
     "create_owned_layerplan_glsl_direct_runner",
+    "current_layered_direct_glsl_implementation_identity",
 ]

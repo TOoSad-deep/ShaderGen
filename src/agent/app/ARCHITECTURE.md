@@ -5,8 +5,9 @@
 ```text
 默认 direct:
   services/layerplan_glsl_direct.py
-    -> nodes/layerplan_glsl_shadow/
-    -> shaderforge.program_spec / rendering / evaluation
+    -> nodes/layerplan_glsl_shadow/（VisualAnalysis）
+    -> nodes/layered_direct/（Initial/Refine）
+    -> shaderforge.layered_spec -> program_spec / rendering / evaluation
 
 服务端显式选择 ShaderGraph:
   services/png_to_shader_min.py
@@ -18,7 +19,8 @@
 - `contracts/`：LLM 与最小 Scene/Patch 契约。
 - `llms/`：Gateway 和 provider/model-family 适配。
 - `graphs/`：显式 ShaderGraph engine 的 Graph Builder、节点/边和路由。
-- `nodes/`：`png_to_shader_min` Graph Node，以及 direct/shadow 共用的有界 Author helper。
+- `nodes/`：`png_to_shader_min` Graph Node、Layered direct Author helper，以及
+  direct/shadow 共用的 VisualAnalysis helper。
 - `prompts/`、`parsers/`、`messages/`：模型输入输出边界。
 - `states/`：`PngToShaderMinState`。
 - `services/`：对 Backend 的稳定 Graph Service、direct runner 和隔离 attempt 支持。

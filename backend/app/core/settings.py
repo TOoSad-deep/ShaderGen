@@ -64,11 +64,7 @@ def _require_disjoint_artifact_roots(
     """拒绝相同或任一方向嵌套的公开/私有 Artifact 根."""
     first = _resolved_artifact_root(first_path)
     second = _resolved_artifact_root(second_path)
-    if (
-        first == second
-        or first.is_relative_to(second)
-        or second.is_relative_to(first)
-    ):
+    if first == second or first.is_relative_to(second) or second.is_relative_to(first):
         raise ValueError(
             f"{first_name} 与 {second_name} 必须是彼此隔离、互不嵌套的目录。"
         )
@@ -189,11 +185,11 @@ class BackendSettings:
         )
         promotion_verification = None
         if not kill_switch_active and policy.stage in {"canary", "direct_default"}:
-            from agent.app.services.layerplan_glsl_shadow_suite import (
-                current_direct_glsl_implementation_identity,
+            from agent.app.services.layerplan_glsl_direct import (
+                current_layered_direct_glsl_implementation_identity,
             )
 
-            identity = current_direct_glsl_implementation_identity().get(
+            identity = current_layered_direct_glsl_implementation_identity().get(
                 "identity_sha256"
             )
             promotion_verification = verify_runtime_promotion_authorization(

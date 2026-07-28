@@ -117,6 +117,13 @@ class _FakeDirectResult:
         self.failure_code = None if ok else "author_output_invalid"
         self.current_best = (
             SimpleNamespace(
+                layered_spec=SimpleNamespace(
+                    layered_spec_sha256="d" * 64,
+                    to_dict=lambda: {
+                        "schema_version": "layered_shader_spec_v1",
+                        "layered_spec_sha256": "d" * 64,
+                    },
+                ),
                 spec=spec,
                 png_bytes=_PNG,
                 mae=0.1,
@@ -160,6 +167,15 @@ class _FakeDirectResult:
                 "implementation_identity_sha256": _IDENTITY,
             },
         }
+
+    def to_private_diagnostics(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "sequence": 2,
+                "kind": "initial",
+                "error_code": self.failure_code,
+            }
+        ]
 
 
 class _FakeDirectRunner:
@@ -462,6 +478,11 @@ async def test_runtime_direct_success_publishes_and_reads_parent_only(
         json.loads(private.read_bytes("private/program-spec.json"))["fragment_source"]
         == "void main() {}"
     )
+    layered = json.loads(private.read_bytes("private/layered-shader-spec.json"))
+    assert layered["schema_version"] == "layered_shader_spec_v1"
+    manifest = json.loads(private.read_bytes("private/manifest.json"))
+    assert manifest["authoring_representation"] == "layered_shader_spec_v1"
+    assert manifest["layered_spec_sha256"] == "d" * 64
     with pytest.raises(FileNotFoundError):
         public.artifacts.resolve_run(str(attempt))
     _assert_private_permissions(tmp_path / "private")
@@ -550,6 +571,7 @@ async def test_runtime_direct_failure_uses_fresh_private_direct_retry(
         ).read_bytes("private/failure-summary.json")
     )
     assert failure["failure_code"] == "author_output_invalid"
+    assert failure["diagnostics"][0]["kind"] == "initial"
     assert "private-instruction" not in json.dumps(failure)
     assert runtime.artifacts.private_attempt_store.resolve_run(str(retry))
     with pytest.raises(FileNotFoundError):

@@ -15,10 +15,11 @@ from agent.app.services.layerplan_glsl_direct import (
 from shaderforge.program_spec import is_executable
 
 _shadow_fakes: Any = import_module("tests.unit_tests.test_layerplan_glsl_shadow_runner")
-_FakeGateway = _shadow_fakes._FakeGateway
 _FakeRenderer = _shadow_fakes._FakeRenderer
 _TEST_ISSUER = _shadow_fakes._TEST_ISSUER
 _reference_png = _shadow_fakes._reference_png
+_direct_fakes: Any = import_module("tests.unit_tests.test_layerplan_glsl_direct_runner")
+_LayeredFakeGateway = _direct_fakes._LayeredFakeGateway
 
 
 @pytest.mark.anyio
@@ -26,7 +27,7 @@ async def test_fake_llm_renderer_direct_chain_retains_private_canonical_result()
     None
 ):
     """覆盖 plan → Initial → safety → receipt → metric → immutable result."""
-    gateway = _FakeGateway()
+    gateway = _LayeredFakeGateway()
     renderer = _FakeRenderer()
     runner = LayerPlanGlslDirectRunner(
         gateway=gateway,

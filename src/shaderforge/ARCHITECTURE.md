@@ -8,6 +8,7 @@ ShaderForge 是不依赖 FastAPI、LangChain 或 React 的确定性领域核心�
 - `perception/`：参考图确定性感知与 fallback MinScene，产品 Author 前转换为 ShaderDocument。
 - `generation/`：固定 WebGL1 模板、typed uniform 和 baked GLSL。
 - `program_spec/`：默认 direct engine 与历史 shadow Harness 共用的唯一 canonical LayerPlan/ShaderProgramSpec、内容哈希、可信身份绑定与执行 attestation；不依赖 Agent 或模型 SDK。
+- `layered_spec/`：把 LayerPlan 一一映射为 Layer 级 direct GLSL 源表示，提供可信哈希、replace-one-layer Patch 和确定性单 Pass ProgramSpec Compiler。
 - `rendering/`：Playwright/Chromium WebGL1、prepared uniform 热渲染和 run-scoped 有界多 program registry。
 - `evaluation/`：`min_scene_composite_v3` 与空间残差。
 - `optimization/`：有界 base/feature/patch 候选。

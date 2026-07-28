@@ -15,6 +15,7 @@ from agent.app.services.layerplan_glsl_direct import (
     DirectAttemptResult,
     LayerPlanGlslDirectConfig,
     LayerPlanGlslDirectRunner,
+    current_layered_direct_glsl_implementation_identity,
 )
 from agent.app.services.layerplan_glsl_shadow import ShadowABConfigError
 
@@ -23,9 +24,106 @@ _FakeGateway = _shadow_fakes._FakeGateway
 _FakeRenderer = _shadow_fakes._FakeRenderer
 _TEST_ISSUER = _shadow_fakes._TEST_ISSUER
 _reference_png = _shadow_fakes._reference_png
-_spec_payload = _shadow_fakes._spec_payload
+CANVAS = _shadow_fakes.CANVAS
 
 IMPLEMENTATION_SHA256 = "a" * 64
+
+
+def _layered_payload(gain: float) -> str:
+    return json.dumps(
+        {
+            "schema_version": "layered_shader_spec_v1",
+            "canvas": {"width": CANVAS, "height": CANVAS},
+            "layers": [
+                {
+                    "layer_id": "bg",
+                    "role": "background",
+                    "z_index": 0,
+                    "glsl_body": "return vec4(vec3(u_gain), 1.0);",
+                    "uniform_schema": {
+                        "u_gain": {
+                            "type": "float",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                            "default": 0.5,
+                        }
+                    },
+                    "uniform_values": {"u_gain": gain},
+                    "tunable_manifest": [
+                        {
+                            "path": "u_gain",
+                            "type": "float",
+                            "minimum": 0.0,
+                            "maximum": 1.0,
+                            "step": 0.01,
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+
+def _tagged_json(messages: Any, label: str) -> dict[str, Any]:
+    opening = f"<{label}>"
+    closing = f"</{label}>"
+    for part in messages[1].content:
+        if not isinstance(part, dict):
+            continue
+        text = str(part.get("text", ""))
+        if opening not in text:
+            continue
+        payload = text.split(opening, 1)[1].split(closing, 1)[0]
+        value = json.loads(payload)
+        assert isinstance(value, dict)
+        return value
+    raise AssertionError(f"missing tagged JSON: {label}")
+
+
+class _LayeredFakeGateway(_FakeGateway):
+    """复用 shadow fake 的调用身份，并为 Refine 动态回显可信 Patch guard."""
+
+    def __init__(
+        self,
+        *,
+        initial_gains: tuple[float, ...] = (0.5,),
+        refine_gains: tuple[float, ...] = (0.5,),
+    ) -> None:
+        super().__init__(
+            initial_responses=[_layered_payload(value) for value in initial_gains],
+            refine_responses=["unused"],
+        )
+        self._refine_gains = list(refine_gains)
+
+    async def ainvoke(self, messages: Any, options: Any) -> Any:
+        system_text = str(messages[0].content)
+        if "direct layered GLSL Refine Author" in system_text:
+            incumbent = _tagged_json(messages, "current_best_layered_spec")
+            layers = incumbent["layers"]
+            assert isinstance(layers, list) and layers
+            target = layers[0]
+            assert isinstance(target, dict)
+            gain = (
+                self._refine_gains.pop(0)
+                if len(self._refine_gains) > 1
+                else self._refine_gains[0]
+            )
+            patch = {
+                "schema_version": "layer_patch_v1",
+                "base_layered_spec_sha256": incumbent["layered_spec_sha256"],
+                "target_layer_id": target["layer_id"],
+                "expected_layer_sha256": target["layer_sha256"],
+                "replacement": json.loads(_layered_payload(gain))["layers"][0],
+            }
+            self._queues[("refine", False)] = [json.dumps(patch)]
+        return await super().ainvoke(messages, options)
+
+
+class _LayeredRepairGateway(_FakeGateway):
+    async def ainvoke(self, messages: Any, options: Any) -> Any:
+        if "只修复 ShaderGen direct layered 作者" in str(messages[0].content):
+            self._last_text = None
+        return await super().ainvoke(messages, options)
 
 
 async def _run(
@@ -51,16 +149,26 @@ def test_direct_config_requires_trusted_implementation_identity() -> None:
         LayerPlanGlslDirectConfig(implementation_identity_sha256="unknown")
 
 
+def test_layered_direct_implementation_identity_is_content_addressed() -> None:
+    identity = current_layered_direct_glsl_implementation_identity()
+
+    assert identity["schema_version"] == "direct_layered_glsl_implementation_v1"
+    assert identity["authoring_representation"] == "layered_shader_spec_v1"
+    assert identity["execution_representation"] == DIRECT_REPRESENTATION
+    assert identity == current_layered_direct_glsl_implementation_identity()
+    assert len(identity["identity_sha256"]) == 64
+
+
 @pytest.mark.anyio
 async def test_direct_runner_runs_only_layerplan_and_arm_b_initial() -> None:
-    gateway = _FakeGateway()
+    gateway = _LayeredFakeGateway()
     renderer = _FakeRenderer()
     result = await _run(gateway, renderer)
 
     assert result.status == "ok"
     assert [call["role"] for call in gateway.calls] == ["plan", "initial"]
     initial_text = str(gateway.calls[1]["messages"][1].content)
-    assert "<layer_plan_advisory>" in initial_text
+    assert "<canonical_layer_plan>" in initial_text
     assert result.identity.engine_id == DIRECT_ENGINE_ID
     assert result.identity.representation == DIRECT_REPRESENTATION
     assert result.layer_plan is not None
@@ -75,7 +183,7 @@ async def test_direct_runner_runs_only_layerplan_and_arm_b_initial() -> None:
 
 @pytest.mark.anyio
 async def test_plan_failure_never_starts_direct_author_or_renderer() -> None:
-    gateway = _FakeGateway()
+    gateway = _LayeredFakeGateway()
     renderer = _FakeRenderer()
     result = await _run(
         gateway,
@@ -103,7 +211,7 @@ async def test_plan_failure_never_starts_direct_author_or_renderer() -> None:
 
 @pytest.mark.anyio
 async def test_initial_failure_is_safe_and_has_no_candidate() -> None:
-    gateway = _FakeGateway(initial_responses_b=["not-json"])
+    gateway = _FakeGateway(initial_responses=["not-json"])
     renderer = _FakeRenderer()
     result = await _run(gateway, renderer)
 
@@ -117,10 +225,57 @@ async def test_initial_failure_is_safe_and_has_no_candidate() -> None:
 
 
 @pytest.mark.anyio
+async def test_initial_structural_repair_receives_bound_plan_schema() -> None:
+    gateway = _LayeredRepairGateway(
+        initial_responses=["not-json"],
+        repair_responses=[_layered_payload(0.5)],
+    )
+    result = await _run(gateway, _FakeRenderer())
+
+    assert result.status == "ok"
+    assert [call["role"] for call in gateway.calls] == [
+        "plan",
+        "initial",
+        "repair",
+    ]
+    assert result.direct_ledger.repair_count == 1
+    assert gateway.calls[1]["options"].max_output_tokens == 8192
+    repair_payload = str(gateway.calls[2]["messages"][1].content)
+    assert '"prefixItems"' in repair_payload
+    assert '"safe_repair_hints"' in repair_payload
+    assert '"layer_id":"bg"' in repair_payload
+
+
+@pytest.mark.anyio
+async def test_static_failure_keeps_private_rule_diagnostics_only() -> None:
+    payload = json.loads(_layered_payload(0.5))
+    payload["layers"][0]["glsl_body"] = (
+        "float value = 0.0;"
+        " for (float i = 0.0; i < 4.0; i += 1.0) { value += 0.1; }"
+        " return vec4(vec3(value), 1.0);"
+    )
+    result = await _run(
+        _FakeGateway(initial_responses=[json.dumps(payload)]),
+        _FakeRenderer(),
+    )
+
+    assert result.failure_code == "static_validation_failed"
+    assert result.to_private_diagnostics() == [
+        {
+            "sequence": 2,
+            "kind": "initial",
+            "error_code": "static_validation_failed",
+            "violation_codes": ["unbounded_loop"],
+        }
+    ]
+    assert "glsl_body" not in json.dumps(result.to_private_diagnostics())
+
+
+@pytest.mark.anyio
 async def test_worse_refine_keeps_incumbent_and_closes_program() -> None:
-    gateway = _FakeGateway(
-        initial_responses_b=[_spec_payload(0.5)],
-        refine_responses_b=[_spec_payload(0.9)],
+    gateway = _LayeredFakeGateway(
+        initial_gains=(0.5,),
+        refine_gains=(0.9,),
     )
     renderer = _FakeRenderer()
     result = await _run(
@@ -146,9 +301,32 @@ async def test_worse_refine_keeps_incumbent_and_closes_program() -> None:
 
 
 @pytest.mark.anyio
+async def test_better_single_layer_refine_replaces_incumbent() -> None:
+    gateway = _LayeredFakeGateway(
+        initial_gains=(0.9,),
+        refine_gains=(0.5,),
+    )
+    result = await _run(
+        gateway,
+        _FakeRenderer(),
+        LayerPlanGlslDirectConfig(
+            implementation_identity_sha256=IMPLEMENTATION_SHA256,
+            refine_budget=1,
+        ),
+    )
+
+    assert result.status == "ok"
+    assert result.current_best is result.candidates[1]
+    assert result.current_best.role == "refine"
+    assert result.current_best.patched_layer_id == "bg"
+    assert result.current_best.spec.uniform_values["u_gain"] == 0.5
+    assert result.direct_ledger.accepted_candidates == 2
+
+
+@pytest.mark.anyio
 async def test_receipt_failure_never_forms_current_best_and_closes_program() -> None:
     renderer = _FakeRenderer(receipt_mode="missing")
-    result = await _run(_FakeGateway(), renderer)
+    result = await _run(_LayeredFakeGateway(), renderer)
 
     assert result.status == "inconclusive"
     assert result.failure_code == "static_validation_failed"
@@ -157,6 +335,14 @@ async def test_receipt_failure_never_forms_current_best_and_closes_program() -> 
     assert result.direct_ledger.compile_count == 1
     assert result.direct_ledger.draw_count == 1
     assert renderer.close_count == 1
+    assert result.to_private_diagnostics() == [
+        {
+            "sequence": 2,
+            "kind": "initial",
+            "error_code": "static_validation_failed",
+            "detail": "receipt_missing",
+        }
+    ]
 
 
 @pytest.mark.anyio
@@ -176,7 +362,7 @@ async def test_renderer_budget_ceiling_fails_closed_and_releases_resources(
 ) -> None:
     renderer = _FakeRenderer()
     result = await _run(
-        _FakeGateway(),
+        _LayeredFakeGateway(),
         renderer,
         LayerPlanGlslDirectConfig(
             implementation_identity_sha256=IMPLEMENTATION_SHA256,
@@ -201,7 +387,7 @@ async def test_renderer_budget_ceiling_fails_closed_and_releases_resources(
 async def test_budget_ledgers_are_independent_and_safe_summary_is_json_only() -> None:
     renderer = _FakeRenderer()
     result = await _run(
-        _FakeGateway(),
+        _LayeredFakeGateway(),
         renderer,
         LayerPlanGlslDirectConfig(
             implementation_identity_sha256=IMPLEMENTATION_SHA256,
@@ -225,6 +411,10 @@ async def test_budget_ledgers_are_independent_and_safe_summary_is_json_only() ->
     assert result.current_best.spec.fragment_source not in encoded
     assert result.current_best.png_bytes.hex() not in encoded
     assert "layer_plan_advisory" not in encoded
+    assert (
+        summary["current_best"]["layered_spec_sha256"]
+        == result.current_best.layered_spec.layered_spec_sha256
+    )
     current_best_summary = summary["current_best"]
     assert isinstance(current_best_summary, dict)
     assert current_best_summary["spec_sha256"] == (result.current_best.spec.spec_sha256)

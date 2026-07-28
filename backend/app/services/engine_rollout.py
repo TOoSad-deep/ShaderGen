@@ -18,8 +18,8 @@ from agent.app.services.engine_rollout_artifacts import (
     Representation,
     SelectedEngineArtifacts,
 )
-from agent.app.services.layerplan_glsl_shadow_suite import (
-    current_direct_glsl_implementation_identity,
+from agent.app.services.layerplan_glsl_direct import (
+    current_layered_direct_glsl_implementation_identity as current_direct_glsl_implementation_identity,
 )
 from backend.app.core.engine_policy import (
     EnginePolicyResolution,

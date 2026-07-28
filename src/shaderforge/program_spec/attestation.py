@@ -25,7 +25,7 @@ from shaderforge.program_spec.receipt import (
     process_receipt_verifier,
 )
 
-TRUSTED_VALIDATOR_VERSION = "program_spec_validator_v1"
+TRUSTED_VALIDATOR_VERSION = "program_spec_validator_v1_1"
 REQUIRED_CHECKS = (
     "schema_static_safety",
     "webgl1_compile",
