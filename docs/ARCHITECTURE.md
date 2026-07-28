@@ -1,105 +1,41 @@
-# ShaderGen 当前架构
+# Architecture
 
-本文只描述默认产品链路和稳定边界。休眠实现仍可能存在于代码中，但不构成当前任务或完成条件。
-
-## 产品链路
+## Current request path
 
 ```text
-Frontend React
-  -> Backend parent run
-  -> direct_default（无 policy 文件时的默认值）
-     -> direct child
-        -> VisualAnalysis Author -> advisory LayerPlan
-        -> Initial Layered Author / 单 Layer Refine Patch
-        -> canonical LayeredShaderSpecV1
-        -> 确定性 Layer Compiler -> ShaderProgramSpecV1
-        -> 静态校验 -> WebGL1 prepare/draw -> metric
-     -> direct 失败时 fresh direct child（最多重试一次）
-        -> 独立 Runner / Renderer / cache / 预算 / 私有 Store
-  -> 选中 child 的 final-render / metrics / manifest
+POST /api/shader/generate
+  → project lock + optional process ledger
+  → direct-only parent coordinator
+  → up to 3 fresh isolated attempts
+      → visual LayerPlan author
+      → Layered Initial author
+      → deterministic compile
+      → static validation
+      → WebGL1 prepare/link/draw
+      → receipt + attestation
+      → optional single-layer Refine
+  → atomic parent Artifact publication
+  → API response
 ```
 
-`SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 可让新请求直接使用 ShaderGraph。客户端、HTTP 参数、instruction 和任何 `VITE_*` 都不能选择 engine。
+## Ownership
 
-## 组件边界
+- `src/agent/app/nodes/layered_direct/`: model calls and structured repair.
+- `src/agent/app/services/layerplan_glsl_direct.py`: one isolated attempt.
+- `src/shaderforge/layered_spec/`: Layered models, patching and compiler.
+- `src/shaderforge/program_spec/`: canonical execution IR, hashes and attestations.
+- `src/shaderforge/validation/`: static WebGL1 safety checks.
+- `src/shaderforge/rendering/`: real WebGL1 preparation and drawing.
+- `backend/app/services/engine_rollout*.py`: three-attempt coordination and
+  parent publication.
 
-- `frontend/`：上传、进度、实际 engine/attempt、Render、GLSL 和失败信息。
-- `backend/`：HTTP、parent/child attempt 编排、进度、过程账本和生命周期。
-- `src/agent/`：LLM Gateway、direct Author/Runner、显式 ShaderGraph engine、Prompt、Parser 和 State。
-- `src/shaderforge/`：ProgramSpec、ShaderGraph、静态校验、WebGL1 渲染、评分、优化和 Artifact。
-- `src/nodelab/`：独立可选 Node 调试工具，不进入产品 Backend。
+## Artifact boundary
 
-Backend 只能通过 `agent.app.services.*` 调用 Agent。Agent 不持有数据库连接池；ShaderForge 不依赖 FastAPI、LangChain 或 React。
+Child attempts write detailed LayerPlan, Layered spec, ProgramSpec and diagnostics
+to the private attempt root. Only the selected attempt is promoted to the public
+parent root, which exposes `render.png`, `metrics.json` and `manifest.json`.
 
-## Direct GLSL
+## Deliberately absent
 
-Direct engine 使用三个有界 Author：
-
-1. VisualAnalysis 读取参考图和 instruction，生成 advisory `LayerPlanV1`。
-2. Initial 生成与 Plan 层一一对应的 `LayeredShaderSpecV1`。
-3. Compiler 确定性生成 Renderer 消费的完整 `ShaderProgramSpecV1`。
-4. Refine 根据参考图、当前 Render、metric 和可信 incumbent，只返回一个
-   `LayerPatchV1`；应用后重新编译和整图验收。
-
-LayerPlan 不直接参与安全校验、评分或接受判断，但其稳定 Layer ID 会贯通到
-Layered Spec 和 Patch。模型只维护 Layer 级语义；`shaderforge.layered_spec`
-负责 Layer 哈希、Patch 和编译，`shaderforge.program_spec` 负责最终执行契约
-与 attestation。候选必须通过 WebGL1 静态规则并真实 prepare/draw，只有
-Renderer receipt 绑定的像素和整图 metric 可以更新 attempt-local
-`current_best`。
-
-Direct 成功时：
-
-- `engine=direct_glsl_layerplan_v1`
-- `representation=shader_program_spec_v1`
-- `min_pipeline.scene=null`
-- `renderer_path=direct_program_spec_v1`
-
-完整 LayerPlan、Layered Spec、编译后 ProgramSpec、Prompt、Render bytes 和
-原始错误只保存在私有 attempt 边界。
-
-## ShaderGraph engine
-
-`langgraph.json` 只注册 `png_to_shader_min`。模型或感知产生的 ShaderDocument 必须经 specialized Compiler、真实 WebGL1 渲染和复合评分；候选只有 strict total-loss 改善时才能提交。
-
-服务端 policy 或 kill switch 明确将 ShaderGraph 选为主 engine 时，成功结果为：
-
-- `engine=shader_graph_v1`
-- `representation=shader_document_v1`
-- `min_pipeline.scene` 为 `shader_graph_v1`
-- `renderer_path=compiled_graph_program_cache_v1`
-
-完整拓扑和路由见 `src/agent/app/graphs/ARCHITECTURE.md`。
-
-## Parent run 与公开 Artifact
-
-每个 HTTP `run_id` 是 parent run。每个 child attempt 使用独立 Runner、Renderer、cache、预算和私有 Store。Direct attempt 内先执行有界结构修复；仍失败时只能创建一个新的 direct attempt，不能切换表示或自动调用 ShaderGraph。两次 direct attempt 都失败时，parent 以 `direct_attempts_failed` 结束。
-
-公开 Artifact 仅包括：
-
-```text
-GET /api/shader/runs/{run_id}/artifacts/final-render
-GET /api/shader/runs/{run_id}/artifacts/metrics
-GET /api/shader/runs/{run_id}/artifacts/manifest
-```
-
-API 通过 `engine`、`representation`、`engine_run` 报告实际结果。`POST /api/shader/generate` 当前阻塞执行；`RunProgressRegistry` 是进程内状态，重启即失。
-
-## 有界等待
-
-`src/shaderforge/config/runtime_timeouts.yaml` 是模型、Renderer、engine attempt 和前端等待的唯一默认配置源：
-
-- 模型单次 HTTP 默认 3600 秒，Renderer prepare/draw 默认 300/120 秒。
-- 每个 direct、显式 ShaderGraph 或 production-shadow attempt 默认 7200 秒。
-- 前端 fast/balanced/high/manual POST 默认 5/6/8/12 小时，进度 GET 60 秒，POST 后观察 2 小时。
-
-Python 与 Vite 都严格校验正有限数、未知字段和内外层覆盖关系。更长等待不提供服务端取消，也不允许无限 timeout。
-
-## 安全与休眠能力
-
-- 图片、完整 GLSL、ProgramSpec、Prompt 和模型原始响应不得进入普通日志。
-- 密钥只在服务端 `.env` 或部署 Secret；`VITE_*` 只能保存公开配置。
-- Memory/checkpoint、PostgreSQL 旧数据、shadow/A-B、promotion、canary 和 evidence 相关实现当前休眠。
-- 休眠能力只在用户明确发起对应任务时读取其最近模块文档；历史设计从 `docs/archive/` 精确追溯。
-
-Graph 拓扑变化的同步和验证规则以根 `AGENTS.md` 为唯一流程来源。
+There is no alternate engine, compatibility fallback, graph runtime, shadow
+experiment, promotion policy or visual node laboratory in the product runtime.

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import FrozenInstanceError
-from importlib import import_module
 from typing import Any
 
 import pytest
@@ -17,14 +16,21 @@ from agent.app.services.layerplan_glsl_direct import (
     LayerPlanGlslDirectRunner,
     current_layered_direct_glsl_implementation_identity,
 )
-from agent.app.services.layerplan_glsl_shadow import ShadowABConfigError
-
-_shadow_fakes: Any = import_module("tests.unit_tests.test_layerplan_glsl_shadow_runner")
-_FakeGateway = _shadow_fakes._FakeGateway
-_FakeRenderer = _shadow_fakes._FakeRenderer
-_TEST_ISSUER = _shadow_fakes._TEST_ISSUER
-_reference_png = _shadow_fakes._reference_png
-CANVAS = _shadow_fakes.CANVAS
+from tests.direct_fakes import (
+    CANVAS,
+)
+from tests.direct_fakes import (
+    TEST_ISSUER as _TEST_ISSUER,
+)
+from tests.direct_fakes import (
+    FakeGateway as _FakeGateway,
+)
+from tests.direct_fakes import (
+    FakeRenderer as _FakeRenderer,
+)
+from tests.direct_fakes import (
+    reference_png as _reference_png,
+)
 
 IMPLEMENTATION_SHA256 = "a" * 64
 
@@ -64,6 +70,21 @@ def _layered_payload(gain: float) -> str:
     )
 
 
+def _layered_payload_above_program_spec_uniform_defaults() -> str:
+    payload = json.loads(_layered_payload(0.5))
+    layer = payload["layers"][0]
+    for index in range(17):
+        name = f"u_extra_{index}"
+        layer["uniform_schema"][name] = {
+            "type": "vec4",
+            "minimum": [0.0, 0.0, 0.0, 0.0],
+            "maximum": [1.0, 1.0, 1.0, 1.0],
+            "default": [0.5, 0.5, 0.5, 0.5],
+        }
+        layer["uniform_values"][name] = [0.5, 0.5, 0.5, 0.5]
+    return json.dumps(payload)
+
+
 def _tagged_json(messages: Any, label: str) -> dict[str, Any]:
     opening = f"<{label}>"
     closing = f"</{label}>"
@@ -81,7 +102,7 @@ def _tagged_json(messages: Any, label: str) -> dict[str, Any]:
 
 
 class _LayeredFakeGateway(_FakeGateway):
-    """复用 shadow fake 的调用身份，并为 Refine 动态回显可信 Patch guard."""
+    """复用当前 fake 调用身份，并为 Refine 动态回显可信 Patch guard."""
 
     def __init__(
         self,
@@ -145,7 +166,7 @@ async def _run(
 
 
 def test_direct_config_requires_trusted_implementation_identity() -> None:
-    with pytest.raises(ShadowABConfigError, match="SHA-256"):
+    with pytest.raises(ValueError, match="sha256"):
         LayerPlanGlslDirectConfig(implementation_identity_sha256="unknown")
 
 
@@ -179,6 +200,23 @@ async def test_direct_runner_runs_only_layerplan_and_arm_b_initial() -> None:
     assert result.direct_ledger.llm_call_count == 1
     assert result.plan_ledger.llm_call_count == 1
     assert renderer.close_count == 1
+
+
+@pytest.mark.anyio
+async def test_layered_direct_defers_uniform_capacity_to_renderer() -> None:
+    gateway = _FakeGateway(
+        initial_responses=[_layered_payload_above_program_spec_uniform_defaults()]
+    )
+    renderer = _FakeRenderer()
+
+    result = await _run(gateway, renderer)
+
+    assert result.status == "ok"
+    assert result.current_best is not None
+    assert len(result.current_best.spec.uniform_schema) == 18
+    assert result.direct_ledger.compile_count == 1
+    assert result.direct_ledger.draw_count == 1
+    assert len(renderer.prepare_calls) == 1
 
 
 @pytest.mark.anyio

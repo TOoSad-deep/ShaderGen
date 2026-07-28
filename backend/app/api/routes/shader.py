@@ -18,7 +18,6 @@ from backend.app.services.run_progress import RunProgressRegistry
 from backend.app.services.shader import (
     ProjectLockRegistry,
     PublicArtifactNotFoundError,
-    get_default_png_to_shader_min_service,
     read_shader_run_artifact,
 )
 from backend.app.services.shader_generation import (
@@ -74,9 +73,7 @@ async def read_image_upload(file: UploadFile) -> bytes:
 
 def _runtime(request: Request) -> tuple[Any | None, ProjectLockRegistry]:
     locks = getattr(request.app.state, "project_locks", None)
-    service = getattr(request.app.state, "png_to_shader_min_service", None)
-    if service is None:
-        service = get_default_png_to_shader_min_service()
+    service = getattr(request.app.state, "shader_runtime", None)
     if locks is None:
         locks = ProjectLockRegistry()
         request.app.state.project_locks = locks
@@ -157,19 +154,9 @@ async def generate_shader(
     )
     dependencies = ShaderGenerationDependencies(
         pool=getattr(request.app.state, "db_pool", None),
-        min_service=service,
+        runtime=service,
         locks=locks,
         progress=_progress_registry(request),
-        engine_rollout_service=getattr(
-            request.app.state,
-            "engine_rollout_service",
-            None,
-        ),
-        production_shadow=getattr(
-            request.app.state,
-            "production_shadow_coordinator",
-            None,
-        ),
     )
     try:
         return await execute_shader_generation(command, dependencies)
@@ -220,26 +207,14 @@ async def get_shader_run_artifact(
 ) -> Response:
     """下载 final-render、metrics 或 manifest 三种白名单产物."""
     service, _locks = _runtime(request)
-    rollout_service = getattr(request.app.state, "engine_rollout_service", None)
     if service is None:
-        raise HTTPException(status_code=503, detail="scene_mvp 服务尚未就绪。")
+        raise HTTPException(status_code=503, detail="Direct 服务尚未就绪。")
     try:
-        try:
-            artifact = await read_shader_run_artifact(
-                str(run_id),
-                artifact_name,
-                service=rollout_service or service,
-            )
-        except PublicArtifactNotFoundError:
-            if rollout_service is None:
-                raise
-            # canary 进程仍需读取切换前的 v1 父 run；fallback 只访问公开旧
-            # store，private child 使用另一根目录且不会被该 reader 解析。
-            artifact = await read_shader_run_artifact(
-                str(run_id),
-                artifact_name,
-                service=service,
-            )
+        artifact = await read_shader_run_artifact(
+            str(run_id),
+            artifact_name,
+            service=service,
+        )
     except (PublicArtifactNotFoundError, ValueError) as exc:
         raise HTTPException(status_code=404, detail="未找到该运行产物。") from exc
     return Response(

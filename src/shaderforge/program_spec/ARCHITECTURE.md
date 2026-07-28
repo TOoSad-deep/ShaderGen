@@ -5,10 +5,8 @@
 ## 真相层级定位
 
 - LayerPlanV1 是视觉分析 Author 对参考图的结构化分层解读，永久 advisory，不参与 scorer、acceptance 与 `current_best`。
-- ShaderProgramSpecV1 是 Renderer 消费并经安全校验的执行真相。默认 direct
-  路径由 `shaderforge.layered_spec` 确定性编译生成；历史 shadow 仍可从模型
-  语义装配。它绝不能由 `CompiledDslShader`/`GraphProgramKey` 派生或反向
-  构造；本包不 import legacy DSL 与 Graph registry。
+- ShaderProgramSpecV1 是 Renderer 消费并经安全校验的执行真相，只能由
+  `shaderforge.layered_spec` 根据当前 Layered Spec 确定性编译生成。
 
 ## 防伪边界（fail-closed）
 
@@ -31,6 +29,6 @@
 
 ## 边界
 
-- 本包纯确定性、纯 stdlib，不发起模型调用、不触碰浏览器与 Graph。
+- 本包纯确定性、纯 stdlib，不发起模型调用，也不触碰浏览器。
 - uniform 优化只能沿 `tunable_manifest` 修改 `uniform_values`；源码/拓扑变化必须是新 Spec 并重新全量校验。
 - 静态校验不是 GLSL 编译器，真实 compile/link/draw 结论必须由可信执行环境注入。

@@ -1,7 +1,6 @@
 """Default direct layered GLSL Initial/Refine Author helpers.
 
-此模块独立于休眠的 ``layerplan_glsl_shadow`` 作者。两个 helper 都复用
-``invoke_min_author`` 的有界调用/结构修复、Gateway 的 effective identity，
+两个 helper 复用当前通用有界调用/结构修复、Gateway 的 effective identity，
 并将模型 JSON 交给 layered-spec 可信层装配；不会输出或信任模型自报身份。
 """
 
@@ -30,9 +29,9 @@ from agent.app.messages.structured_multimodal import (
     multimodal_human_message,
     text_part,
 )
-from agent.app.nodes.png_to_shader_min.model_author import (
-    MinAuthorCallResult,
-    invoke_min_author,
+from agent.app.nodes.layered_direct.structured_author import (
+    StructuredAuthorCallResult,
+    invoke_structured_author,
 )
 from agent.app.prompts.prompt_loader import load_prompt_definition
 from shaderforge.layered_spec import LayeredSpecError
@@ -95,7 +94,9 @@ class RefineLayeredAuthorResult:
     total_tokens: int | None = None
 
 
-def _effective_identity(result: MinAuthorCallResult) -> EffectiveCallIdentity | None:
+def _effective_identity(
+    result: StructuredAuthorCallResult,
+) -> EffectiveCallIdentity | None:
     identity = result.effective_identity
     return identity if identity is not None and identity.model_ref.strip() else None
 
@@ -224,7 +225,7 @@ async def run_initial_layered_glsl_author(
         text_part("expected_json_schema", schema),
         *labeled_image_parts("reference_image", reference_image, content_type),
     ]
-    result = await invoke_min_author(
+    result = await invoke_structured_author(
         gateway=gateway,
         messages=[
             SystemMessage(content=DIRECT_LAYERED_INITIAL_PROMPT.prompt),
@@ -309,7 +310,7 @@ async def run_refine_layered_glsl_author(
             "current_render", current_render, current_render_content_type
         ),
     ]
-    result = await invoke_min_author(
+    result = await invoke_structured_author(
         gateway=gateway,
         messages=[
             SystemMessage(content=DIRECT_LAYERED_REFINE_PROMPT.prompt),

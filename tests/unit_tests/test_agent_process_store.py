@@ -249,7 +249,7 @@ async def test_scene_mvp_success_does_not_fabricate_model_call_event() -> None:
         glsl_chars=42,
         events=(
             {
-                "stage": "render_and_evaluate",
+                "stage": "direct_glsl",
                 "event_type": "scene_mvp_completed",
                 "payload": {"duration_ms": 4.0},
             },
@@ -369,7 +369,7 @@ async def test_agent_process_store_persists_failure_diagnostics() -> None:
         error=RuntimeError("PRIVATE_PROVIDER_RESPONSE"),
         stop_reason="wall_time_exhausted",
         diagnostics={
-            "failure_stage": "author_initial",
+            "failure_stage": "direct_glsl",
             "failure_error_type": "TimeoutError",
             "candidate_count": 0,
         },
@@ -383,7 +383,7 @@ async def test_agent_process_store_persists_failure_diagnostics() -> None:
     assert json.loads(log_args[5]) == {
         "error_type": "RuntimeError",
         "stop_reason": "wall_time_exhausted",
-        "failure_stage": "author_initial",
+        "failure_stage": "direct_glsl",
         "failure_error_type": "TimeoutError",
         "candidate_count": 0,
     }
@@ -395,7 +395,7 @@ async def test_agent_process_store_persists_failure_diagnostics() -> None:
     assert json.loads(update_args[2]) == {
         "stop_reason": "wall_time_exhausted",
         "diagnostics": {
-            "failure_stage": "author_initial",
+            "failure_stage": "direct_glsl",
             "failure_error_type": "TimeoutError",
             "candidate_count": 0,
         },
@@ -436,11 +436,11 @@ async def test_process_store_records_scene_mvp_request_and_trace() -> None:
         events=(
             {"stage": "perceive_target", "event_type": "scene_mvp_completed"},
             {
-                "stage": "render_and_evaluate",
+                "stage": "direct_glsl",
                 "event_type": "scene_mvp_completed",
                 "payload": {"current_best_loss": 0.1},
             },
-            {"stage": "finalize", "event_type": "scene_mvp_completed"},
+            {"stage": "engine_rollout", "event_type": "direct_completed"},
         ),
         result_summary={
             "generation_mode": "scene_mvp",

@@ -21,7 +21,7 @@ from shaderforge.validation import validate_program_spec_safety
 CANVAS = 32
 
 
-def _compiled_spec():
+def _compiled_spec(*, uniform_count: int = 0):
     reference_sha256 = sha256(b"layered-renderer-reference").hexdigest()
     plan = build_layer_plan(
         {
@@ -49,6 +49,23 @@ def _compiled_spec():
             prompt_version="layer-plan-smoke",
         ),
     )
+    uniform_schema = {
+        f"u_color_{index}": {
+            "type": "vec4",
+            "minimum": [0.0, 0.0, 0.0, 0.0],
+            "maximum": [1.0, 1.0, 1.0, 1.0],
+            "default": [0.25, 0.5, 0.75, 1.0],
+        }
+        for index in range(uniform_count)
+    }
+    uniform_values = {name: [0.25, 0.5, 0.75, 1.0] for name in uniform_schema}
+    glsl_body = "return vec4(0.25, 0.5, 0.75, 1.0);"
+    if uniform_schema:
+        color_sum = " + ".join(uniform_schema)
+        glsl_body = (
+            f"vec4 color = ({color_sum}) / {float(uniform_count):.1f};\n"
+            "return vec4(color.rgb, 1.0);"
+        )
     layered = build_layered_shader_spec(
         {
             "schema_version": "layered_shader_spec_v1",
@@ -58,9 +75,9 @@ def _compiled_spec():
                     "layer_id": "background",
                     "role": "background",
                     "z_index": 0,
-                    "glsl_body": "return vec4(0.25, 0.5, 0.75, 1.0);",
-                    "uniform_schema": {},
-                    "uniform_values": {},
+                    "glsl_body": glsl_body,
+                    "uniform_schema": uniform_schema,
+                    "uniform_values": uniform_values,
                     "tunable_manifest": [],
                 }
             ],
@@ -103,4 +120,33 @@ async def test_layered_spec_compiles_and_draws_on_real_webgl1() -> None:
     assert result.rgb_bytes[:3] == bytes((64, 128, 191))
     assert len(result.rgb_bytes) == CANVAS * CANVAS * 3
     assert result.image_bytes is not None
+    assert result.execution_receipt is not None
+
+
+@pytest.mark.anyio
+async def test_real_webgl1_decides_uniform_capacity_above_static_defaults() -> None:
+    spec = _compiled_spec(uniform_count=18)
+    safety = validate_program_spec_safety(spec)
+    assert {item.code for item in safety.violations} >= {
+        "too_many_uniforms",
+        "too_many_uniform_components",
+    }
+
+    async with PlaywrightWebGL1Renderer() as renderer:
+        prepared = await renderer.prepare(
+            spec.fragment_source,
+            CANVAS,
+            CANVAS,
+            {item.name: item.type for item in spec.uniform_schema},
+        )
+        result = await prepared.render_uniforms(
+            dict(spec.uniform_values),
+            capture_png=True,
+            receipt_spec_sha256=spec.spec_sha256,
+        )
+        await prepared.close()
+
+    assert result.success, result.draw_error
+    assert result.rgb_bytes is not None
+    assert result.rgb_bytes[:3] == bytes((64, 128, 191))
     assert result.execution_receipt is not None

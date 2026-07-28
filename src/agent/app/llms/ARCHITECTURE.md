@@ -17,7 +17,7 @@
 - LLMs 实现 `agent.app.contracts.llm`，不依赖业务 State、Prompt、Node、Graph 或后端。
 - Gateway 优先从响应 `model_name` / `model` 元数据构造 `LLMResponse.model_ref`；供应商未返回时才使用解析后的 provider 和配置模型名，并以 `model_identity_source` 区分 `response_metadata` 与 `configured_fallback`。
 - `LLMResponse.requested_model_ref` 保留调用方请求值，不能替代实际 `model_ref`；Node 的业务状态和 Candidate provenance 以实际值为准，同时保留请求值供审计。
-- `LLMResponse.effective_identity` 记录 Gateway 可信的**实际生效**调用身份：`provider` + 实际 `model_ref` + `model_identity_source` + `EffectiveSamplingParams`（family 工厂真实下发的 temperature/thinking/reasoning_effort/response_format/max_output_tokens）。`client_factory.resolve_effective_sampling` 按 family 行为给出事实值——kimi 记录 `temperature=1` 与 `reasoning_effort`（thinking 请求被端点忽略，记 None），qwen 记录规范化 thinking，其余 family 的 thinking 记 None；绝不回写 `LLMCallOptions` 请求假值。需要内容寻址调用身份的实验（如 shadow harness）必须在 `effective_identity` 缺失时 fail-closed。
+- `LLMResponse.effective_identity` 记录 Gateway 可信的**实际生效**调用身份：`provider` + 实际 `model_ref` + `model_identity_source` + `EffectiveSamplingParams`（family 工厂真实下发的 temperature/thinking/reasoning_effort/response_format/max_output_tokens）。`client_factory.resolve_effective_sampling` 按 family 行为给出事实值——kimi 记录 `temperature=1` 与 `reasoning_effort`（thinking 请求被端点忽略，记 None），qwen 记录规范化 thinking，其余 family 的 thinking 记 None；绝不回写 `LLMCallOptions` 请求假值。当前结构化 Author 在 `effective_identity` 缺失时必须 fail-closed。
 - model-family 私有响应字段必须在 Gateway 边界规范化，Node 不读取供应商字段。
 - `LLMCallOptions.response_format=json_object` 由各 OpenAI-compatible family 映射为请求级 JSON mode；结构化角色必须同时关闭不兼容的 thinking，普通文本节点继续使用 `text`。
 - Gateway 不输出 API key、base64 图片、完整原始响应或 reasoning 到错误字符串。

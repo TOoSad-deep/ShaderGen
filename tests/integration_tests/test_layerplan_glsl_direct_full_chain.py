@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import json
-from importlib import import_module
-from typing import Any
+from pathlib import Path
+from uuid import uuid4
 
 import pytest
 
@@ -12,14 +12,35 @@ from agent.app.services.layerplan_glsl_direct import (
     LayerPlanGlslDirectConfig,
     LayerPlanGlslDirectRunner,
 )
+from backend.app.services.engine_rollout_runtime import build_engine_rollout_runtime
 from shaderforge.program_spec import is_executable
+from shaderforge.store import LocalArtifactStore
+from tests.direct_fakes import (
+    TEST_ISSUER as _TEST_ISSUER,
+)
+from tests.direct_fakes import (
+    FakeRenderer as _FakeRenderer,
+)
+from tests.direct_fakes import (
+    reference_png as _reference_png,
+)
+from tests.unit_tests.test_layerplan_glsl_direct_runner import _LayeredFakeGateway
 
-_shadow_fakes: Any = import_module("tests.unit_tests.test_layerplan_glsl_shadow_runner")
-_FakeRenderer = _shadow_fakes._FakeRenderer
-_TEST_ISSUER = _shadow_fakes._TEST_ISSUER
-_reference_png = _shadow_fakes._reference_png
-_direct_fakes: Any = import_module("tests.unit_tests.test_layerplan_glsl_direct_runner")
-_LayeredFakeGateway = _direct_fakes._LayeredFakeGateway
+
+class _OwnedFakeRunner:
+    def __init__(self, config: LayerPlanGlslDirectConfig) -> None:
+        self._runner = LayerPlanGlslDirectRunner(
+            gateway=_LayeredFakeGateway(),
+            renderer=_FakeRenderer(),
+            config=config,
+            receipt_issuer=_TEST_ISSUER,
+        )
+
+    async def run(self, reference_image: bytes, **kwargs):
+        return await self._runner.run(reference_image, **kwargs)
+
+    async def close(self) -> None:
+        return None
 
 
 @pytest.mark.anyio
@@ -57,3 +78,32 @@ async def test_fake_llm_renderer_direct_chain_retains_private_canonical_result()
     assert result.direct_ledger.draw_count == 1
     assert renderer.close_count == 1
     json.dumps(result.to_safe_summary(), allow_nan=False)
+
+
+@pytest.mark.anyio
+async def test_runtime_progress_publishes_selected_render(tmp_path: Path) -> None:
+    runtime = build_engine_rollout_runtime(
+        public_store=LocalArtifactStore(tmp_path / "public"),
+        private_attempt_root=tmp_path / "private",
+        direct_runner_factory=_OwnedFakeRunner,
+    )
+    progress: list[tuple[dict[str, object], bytes | None]] = []
+    try:
+        await runtime.generate(
+            _reference_png(),
+            "image/png",
+            project_id=str(uuid4()),
+            run_id=str(uuid4()),
+            on_progress=lambda event, render: progress.append((event, render)),
+        )
+    finally:
+        await runtime.close()
+
+    renders = [
+        render
+        for event, render in progress
+        if event.get("phase") == "direct_completed"
+    ]
+    assert len(renders) == 1
+    assert renders[0] is not None
+    assert renders[0].startswith(b"\x89PNG\r\n\x1a\n")

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from dataclasses import replace
 from hashlib import sha256
 from typing import Any
@@ -694,45 +693,3 @@ def test_layer_plan_rejects_out_of_range_confidence() -> None:
         )
 
     assert excinfo.value.code == "out_of_domain"
-
-
-# --- 跨层类型断言：Agent shadow adapter 只输出 canonical 类型 ---
-
-
-def test_agent_shadow_adapter_returns_canonical_types() -> None:
-    """Agent 侧不得定义第二套 LayerPlanV1/ShaderProgramSpecV1 执行真相."""
-    import agent.app.contracts.layerplan_glsl_shadow as shadow_contract
-    from shaderforge.program_spec import LayerPlanV1, ShaderProgramSpecV1
-
-    assert shadow_contract.ShaderProgramSpecV1 is ShaderProgramSpecV1
-    assert shadow_contract.LayerPlanV1 is LayerPlanV1
-
-    # shadow renderer 契约禁止纹理采样，但仍要求 canonical 兼容声明。
-    model_output = _model_output()
-    model_output["fragment_source"] = (
-        "precision mediump float;\n"
-        "varying vec2 v_uv;\n"
-        "uniform sampler2D u_image;\n"
-        "uniform vec2 u_resolution;\n"
-        "uniform float u_time;\n"
-        "uniform float u_strength;\n"
-        "uniform vec3 u_color;\n"
-        "void main(){gl_FragColor=vec4(u_color * u_strength, 1.0);}\n"
-    )
-    spec = shadow_contract.assemble_program_spec(
-        shadow_contract.parse_program_spec_semantics(
-            json.dumps(model_output),
-            expected_width=512,
-            expected_height=512,
-        ),
-        author_identity=_initial_identity(),
-    )
-    assert type(spec) is ShaderProgramSpecV1
-    assert spec.spec_sha256 == recompute_spec_sha256(spec)
-
-    plan = shadow_contract.assemble_layer_plan(
-        shadow_contract.parse_layer_plan_semantics(json.dumps(_layer_output())),
-        reference_sha256=REFERENCE_SHA256,
-        author_identity=build_layer_author_identity(model_ref="m", prompt_version="p"),
-    )
-    assert type(plan) is LayerPlanV1

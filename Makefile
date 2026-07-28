@@ -1,4 +1,4 @@
-.PHONY: all setup setup-memory-postgres dev dev-agent dev-backend dev-node-lab dev-frontend check check-wheel docs-check format lint test tests test_watch integration_tests test-memory-postgres test-scene-mvp-ui docker_tests help extended_tests
+.PHONY: all setup dev dev-backend dev-frontend check check-wheel docs-check format lint test tests test_watch integration_tests docker_tests help extended_tests
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -11,20 +11,11 @@ setup:
 	uv run playwright install chromium
 	npm --prefix frontend install
 
-setup-memory-postgres:
-	uv run python scripts/setup_memory_postgres.py
-
 dev:
-	@echo 'Run one service per terminal: make dev-agent | make dev-backend | make dev-node-lab | make dev-frontend'
-
-dev-agent:
-	uv run langgraph dev
+	@echo 'Run one service per terminal: make dev-backend | make dev-frontend'
 
 dev-backend:
 	uv run uvicorn backend.app.main:app --reload --port 8088
-
-dev-node-lab:
-	uv run uvicorn nodelab.http.main:create_app --factory --reload --port 8090
 
 dev-frontend:
 	npm --prefix frontend run dev
@@ -37,18 +28,10 @@ tests: test
 integration_tests:
 	uv run pytest tests/integration_tests
 
-test-memory-postgres:
-	uv run python scripts/run_memory_postgres_test.py
-
-test-scene-mvp-ui:
-	npm --prefix frontend run e2e:scene-mvp
-
 check:
 	uv run pytest tests/unit_tests
 	uv run python scripts/docs_check.py
 	uv run python scripts/check_wheel.py
-	uv run langgraph validate
-	npm --prefix frontend run test:unit
 	npm --prefix frontend run test
 	npm --prefix frontend run build
 
@@ -82,7 +65,7 @@ lint_tests: PYTHON_FILES=tests
 lint_tests: MYPY_CACHE=.mypy_cache_test
 
 lint lint_diff lint_package lint_tests:
-	uv run ruff check .
+	uv run ruff check src backend tests scripts
 	[ "$(PYTHON_FILES)" = "" ] || uv run ruff format $(PYTHON_FILES) --diff
 	[ "$(PYTHON_FILES)" = "" ] || uv run ruff check --select I $(PYTHON_FILES)
 	[ "$(PYTHON_FILES)" = "" ] || uv run mypy --strict $(PYTHON_FILES)
@@ -105,16 +88,11 @@ spell_fix:
 help:
 	@echo '----'
 	@echo 'setup                        - install Python and frontend dependencies'
-	@echo 'setup-memory-postgres        - initialize LangGraph PostgreSQL persistence tables'
-	@echo 'dev-agent                    - run LangGraph dev server'
 	@echo 'dev-backend                  - run FastAPI backend on port 8088'
-	@echo 'dev-node-lab                 - run standalone Node Lab on port 8090'
 	@echo 'dev-frontend                 - run Vite frontend'
-	@echo 'check                        - run unit tests, docs, clean wheel, LangGraph, frontend unit tests and build'
+	@echo 'check                        - run unit tests, docs, clean wheel, frontend unit tests and build'
 	@echo 'check-wheel                  - build a clean wheel from sdist and verify package boundaries'
 	@echo 'docs-check                   - verify harness docs and architecture boundaries'
-	@echo 'test-memory-postgres         - verify Shader Memory against PostgreSQL'
-	@echo 'test-scene-mvp-ui             - verify the scene_mvp pipeline summary in isolated Chromium'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'test                         - run unit tests'

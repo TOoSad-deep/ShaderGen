@@ -131,22 +131,6 @@ export function MinRunLivePanel({
           {vm.failure.stopReasonLabel ? `（${vm.failure.stopReasonLabel}）` : ""}
         </p>
       ) : null}
-      {vm.initialAuthorSourceLabel || vm.initialSelectionSourceLabel ? (
-        <p className="min-live-basis">
-          {vm.initialAuthorSourceLabel
-            ? `Initial Author 输出来源：${vm.initialAuthorSourceLabel}`
-            : ""}
-          {vm.initialAuthorSourceLabel && vm.initialSelectionSourceLabel ? "；" : ""}
-          {vm.initialSelectionSourceLabel
-            ? `首轮 current_best 选择：${vm.initialSelectionSourceLabel}`
-            : ""}
-          {vm.refineCount ? `；本 run 记录 ${vm.refineCount} 次模型修订` : ""}
-          。以上字段只证明 Initial 阶段，不代表最终 current_best provenance；后续候选
-          仍须经真实渲染与评分严格改善，最终 GLSL 与 Render 来自冻结 current_best 的
-          typed ShaderGraph 编译产物。
-        </p>
-      ) : null}
-
       <div className="min-live-grid">
         <section className="min-live-timeline" aria-label="节点时间线">
           <h3>
@@ -174,6 +158,8 @@ export function MinRunLivePanel({
                     </>
                   ) : stage.state === "failed" ? (
                     <em>失败</em>
+                  ) : stage.state === "running" ? (
+                    <em>进行中</em>
                   ) : (
                     "待执行"
                   )}

@@ -4,7 +4,6 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from contextlib import AsyncExitStack, asynccontextmanager
-from pathlib import Path
 from typing import cast
 from uuid import uuid4
 
@@ -22,27 +21,21 @@ from backend.app.database.session import close_database_pool, open_database_pool
 from backend.app.middleware.request_logging import build_request_logging_middleware
 from backend.app.schemas.shader import ShaderGenerationErrorDetail
 from backend.app.services.engine_rollout_runtime import build_engine_rollout_runtime
-from backend.app.services.production_shadow import (
-    ProductionShadowConfig,
-    ProductionShadowCoordinator,
-)
 from backend.app.services.run_progress import RunProgressRegistry
 from backend.app.services.shader import (
     ProjectLockRegistry,
-    close_png_to_shader_min_service,
-    get_default_png_to_shader_min_service,
+    close_generation_runtime,
 )
+from shaderforge.store import LocalArtifactStore
 
 logger = logging.getLogger("backend.app")
 
 
 def _clear_runtime_state(app: FastAPI) -> None:
     """清空只在单次应用生命周期内有效的依赖."""
-    app.state.png_to_shader_min_service = None
     app.state.project_locks = None
     app.state.run_progress = None
-    app.state.production_shadow_coordinator = None
-    app.state.engine_rollout_service = None
+    app.state.shader_runtime = None
 
 
 def build_lifespan(settings: BackendSettings) -> Lifespan[FastAPI]:
@@ -53,9 +46,7 @@ def build_lifespan(settings: BackendSettings) -> Lifespan[FastAPI]:
         logger.info("backend.startup")
         app.state.project_locks = ProjectLockRegistry()
         app.state.run_progress = RunProgressRegistry()
-        app.state.png_to_shader_min_service = None
-        app.state.production_shadow_coordinator = None
-        app.state.engine_rollout_service = None
+        app.state.shader_runtime = None
         app.state.db_pool = None
         try:
             async with AsyncExitStack() as cleanup:
@@ -64,71 +55,16 @@ def build_lifespan(settings: BackendSettings) -> Lifespan[FastAPI]:
                 await open_database_pool(app, settings.database_url)
                 cleanup.push_async_callback(close_database_pool, app)
 
-                app.state.png_to_shader_min_service = (
-                    get_default_png_to_shader_min_service()
+                app.state.shader_runtime = build_engine_rollout_runtime(
+                    public_store=LocalArtifactStore(settings.public_artifact_root),
+                    private_attempt_root=settings.private_attempt_artifact_root,
+                    attempt_timeout_seconds=settings.attempt_timeout_seconds,
+                    close_timeout_seconds=settings.close_timeout_seconds,
                 )
-                public_artifacts = getattr(
-                    app.state.png_to_shader_min_service,
-                    "artifacts",
-                    None,
-                )
-                public_artifact_root = getattr(
-                    public_artifacts,
-                    "base_root",
-                    None,
-                )
-                if isinstance(public_artifact_root, Path):
-                    settings.require_artifact_root_isolation(
-                        public_artifact_root=public_artifact_root
-                    )
                 cleanup.push_async_callback(
-                    close_png_to_shader_min_service,
-                    app.state.png_to_shader_min_service,
+                    close_generation_runtime,
+                    app.state.shader_runtime,
                 )
-                app.state.engine_rollout_service = build_engine_rollout_runtime(
-                    policy=settings.engine_policy,
-                    resolution=settings.engine_policy_resolution,
-                    promotion_verification=(
-                        settings.promotion_authorization_verification
-                    ),
-                    public_min_service=app.state.png_to_shader_min_service,
-                    private_attempt_root=(
-                        settings.engine_rollout_private_artifact_root
-                    ),
-                    attempt_timeout_seconds=(
-                        settings.engine_rollout_attempt_timeout_seconds
-                    ),
-                    close_timeout_seconds=(
-                        settings.engine_rollout_close_timeout_seconds
-                    ),
-                )
-                if app.state.engine_rollout_service is not None:
-                    cleanup.push_async_callback(
-                        close_png_to_shader_min_service,
-                        app.state.engine_rollout_service,
-                    )
-
-                shadow = ProductionShadowCoordinator(
-                    policy=settings.engine_policy,
-                    resolution=settings.engine_policy_resolution,
-                    config=ProductionShadowConfig(
-                        output_root=settings.production_shadow_artifact_root,
-                        queue_capacity=settings.production_shadow_queue_capacity,
-                        worker_count=settings.production_shadow_worker_count,
-                        attempt_timeout_seconds=(
-                            settings.production_shadow_attempt_timeout_seconds
-                        ),
-                        close_timeout_seconds=(
-                            settings.production_shadow_close_timeout_seconds
-                        ),
-                        resource_close_timeout_seconds=(
-                            settings.production_shadow_resource_close_timeout_seconds
-                        ),
-                    ),
-                )
-                app.state.production_shadow_coordinator = shadow
-                cleanup.push_async_callback(shadow.close)
-                await shadow.start()
                 yield
         finally:
             logger.info("backend.shutdown")

@@ -1,4 +1,4 @@
-"""D095 engine rollout 的 attempt 读取与父公开 Artifact 原子发布服务."""
+"""Current Direct attempt isolation and parent Artifact publication."""
 
 from __future__ import annotations
 
@@ -10,17 +10,16 @@ from typing import Any, Literal, cast
 
 from shaderforge.store import ArtifactRef, LocalArtifactStore
 
-PARENT_MANIFEST_SCHEMA_VERSION = "png_to_shader_manifest_v2"
-EngineId = Literal["shader_graph_v1", "direct_glsl_layerplan_v1"]
-Representation = Literal["shader_document_v1", "shader_program_spec_v1"]
+PARENT_MANIFEST_SCHEMA_VERSION = "direct_shader_manifest_v1"
+EngineId = Literal["direct_glsl_layerplan_v1"]
+Representation = Literal["shader_program_spec_v1"]
 _REPRESENTATION_BY_ENGINE: dict[str, str] = {
-    "shader_graph_v1": "shader_document_v1",
     "direct_glsl_layerplan_v1": "shader_program_spec_v1",
 }
 
 
 class EngineRolloutArtifactError(ValueError):
-    """attempt 或父公开 Artifact 不满足 D095 契约."""
+    """Direct attempt 或父公开 Artifact 不满足当前产物契约."""
 
 
 def _json_object(data: bytes, *, label: str) -> dict[str, Any]:
@@ -116,7 +115,7 @@ class EngineRolloutArtifactService:
         engine_run: dict[str, Any],
         selected: SelectedEngineArtifacts,
     ) -> PublishedParentArtifacts:
-        """构造 v2 discriminator manifest 并原子发布三个父白名单文件."""
+        """构造当前 Direct manifest 并原子发布三个父白名单文件."""
         if _REPRESENTATION_BY_ENGINE.get(engine) != representation:
             raise EngineRolloutArtifactError("engine/representation 配对非法。")
         selected_attempt_id = engine_run.get("selected_attempt_id")
@@ -142,7 +141,7 @@ class EngineRolloutArtifactService:
             "engine": engine,
             "representation": representation,
             "engine_run": engine_run,
-            "engine_manifest": engine_manifest,
+            "direct_manifest": engine_manifest,
             "public_artifacts": {
                 "final-render": {
                     "sha256": sha256(selected.final_render).hexdigest(),
@@ -239,13 +238,10 @@ class EngineRolloutArtifactService:
 
 def create_engine_rollout_artifact_service(
     *,
-    public_service: Any,
+    public_store: LocalArtifactStore,
     private_attempt_root: Path,
 ) -> EngineRolloutArtifactService:
-    """从 Agent 公共 service 构造隔离的 parent/attempt Artifact 边界."""
-    public_store = getattr(public_service, "artifacts", None)
-    if not isinstance(public_store, LocalArtifactStore):
-        raise EngineRolloutArtifactError("public service 未暴露可信 Artifact store。")
+    """Construct isolated public-parent/private-attempt stores."""
     return EngineRolloutArtifactService(
         public_store=public_store,
         private_attempt_store=LocalArtifactStore(

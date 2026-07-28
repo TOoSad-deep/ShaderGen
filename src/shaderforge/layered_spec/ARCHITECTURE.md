@@ -13,4 +13,5 @@
   稳定执行 premultiplied source-over，最后与白底合成并确定性生成现有
   `ShaderProgramSpecV1`；常量 edge 倒置的 `smoothstep` 使用既有确定性等价
   修复，其余非法源码继续拒绝。安全校验、真实执行和 attestation 仍由既有
-  链路负责。
+  链路负责；当前产品不以 uniform 数量或总分量预拒绝 Layered 候选，而由
+  当前真实 Renderer 的 prepare/link/draw 判定容量。

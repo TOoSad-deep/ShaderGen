@@ -10,20 +10,15 @@ renderer:
   resource_close_seconds: 10
 
 engine:
-  # 首次 direct 与 fresh direct retry 各自拥有一个独立 attempt。
+  # 首次 direct 与两次 fresh direct retry 各自拥有一个独立 attempt。
   attempt_seconds: 7200
   close_seconds: 60
-
-production_shadow:
-  attempt_seconds: 7200
-  close_seconds: 60
-  resource_close_seconds: 30
 
 frontend:
   generation_request_seconds:
-    fast: 18000
-    balanced: 21600
-    high: 28800
+    fast: 25200
+    balanced: 28800
+    high: 36000
     manual: 43200
   progress_request_seconds: 60
   progress_observation_grace_seconds: 7200

@@ -1,12 +1,8 @@
 import { apiFetch, parseApiError, resolveApiUrl } from "./client";
 
 export type QualityPreset = "fast" | "balanced" | "high" | "manual";
-export type ShaderEngineId =
-  | "shader_graph_v1"
-  | "direct_glsl_layerplan_v1";
-export type ShaderRepresentation =
-  | "shader_document_v1"
-  | "shader_program_spec_v1";
+export type ShaderEngineId = "direct_glsl_layerplan_v1";
+export type ShaderRepresentation = "shader_program_spec_v1";
 
 export interface ShaderEngineAttemptSummary {
   attempt_id?: string | null;
@@ -16,39 +12,10 @@ export interface ShaderEngineAttemptSummary {
   failure_code?: string | null;
 }
 
-export interface ShaderShadowSubmissionSummary {
-  schema_version?: string | null;
-  policy_id?: string | null;
-  policy_sha256?: string | null;
-  configured_stage?: string | null;
-  effective_stage?: string | null;
-  kill_switch_active?: boolean | null;
-  bucket?: number | null;
-  shadow_percent?: number | null;
-  parent_run_id?: string | null;
-  attempt_id?: string | null;
-  status?: string | null;
-  reason?: string | null;
-}
-
-// 父 run 的只读、安全执行摘要。所有字段均可缺省，以兼容 discriminator
-// 上线前的响应；这里不包含 LayerPlan、ProgramSpec、Prompt 或失败源码。
+// 父 run 的只读、安全执行摘要，不包含 LayerPlan、ProgramSpec、Prompt 或源码。
 export interface ShaderEngineRunSummary {
-  policy_id?: string | null;
-  policy_sha256?: string | null;
-  configured_stage?: string | null;
-  effective_stage?: string | null;
-  // stage/attempt_refs 是父 envelope 契约命名；前两个字段及 attempts
-  // 兼容 production-shadow scaffold 的早期安全摘要命名。
-  stage?: string | null;
-  bucket?: number | null;
   selected_attempt_id?: string | null;
-  attempts?: ShaderEngineAttemptSummary[] | null;
   attempt_refs?: ShaderEngineAttemptSummary[] | null;
-  fallback_from?: ShaderEngineId | null;
-  fallback_reason?: string | null;
-  promotion_authorization_sha256?: string | null;
-  shadow_submission?: ShaderShadowSubmissionSummary | null;
 }
 
 export interface MinPipelineTracePhase {
@@ -56,28 +23,6 @@ export interface MinPipelineTracePhase {
   status: string;
   duration_ms?: number | null;
   message?: string | null;
-}
-
-export interface ShaderGraphShadowSummary {
-  status: "rendered" | "unsupported" | "failed";
-  renderer_path?: string | null;
-  dsl_schema_version?: string | null;
-  compiler_version?: string | null;
-  document_sha256?: string | null;
-  topology_sha256?: string | null;
-  layer_count?: number | null;
-  primitive_count?: number | null;
-  compile_count?: number | null;
-  cache_hit_count?: number | null;
-  cache_size?: number | null;
-  render_duration_ms?: number | null;
-  unsupported_features?: string[] | null;
-  error_code?: string | null;
-  shader_graph?: {
-    schema_version?: string;
-    layers?: Array<Record<string, unknown>>;
-    [key: string]: unknown;
-  } | null;
 }
 
 // scene_mvp 最小管线的运行摘要；后端字段可缺省，前端全部按可选处理。
@@ -99,19 +44,12 @@ export interface MinPipelineSummary {
   llm_call_count?: number | null;
   llm_budget?: number | null;
   refine_budget?: number | null;
-  scene?: unknown;
   trace?: MinPipelineTracePhase[] | null;
   // 质量目标：区分“流程完成”与“质量达标”
   target_mae?: number | null;
   target_loss?: number | null;
   target_reached?: boolean | null;
-  // prepared 渲染路径与 prepare 阶段耗时
   renderer_path?: string | null;
-  prepare_duration_ms?: number | null;
-  // prepared 后复用 uniform 的热渲染统计
-  uniform_render_count?: number | null;
-  uniform_render_p95_ms?: number | null;
-  shader_graph_shadow?: ShaderGraphShadowSummary | null;
 }
 
 export interface ShaderResponse {
@@ -120,10 +58,9 @@ export interface ShaderResponse {
   glsl: string;
   generation_mode: "scene_mvp";
   quality_preset: QualityPreset;
-  // 只读执行来源；客户端不发送也不能覆盖。
-  engine?: ShaderEngineId | null;
-  representation?: ShaderRepresentation | null;
-  engine_run?: ShaderEngineRunSummary | null;
+  engine: ShaderEngineId;
+  representation: ShaderRepresentation;
+  engine_run: ShaderEngineRunSummary;
   stop_reason?: string | null;
   render_width?: number | null;
   render_height?: number | null;

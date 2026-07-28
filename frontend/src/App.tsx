@@ -363,7 +363,6 @@ export function App() {
             <p>上传参考图，由 scene_mvp 最小管线生成无贴图 fragment shader。</p>
           </div>
           <div className="topbar-actions">
-            <a href="/lab">Node Lab</a>
             <span className={`status ${loading ? "is-loading" : ""}`}>{statusText}</span>
             {loading ? (
               <button type="button" className="stop-button" onClick={handleStopWaiting}>
@@ -389,10 +388,10 @@ export function App() {
               <option value="fast">Fast</option>
               <option value="balanced">Balanced</option>
               <option value="high">High</option>
-              <option value="manual">Manual（1000/32/30）</option>
+              <option value="manual">Manual</option>
             </select>
             <small className="experimental-note">
-              scene_mvp 返回质量指标、预算用量、场景 JSON 与阶段追踪。
+              Layered Direct 返回质量指标、预算用量、尝试记录与阶段追踪。
             </small>
           </label>
           <label className="instruction-field">
@@ -427,8 +426,6 @@ export function App() {
             runId={runResult.run_id}
             stopReason={runResult.stop_reason}
             minPipeline={runResult.min_pipeline}
-            engine={runResult.engine}
-            representation={runResult.representation}
             engineRun={runResult.engine_run}
           />
         ) : null}

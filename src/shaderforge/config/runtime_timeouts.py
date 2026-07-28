@@ -47,12 +47,6 @@ class _EngineConfig(_SecondsModel):
     close_seconds: float = Field(gt=0, allow_inf_nan=False)
 
 
-class _ProductionShadowConfig(_SecondsModel):
-    attempt_seconds: float = Field(gt=0, allow_inf_nan=False)
-    close_seconds: float = Field(gt=0, allow_inf_nan=False)
-    resource_close_seconds: float = Field(gt=0, allow_inf_nan=False)
-
-
 class _GenerationRequestConfig(_SecondsModel):
     fast: float = Field(gt=0, allow_inf_nan=False)
     balanced: float = Field(gt=0, allow_inf_nan=False)
@@ -87,30 +81,25 @@ class _RootConfig(BaseModel):
     llm: _LlmConfig
     renderer: _RendererConfig
     engine: _EngineConfig
-    production_shadow: _ProductionShadowConfig
     frontend: _FrontendConfig
 
     @model_validator(mode="after")
     def validate_timeout_order(self) -> _RootConfig:
-        """保证外层足以覆盖 direct + fallback 的串行最坏边界."""
-        inner_attempt_floor = (
-            self.llm.request_seconds + self.renderer.prepare_seconds
-        )
+        """保证外层足以覆盖三个 direct attempt 的串行最坏边界."""
+        inner_attempt_floor = self.llm.request_seconds + self.renderer.prepare_seconds
         if self.engine.attempt_seconds <= inner_attempt_floor:
             raise ValueError(
                 "engine.attempt_seconds 必须大于 "
                 "llm.request_seconds + renderer.prepare_seconds。"
             )
-        parent_floor = 2 * (
-            self.engine.attempt_seconds + self.engine.close_seconds
-        )
+        parent_floor = 3 * (self.engine.attempt_seconds + self.engine.close_seconds)
         generation = self.frontend.generation_request_seconds.model_dump()
         too_short = sorted(
             name for name, seconds in generation.items() if seconds <= parent_floor
         )
         if too_short:
             raise ValueError(
-                "frontend.generation_request_seconds 必须逐档大于两个串行 "
+                "frontend.generation_request_seconds 必须逐档大于三个串行 "
                 f"engine attempt + close 的上界 {parent_floor} 秒；过短档位={too_short}。"
             )
         return self
@@ -141,15 +130,6 @@ class EngineTimeouts:
 
 
 @dataclass(frozen=True, slots=True)
-class ProductionShadowTimeouts:
-    """Production shadow timeout."""
-
-    attempt_seconds: float
-    close_seconds: float
-    resource_close_seconds: float
-
-
-@dataclass(frozen=True, slots=True)
 class FrontendTimeouts:
     """浏览器请求和观察 timeout."""
 
@@ -166,7 +146,6 @@ class RuntimeTimeouts:
     llm: LlmTimeouts
     renderer: RendererTimeouts
     engine: EngineTimeouts
-    production_shadow: ProductionShadowTimeouts
     frontend: FrontendTimeouts
 
 
@@ -205,13 +184,6 @@ def load_runtime_timeouts(path: str | Path | None = None) -> RuntimeTimeouts:
         engine=EngineTimeouts(
             attempt_seconds=parsed.engine.attempt_seconds,
             close_seconds=parsed.engine.close_seconds,
-        ),
-        production_shadow=ProductionShadowTimeouts(
-            attempt_seconds=parsed.production_shadow.attempt_seconds,
-            close_seconds=parsed.production_shadow.close_seconds,
-            resource_close_seconds=(
-                parsed.production_shadow.resource_close_seconds
-            ),
         ),
         frontend=FrontendTimeouts(
             generation_request_seconds=MappingProxyType(generation),

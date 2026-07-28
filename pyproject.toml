@@ -1,7 +1,7 @@
 [project]
 name = "shadergen"
 version = "0.0.1"
-description = "图片到 WebGL1 Shader 的 React、FastAPI、LangGraph 与 ShaderForge 单仓应用。"
+description = "图片到 WebGL1 Shader 的 Layered Direct 单仓应用。"
 authors = [
     { name = "William Fu-Hinthorn", email = "13333726+hinthornw@users.noreply.github.com" },
 ]
@@ -14,22 +14,14 @@ dependencies = [
     "fastapi>=0.139.0",
     "langchain",
     "langchain-openai>=1.3.3",
-    "langgraph>=1.2.7",
-    "langgraph-checkpoint-postgres>=3.1.0",
-    "jsonschema>=4.23.0",
     "numpy>=2.2.6",
     "pillow>=12.3.0",
     "playwright>=1.61.0",
-    "psycopg[binary,pool]>=3.3.3",
     "python-dotenv>=1.0.1",
     "python-multipart>=0.0.32",
     "pyyaml>=6.0.3",
     "uvicorn>=0.30.0",
 ]
-
-[project.scripts]
-nodelab-service = "nodelab.http.cli:main"
-
 
 [project.optional-dependencies]
 dev = ["mypy>=1.13.0", "ruff>=0.8.2"]
@@ -44,25 +36,14 @@ packages = [
     "agent.app",
     "agent.app.config",
     "agent.app.contracts",
-    "agent.app.graphs",
     "agent.app.llms",
     "agent.app.llms.families",
     "agent.app.messages",
-    "agent.app.memory",
-    "agent.app.context",
     "agent.app.nodes",
     "agent.app.nodes.layered_direct",
-    "agent.app.nodes.png_to_shader_min",
-    "nodelab",
-    "nodelab.http",
-    "nodelab.http.routes",
-    "nodelab.http.schemas",
     "agent.app.observability",
-    "agent.app.parsers",
     "agent.app.prompts",
     "agent.app.services",
-    "agent.app.states",
-    "agent.app.tools",
     "backend",
     "backend.app",
     "backend.app.api",
@@ -76,19 +57,15 @@ packages = [
     "shaderforge",
     "shaderforge.config",
     "shaderforge.contracts",
-    "shaderforge.dsl",
     "shaderforge.evaluation",
-    "shaderforge.generation",
-    "shaderforge.optimization",
-    "shaderforge.perception",
     "shaderforge.layered_spec",
+    "shaderforge.program_spec",
     "shaderforge.rendering",
     "shaderforge.validation",
     "shaderforge.store",
 ]
 [tool.setuptools.package-dir]
 "agent" = "src/agent"
-"nodelab" = "src/nodelab"
 "shaderforge" = "src/shaderforge"
 
 
@@ -120,13 +97,18 @@ lint.ignore = [
 ]
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["D", "UP"]
+"backend/app/core/settings.py" = ["D"]
+"backend/app/services/engine_rollout.py" = ["D"]
+"backend/app/services/engine_rollout_runtime.py" = ["D"]
+"backend/app/services/shader.py" = ["D"]
+"backend/app/services/shader_generation.py" = ["D"]
+"src/agent/app/contracts/layer_plan.py" = ["D107"]
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
 [dependency-groups]
 dev = [
     "anyio>=4.7.0",
-    "langgraph-cli[inmem]>=0.4.30",
     "mypy>=1.13.0",
     "pytest>=9.0.3",
     "ruff>=0.8.2",

@@ -1,8 +1,0 @@
-{
-  "dependencies": ["."],
-  "graphs": {
-    "png_to_shader_min": "./src/agent/app/graphs/png_to_shader_min_graph.py:png_to_shader_min_graph"
-  },
-  "env": ".env",
-  "image_distro": "wolfi"
-}

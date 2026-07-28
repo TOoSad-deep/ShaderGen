@@ -12,21 +12,19 @@ import itertools
 import json
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from hashlib import sha256
-from typing import Any, Literal
+from io import BytesIO
+from typing import Any, Literal, Protocol
 
 import numpy as np
-from PIL import Image
+from PIL import Image, UnidentifiedImageError
 
+from agent.app.contracts.layer_plan import LayerPlanV1, layer_plan_json_schema
 from agent.app.contracts.layered_direct_glsl import (
     layer_patch_json_schema,
     layered_shader_spec_json_schema,
-)
-from agent.app.contracts.layerplan_glsl_shadow import (
-    LayerPlanV1,
-    layer_plan_json_schema,
 )
 from agent.app.contracts.llm import LLMGateway
 from agent.app.llms.gateway import LangChainLLMGateway
@@ -40,23 +38,13 @@ from agent.app.nodes.layered_direct.authors import (
     run_initial_layered_glsl_author,
     run_refine_layered_glsl_author,
 )
-from agent.app.nodes.layerplan_glsl_shadow.authors import (
+from agent.app.nodes.layered_direct.layer_plan_author import (
     DEFAULT_PLAN_MAX_OUTPUT_TOKENS,
     VISUAL_ANALYSIS_PROMPT,
     run_visual_analysis_author,
 )
-from agent.app.nodes.png_to_shader_min.model_author import MAX_STRUCTURED_ATTEMPTS
-from agent.app.services.layerplan_glsl_shadow import (
-    ARM_B,
-    INCONCLUSIVE_CODES,
-    REQUESTED_SAMPLING_PARAMS,
-    ArmLedger,
-    PlanLedger,
-    ShadowABConfig,
-    ShadowRenderer,
-    border_background,
-    decode_reference,
-    derive_canvas,
+from agent.app.nodes.layered_direct.structured_author import (
+    MAX_STRUCTURED_ATTEMPTS,
 )
 from shaderforge.contracts import WEBGL1_STATIC_NO_TEXTURE_V1
 from shaderforge.evaluation import (
@@ -96,7 +84,99 @@ DIRECT_ENGINE_ID = "direct_glsl_layerplan_v1"
 DIRECT_REPRESENTATION = "shader_program_spec_v1"
 LAYERED_AUTHORING_REPRESENTATION = LAYERED_SHADER_SPEC_V1_SCHEMA_VERSION
 LAYERED_IMPLEMENTATION_IDENTITY_SCHEMA_VERSION = "direct_layered_glsl_implementation_v1"
-LAYERED_PARSER_POLICY_VERSION = "direct_layered_author_parser_v1"
+LAYERED_PARSER_POLICY_VERSION = "direct_layered_author_parser_v2"
+_RENDERER_DEFERRED_SAFETY_CODES = frozenset(
+    {
+        "too_many_uniforms",
+        "too_many_uniform_components",
+    }
+)
+_MAX_WORK_SIDE = 256
+_MAX_CANVAS_SIDE = 4096
+REQUESTED_SAMPLING_PARAMS: Mapping[str, Any] = {
+    "temperature": 0,
+    "thinking": "off",
+    "response_format": "json_object",
+}
+INCONCLUSIVE_CODES = frozenset(
+    {
+        "layer_plan_generation_failed",
+        "llm_budget_exhausted",
+        "llm_invocation_failed",
+        "llm_transient_failure",
+        "author_output_invalid",
+        "author_identity_unavailable",
+        "static_validation_failed",
+        "compile_or_link_failed",
+        "draw_failed",
+        "compile_budget_exhausted",
+        "draw_budget_exhausted",
+        "renderer_unavailable",
+        "no_valid_candidate",
+    }
+)
+
+
+class DirectPreparedRenderer(Protocol):
+    async def render_uniforms(
+        self,
+        uniform_values: Mapping[str, Any],
+        *,
+        capture_png: bool = False,
+        receipt_spec_sha256: str | None = None,
+    ) -> Any: ...
+
+    async def close(self) -> None: ...
+
+
+class DirectRenderer(Protocol):
+    async def prepare(
+        self,
+        fragment_source: str,
+        width: int,
+        height: int,
+        uniform_schema: Mapping[str, Any],
+    ) -> DirectPreparedRenderer: ...
+
+
+@dataclass
+class _PlanLedger:
+    llm_call_count: int = 0
+    total_tokens: int | None = 0
+    repair_count: int = 0
+    wall_clock_ms: float = 0.0
+
+
+@dataclass
+class _AttemptLedger:
+    llm_call_count: int = 0
+    total_tokens: int | None = 0
+    repair_count: int = 0
+    compile_count: int = 0
+    draw_count: int = 0
+    cache_hits: int = 0
+    wall_clock_ms: float = 0.0
+    rejected_candidates: int = 0
+    accepted_candidates: int = 0
+
+
+def _derive_canvas(image: Image.Image) -> tuple[int, int]:
+    width, height = image.size
+    scale = min(1.0, _MAX_WORK_SIDE / max(width, height))
+    return max(16, round(width * scale)), max(16, round(height * scale))
+
+
+def _border_background(rgb: np.ndarray) -> tuple[float, float, float]:
+    border = np.concatenate((rgb[0], rgb[-1], rgb[:, 0], rgb[:, -1]), axis=0)
+    median = np.median(border, axis=0)
+    return (float(median[0]), float(median[1]), float(median[2]))
+
+
+def _decode_reference(image_bytes: bytes) -> Image.Image:
+    try:
+        return Image.open(BytesIO(image_bytes)).convert("RGB")
+    except (UnidentifiedImageError, OSError) as exc:
+        raise ValueError("unable to decode reference image") from exc
 
 
 def current_layered_direct_glsl_implementation_identity() -> dict[str, Any]:
@@ -144,7 +224,12 @@ def current_layered_direct_glsl_implementation_identity() -> dict[str, Any]:
         "renderer_contract_sha256": sha256(
             canonical_json(WEBGL1_STATIC_NO_TEXTURE_V1.to_dict()).encode("utf-8")
         ).hexdigest(),
-        "program_spec_safety_limits": asdict(ProgramSpecSafetyLimits()),
+        "program_spec_safety_limits": {
+            name: value
+            for name, value in asdict(ProgramSpecSafetyLimits()).items()
+            if name not in {"max_uniforms", "max_uniform_components"}
+        },
+        "renderer_deferred_safety_codes": sorted(_RENDERER_DEFERRED_SAFETY_CODES),
     }
     normalized = json.loads(canonical_json(body))
     if not isinstance(
@@ -171,21 +256,33 @@ class LayerPlanGlslDirectConfig:
     canvas_height: int | None = None
 
     def __post_init__(self) -> None:
-        """复用 shadow 配置校验，确保预算与画布语义完全一致."""
-        self.to_shadow_config()
-
-    def to_shadow_config(self) -> ShadowABConfig:
-        """构造共享执行内核所需的冻结配置，不改变 shadow 指纹契约."""
-        return ShadowABConfig(
-            direct_author_llm_budget=self.direct_author_llm_budget,
-            compile_budget_per_arm=self.compile_budget,
-            draw_budget_per_arm=self.draw_budget,
-            refine_budget_per_arm=self.refine_budget,
-            plan_llm_budget=self.plan_llm_budget,
-            canvas_width=self.canvas_width,
-            canvas_height=self.canvas_height,
-            implementation_identity_sha256=self.implementation_identity_sha256,
-        )
+        """Fail closed on invalid attempt budgets, canvas or identity."""
+        for name in (
+            "direct_author_llm_budget",
+            "compile_budget",
+            "draw_budget",
+            "refine_budget",
+            "plan_llm_budget",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer")
+        if (self.canvas_width is None) != (self.canvas_height is None):
+            raise ValueError("canvas_width and canvas_height must be set together")
+        for name in ("canvas_width", "canvas_height"):
+            value = getattr(self, name)
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or value <= 0
+                or value > _MAX_CANVAS_SIDE
+            ):
+                raise ValueError(f"{name} must be within renderer limits")
+        identity = self.implementation_identity_sha256
+        if len(identity) != 64 or any(
+            char not in "0123456789abcdef" for char in identity
+        ):
+            raise ValueError("implementation_identity_sha256 must be lowercase sha256")
 
     def to_dict(self) -> dict[str, Any]:
         """返回 direct 专用、JSON-safe 的冻结配置."""
@@ -216,7 +313,7 @@ class DirectPlanLedger:
     wall_clock_ms: float
 
     @classmethod
-    def from_mutable(cls, ledger: PlanLedger) -> DirectPlanLedger:
+    def from_mutable(cls, ledger: _PlanLedger) -> DirectPlanLedger:
         """从 attempt-local 可变 ledger 冻结快照."""
         return cls(
             llm_call_count=ledger.llm_call_count,
@@ -250,7 +347,7 @@ class DirectLedger:
     accepted_candidates: int
 
     @classmethod
-    def from_mutable(cls, ledger: ArmLedger) -> DirectLedger:
+    def from_mutable(cls, ledger: _AttemptLedger) -> DirectLedger:
         """从 attempt-local 可变 ledger 冻结快照."""
         return cls(
             llm_call_count=ledger.llm_call_count,
@@ -544,7 +641,7 @@ class LayerPlanGlslDirectRunner:
         self,
         *,
         gateway: LLMGateway,
-        renderer: ShadowRenderer,
+        renderer: DirectRenderer,
         config: LayerPlanGlslDirectConfig,
         clock: Callable[[], float] = time.perf_counter,
         receipt_issuer: TrustedReceiptVerifier | None = None,
@@ -567,7 +664,7 @@ class LayerPlanGlslDirectRunner:
         patched_layer_id: str | None,
         target_rgb: np.ndarray,
         background: tuple[float, float, float],
-        ledger: ArmLedger,
+        ledger: _AttemptLedger,
         events: list[dict[str, Any]],
         program_cache: dict[tuple[Any, ...], Any],
     ) -> DirectCandidate | None:
@@ -589,10 +686,15 @@ class LayerPlanGlslDirectRunner:
             )
 
         static_result = validate_program_spec_safety(compiled_spec)
-        if not static_result.valid:
+        blocking_violations = tuple(
+            item
+            for item in static_result.violations
+            if item.code not in _RENDERER_DEFERRED_SAFETY_CODES
+        )
+        if any(item.severity == "error" for item in blocking_violations):
             reject(
                 "static_validation_failed",
-                violations=[item.code for item in static_result.violations],
+                violations=[item.code for item in blocking_violations],
             )
             return None
 
@@ -725,12 +827,12 @@ class LayerPlanGlslDirectRunner:
         instruction: str = "",
     ) -> DirectAttemptResult:
         """执行一次 direct attempt；不运行 Arm A，不产生任何文件副作用."""
-        image = decode_reference(reference_image)
+        image = _decode_reference(reference_image)
         config = self._config
         canvas_width, canvas_height = (
             (config.canvas_width, config.canvas_height)
             if config.canvas_width is not None and config.canvas_height is not None
-            else derive_canvas(image)
+            else _derive_canvas(image)
         )
         assert canvas_width is not None and canvas_height is not None
         if (canvas_width, canvas_height) != image.size:
@@ -738,10 +840,10 @@ class LayerPlanGlslDirectRunner:
                 (canvas_width, canvas_height), Image.Resampling.LANCZOS
             )
         target_rgb = np.asarray(image, dtype=np.float32) / 255.0
-        background = border_background(target_rgb)
+        background = _border_background(target_rgb)
         sequence_counter = itertools.count(1)
-        plan_ledger = PlanLedger()
-        ledger = ArmLedger(ARM_B)
+        plan_ledger = _PlanLedger()
+        ledger = _AttemptLedger()
         events: list[dict[str, Any]] = []
         candidates: list[DirectCandidate] = []
         current_best: DirectCandidate | None = None

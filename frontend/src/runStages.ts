@@ -1,9 +1,8 @@
 // scene_mvp 运行阶段视图模型：把后端白名单进度事件收敛为单一、可测试的纯函数视图。
 // 只消费 /api/shader/runs/{run_id}/progress 已提供的字段，不推测后端没有给出的精确进度。
-// 证据语义约束（D089 修订）：
-// - 事件只在节点完成时发出，next_action/数组顺序只能说明“预计下一节点”，不得标为执行中；
-// - 终态 elapsed_ms 只是 Graph 事件累计，不是包含 persistence/response 的完整 run 时长；
-// - author_source 只是结构化候选来源，不代表 GLSL 生成依据。
+// 证据语义约束：
+// - running/completed/failed 逐字反映后端事件，next_action/数组顺序只说明预计下一节点；
+// - 终态 elapsed_ms 只是 Direct 事件累计，不是包含 persistence/response 的完整 run 时长。
 import type {
   MinRunProgressEvent,
   MinRunProgressSnapshot,
@@ -11,23 +10,12 @@ import type {
 } from "./api/shader";
 import { RUNTIME_TIMEOUTS } from "./runtimeTimeouts";
 
-// 与 src/agent/app/graphs/png_to_shader_min_graph.py 的 12 个节点一一对应。
-export const MIN_GRAPH_NODES: ReadonlyArray<{ id: string; label: string }> = [
-  { id: "initialize_run", label: "初始化运行" },
-  { id: "perceive_target", label: "感知目标图" },
-  { id: "author_initial", label: "生成 ShaderDocument" },
-  { id: "materialize_shader", label: "编译 ShaderGraph" },
-  { id: "render_and_evaluate", label: "渲染与评估" },
-  { id: "decide_after_render", label: "渲染后决策" },
-  { id: "optimize_base", label: "基础参数优化" },
-  { id: "decide_after_base", label: "基础优化后决策" },
-  { id: "optimize_feature", label: "node/layer 参数块优化" },
-  { id: "decide_after_feature", label: "参数块优化后决策" },
-  { id: "author_refine", label: "模型修订" },
-  { id: "finalize", label: "固化产物" },
+export const DIRECT_NODES: ReadonlyArray<{ id: string; label: string }> = [
+  { id: "engine_rollout", label: "Direct 尝试协调" },
+  { id: "direct_glsl", label: "Layered 生成与渲染" },
 ];
 
-const NODE_LABELS = new Map(MIN_GRAPH_NODES.map((node) => [node.id, node.label]));
+const NODE_LABELS = new Map(DIRECT_NODES.map((node) => [node.id, node.label]));
 
 export function nodeLabel(id: string): string {
   return NODE_LABELS.get(id) ?? id;
@@ -35,8 +23,7 @@ export function nodeLabel(id: string): string {
 
 export type KnownRunStatus = "pending" | "running" | "succeeded" | "failed";
 export type RunStatus = KnownRunStatus | "unknown";
-// 后端事件只在节点完成时发出，阶段只有三种可证实状态；不存在“执行中”阶段。
-export type StageState = "pending" | "completed" | "failed";
+export type StageState = "pending" | "running" | "completed" | "failed";
 
 const RUN_STATUS_LABELS: Record<KnownRunStatus, string> = {
   pending: "等待服务端登记",
@@ -57,30 +44,6 @@ const STOP_REASON_LABELS: Record<string, string> = {
 export function stopReasonLabel(reason: string | null | undefined): string | null {
   if (!reason) return null;
   return STOP_REASON_LABELS[reason] ?? reason;
-}
-
-// trace 白名单 author_source 只说明 Initial ShaderDocument 的来源，不是最终
-// current_best provenance；render_and_evaluate 的 selected_source 也只证明首轮选择。
-const AUTHOR_SOURCE_LABELS: Record<string, string> = {
-  model: "模型生成",
-  perception_fallback: "感知兜底 ShaderGraph",
-};
-
-export function initialAuthorSourceLabel(source: string | null | undefined): string | null {
-  if (!source) return null;
-  return AUTHOR_SOURCE_LABELS[source] ?? source;
-}
-
-const INITIAL_SELECTION_SOURCE_LABELS: Record<string, string> = {
-  model_or_fallback: "Author 输出候选",
-  perception_fallback: "感知兜底候选",
-};
-
-export function initialSelectionSourceLabel(
-  source: string | null | undefined,
-): string | null {
-  if (!source) return null;
-  return INITIAL_SELECTION_SOURCE_LABELS[source] ?? source;
 }
 
 // 进度轮询策略：失败后 capped backoff 重连，不永久停止；
@@ -143,7 +106,7 @@ export interface StageView {
   visits: number;
   /** 最近一次执行的耗时（服务端相邻节点完成时刻的间隔近似值）。 */
   lastDurationMs: number | null;
-  /** 最近一次完成时的 Graph 事件累计耗时。 */
+  /** 最近一次完成时的 Direct 事件累计耗时。 */
   lastElapsedMs: number | null;
   phase: string | null;
   /** 最近一次 trace 的阶段摘要（后端白名单 message）。 */
@@ -168,7 +131,7 @@ export interface RunFailureView {
 export interface RunTimingView {
   /** 当前应展示的时长（秒）。 */
   elapsedSeconds: number | null;
-  /** 时长口径标签：终态=Graph 事件累计；有 started_at=已运行；否则=已观察。 */
+  /** 时长口径标签：终态=Direct 事件累计；有 started_at=已运行；否则=已观察。 */
   elapsedLabel: string;
   /** true=终态冻结，不再走字。 */
   frozen: boolean;
@@ -204,19 +167,13 @@ export interface RunViewModel {
   nextStageLabel: string | null;
   completedStageCount: number;
   failure: RunFailureView | null;
-  /** Initial Author 输出来源；不代表最终 current_best provenance。 */
-  initialAuthorSource: string | null;
-  initialAuthorSourceLabel: string | null;
-  /** 首轮真实 render/evaluate 的 selected_source；不代表后续最终 provenance。 */
-  initialSelectionSource: string | null;
-  initialSelectionSourceLabel: string | null;
   refineCount: number | null;
   quality: RunQualityView;
   budgets: BudgetView[];
   /** 实时帧刷新序号（render_seq），不是 current_best 版本号。 */
   renderSeq: number | null;
   eventCount: number;
-  /** 不在 12 节点拓扑内的事件数（后端演进时的前向兼容提示）。 */
+  /** 不在 Direct 阶段表内的事件数。 */
   unknownEventCount: number;
   timing: RunTimingView;
 }
@@ -269,9 +226,9 @@ export function formatTraceDetails(item: Record<string, unknown>): string {
 }
 
 function nextSequentialNodeId(nodeId: string): string | null {
-  const index = MIN_GRAPH_NODES.findIndex((node) => node.id === nodeId);
-  if (index < 0 || index + 1 >= MIN_GRAPH_NODES.length) return null;
-  return MIN_GRAPH_NODES[index + 1].id;
+  const index = DIRECT_NODES.findIndex((node) => node.id === nodeId);
+  if (index < 0 || index + 1 >= DIRECT_NODES.length) return null;
+  return DIRECT_NODES[index + 1].id;
 }
 
 function normalizeStatus(raw: string): RunStatus {
@@ -299,7 +256,7 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
   const status = normalizeStatus(input.status);
   const terminal = status === "succeeded" || status === "failed";
 
-  const stages: StageView[] = MIN_GRAPH_NODES.map((node) => ({
+  const stages: StageView[] = DIRECT_NODES.map((node) => ({
     id: node.id,
     label: node.label,
     state: "pending",
@@ -317,8 +274,6 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
   }));
   const byId = new Map(stages.map((stage) => [stage.id, stage]));
 
-  let initialAuthorSource: string | null = null;
-  let initialSelectionSource: string | null = null;
   let failure: RunFailureView | null = null;
   let unknownEventCount = 0;
 
@@ -328,8 +283,17 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
       unknownEventCount += 1;
       continue;
     }
-    stage.visits += 1;
-    stage.state = event.status === "failed" ? "failed" : "completed";
+    if (event.status === "running") {
+      if (stage.state !== "running") stage.visits += 1;
+    } else if (stage.visits === 0) {
+      stage.visits = 1;
+    }
+    stage.state =
+      event.status === "failed"
+        ? "failed"
+        : event.status === "running"
+          ? "running"
+          : "completed";
     stage.lastDurationMs =
       typeof event.duration_ms === "number" && Number.isFinite(event.duration_ms)
         ? event.duration_ms
@@ -353,30 +317,6 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
       stage.stopReason = event.stop_reason ?? null;
       stage.stopReasonLabel = stopReasonLabel(event.stop_reason);
     }
-    if (
-      event.node === "author_initial" &&
-      !initialAuthorSource &&
-      Array.isArray(event.trace)
-    ) {
-      for (const item of event.trace) {
-        if (typeof item.author_source === "string" && item.author_source) {
-          initialAuthorSource = item.author_source;
-          break;
-        }
-      }
-    }
-    if (
-      event.node === "render_and_evaluate" &&
-      !initialSelectionSource &&
-      Array.isArray(event.trace)
-    ) {
-      for (const item of event.trace) {
-        if (typeof item.selected_source === "string" && item.selected_source) {
-          initialSelectionSource = item.selected_source;
-          break;
-        }
-      }
-    }
     if (event.status === "failed") {
       failure = {
         stageId: stage.id,
@@ -392,7 +332,7 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
   // 后端没有节点开始事件，不得把它当作执行中。终态下没有预计，整视图冻结为历史记录。
   let nextStageId: string | null = null;
   const last = events[events.length - 1];
-  if (last && !terminal && last.node !== "finalize") {
+  if (last && !terminal) {
     const predictedId = last.next_action ?? nextSequentialNodeId(last.node);
     if (predictedId && byId.has(predictedId)) {
       nextStageId = predictedId;
@@ -409,16 +349,16 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
   let elapsedLabel: string;
   let frozen: boolean;
   if (terminal) {
-    // 只有真实 elapsed_ms 才能称为 Graph 事件累计；缺失时保持未知。
+    // 只有真实 elapsed_ms 才能称为 Direct 事件累计；缺失时保持未知。
     frozen = true;
-    elapsedLabel = lastElapsedMs !== null ? "Graph 事件累计" : "终态耗时未知";
+    elapsedLabel = lastElapsedMs !== null ? "Direct 事件累计" : "终态耗时未知";
     elapsedSeconds = lastElapsedMs !== null ? lastElapsedMs / 1000 : null;
   } else if (startedAtSeconds !== null) {
     frozen = false;
     elapsedLabel = "已运行";
     elapsedSeconds = Math.max(0, nowSeconds - startedAtSeconds);
   } else if (lastElapsedMs !== null) {
-    // 无 started_at 时以最后事件的 Graph 累计耗时为下限，叠加本地真实观察时长。
+    // 无 started_at 时以最后事件累计耗时为下限，叠加本地真实观察时长。
     frozen = false;
     elapsedLabel = "已观察";
     elapsedSeconds = Math.max(lastElapsedMs / 1000, nowSeconds - mountedAtSeconds);
@@ -464,11 +404,7 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
     nextStageId,
     nextStageLabel: nextStageId ? nodeLabel(nextStageId) : null,
     completedStageCount: stages.filter((stage) => stage.state === "completed").length,
-    failure,
-    initialAuthorSource,
-    initialAuthorSourceLabel: initialAuthorSourceLabel(initialAuthorSource),
-    initialSelectionSource,
-    initialSelectionSourceLabel: initialSelectionSourceLabel(initialSelectionSource),
+    failure: status === "failed" ? failure : null,
     refineCount: typeof counters?.refine_count === "number" ? counters.refine_count : null,
     quality: {
       bestLoss,

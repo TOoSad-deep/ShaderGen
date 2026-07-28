@@ -464,16 +464,6 @@ body {
   word-break: break-all;
 }
 
-.shader-graph-shadow {
-  display: grid;
-  gap: 10px;
-  margin-top: 14px;
-  padding: 14px;
-  border: 1px solid #bfdbfe;
-  border-radius: 6px;
-  background: #f8fbff;
-}
-
 .engine-run-summary {
   display: grid;
   gap: 10px;
@@ -523,33 +513,6 @@ body {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   font-weight: 700;
-}
-
-.engine-fallback {
-  display: grid;
-  gap: 5px;
-  padding: 10px 12px;
-  border: 1px solid #f59e0b;
-  border-radius: 4px;
-  background: #fffbeb;
-  color: #92400e;
-  font-size: 13px;
-}
-
-.shadow-submission {
-  display: grid;
-  gap: 4px;
-  padding: 10px 12px;
-  border: 1px solid #93c5fd;
-  border-radius: 4px;
-  background: #eff6ff;
-  color: #1e3a8a;
-  font-size: 13px;
-}
-
-.shadow-submission small {
-  color: #475569;
-  line-height: 1.45;
 }
 
 .engine-attempts {
@@ -613,29 +576,6 @@ body {
   grid-column: 1 / -1;
   color: #b91c1c;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-}
-
-.engine-policy .engine-run-facts {
-  margin-top: 8px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
-.shader-graph-shadow h3,
-.shader-graph-shadow p {
-  margin: 0;
-}
-
-.shader-graph-shadow ol {
-  display: grid;
-  gap: 6px;
-  margin: 8px 0 0;
-  padding-left: 24px;
-}
-
-.shader-graph-shadow li {
-  display: grid;
-  grid-template-columns: minmax(120px, 1fr) minmax(90px, auto) minmax(90px, auto);
-  gap: 10px;
 }
 
 .scene-mvp-details {
@@ -823,12 +763,6 @@ body {
   font-size: 13px;
 }
 
-.min-live-basis {
-  margin: 0;
-  color: #334155;
-  font-size: 12px;
-}
-
 .min-live-grid {
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
@@ -859,6 +793,11 @@ body {
   color: #0f172a;
 }
 
+.min-live-timeline li.is-running {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
 .min-live-timeline li.is-failed {
   background: #fef2f2;
   color: #b91c1c;
@@ -874,6 +813,10 @@ body {
 
 .min-live-timeline li.is-completed .node-dot {
   background: #15803d;
+}
+
+.min-live-timeline li.is-running .node-dot {
+  background: #2563eb;
 }
 
 .min-live-timeline li.is-failed .node-dot {
@@ -1090,7 +1033,6 @@ body {
   }
 
   .engine-run-facts,
-  .engine-policy .engine-run-facts,
   .engine-attempts li {
     grid-template-columns: 1fr;
   }

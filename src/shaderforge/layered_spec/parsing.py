@@ -30,7 +30,6 @@ from shaderforge.program_spec.models import (
     LAYER_ROLES,
     MAX_LAYER_COUNT,
     SHA256_HEX_PATTERN,
-    UNIFORM_COMPONENT_COUNTS,
 )
 from shaderforge.validation import ProgramSpecSafetyLimits
 
@@ -259,20 +258,6 @@ def _validate_resource_limits(
     from shaderforge.layered_spec.compiler import _emit_source
 
     limits = ProgramSpecSafetyLimits()
-    declarations = [
-        declaration for layer in layers for declaration in layer.uniform_schema
-    ]
-    if len(declarations) > limits.max_uniforms:
-        raise LayeredSpecError(
-            "too_many_uniforms",
-            f"uniform 数量超过 {limits.max_uniforms} 上限。",
-        )
-    components = sum(UNIFORM_COMPONENT_COUNTS[item.type] for item in declarations)
-    if components > limits.max_uniform_components:
-        raise LayeredSpecError(
-            "too_many_uniform_components",
-            f"uniform 总分量超过 {limits.max_uniform_components} 上限。",
-        )
     tunable_count = sum(len(layer.tunable_manifest) for layer in layers)
     if tunable_count > limits.max_tunables:
         raise LayeredSpecError(
