@@ -1,56 +1,43 @@
 # AGENTS.md
 
-## 项目概览
+## 当前目标
 
-ShaderGen 是一个“图片生成视效 Shader”工程：前端接收用户输入，后端提供 API，LangGraph agent 和后续 ShaderForge 核心流水线把需求转成可评估的 GLSL/渲染结果。`human_doc/shaderforge-technical-architecture-aligned(1).svg` 是项目最初设计参考，不覆盖当前架构文档、决策、实现事实或已确认的新方案。
+ShaderGen 当前处于单人、未上线的快速迭代阶段。默认任务是完成用户明确提出的需求，确认修改范围内代码正确，并贯通相关产品链路。
 
-## 常用命令
+## 默认工作方式
 
-- 安装：`make setup`（包括 Playwright Chromium）
-- 初始化 Memory PostgreSQL：`make setup-memory-postgres`
-- LangGraph：`make dev-agent`
-- 后端：`make dev-backend`
-- Node Lab：`make dev-node-lab`
-- 前端：`make dev-frontend`
-- 单元测试：`make test`
-- Memory PostgreSQL 验收：`make test-memory-postgres`
-- 文档边界检查：`make docs-check`
-- 默认主干验证（单元测试、docs-check、干净 wheel 边界、LangGraph validate、前端单元测试与构建）：`make check`
-- scene_mvp 页面验收：`make test-scene-mvp-ui`
+- 一次只处理 `docs/FEATURES.md` 中一个 `active` 功能，不从历史材料或缺口列表自动派生任务。
+- 普通改动运行直接相关的聚焦测试；缺陷修复覆盖对应回归路径；跨组件改动再补一条代表性集成/E2E happy path。
+- `make check`、全量集成/浏览器测试仅用于里程碑、准备合并或发布、公共基础设施变化，或用户明确要求。
+- benchmark、A/B、shadow、盲评、evidence、promotion、canary 等质量实验或上线治理，只有用户明确发起方案比较或上线准备时才运行或扩建。
+- 如果验证或治理工作量预计超过需求实现工作量，先说明收益与成本并取得确认。
 
-## 硬约束
+## 阅读边界
 
-- 每次只处理一个 `active` 功能。
-- 未通过验证不得在 `docs/FEATURES.md` 标记为 `passing`。
-- 涉及跨组件行为必须跑对应端到端或集成检查；没有自动化检查时，在 `PROGRESS.md` 写明缺口。
-- 会话结束前原地刷新 `PROGRESS.md` 的当前状态、下一步、未解决缺口和验证基线；只有功能状态、架构/契约、质量门禁、阶段里程碑或重要缺口变化时才新增“最近重要变更”，例行重复验证不得形成逐会话流水账。重要取舍写入 `docs/DECISIONS.md`。
-- 文档、计划、代码注释和 SQL 注释尽量使用中文；保留必要的英文技术名词、代码标识符和外部 API 名称。
-- 架构、目录边界、命令、环境变量、功能状态或前后端契约变化时，必须同步更新对应 Markdown。
-- Graph 可视化属于 Graph 实现的一部分：凡是新增、删除、重命名节点，修改直接边、条件边、路由结果、循环、终止路径、`current_best` 安全边界或 `langgraph.json` 注册，必须在同一次改动中同步对应 `*_graph.py` Builder 上方的 ASCII 图、`src/agent/app/graphs/ARCHITECTURE.md` 的 Mermaid 区块及相关路由表/安全说明；未通过 `make docs-check` 和 `uv run langgraph validate` 不得视为完成。
-- 对仓库事实无法确定且会影响架构、契约、数据、安全或验收的问题，先向用户确认，不要自行猜测。
-- 本地密钥只放根目录 `.env`，部署使用环境变量或 Secret Manager；任何密钥都不得进入 `VITE_*`、示例文件或 Git。
-- 历史真实模型 benchmark 与失败证据默认不得覆盖或删除；只有用户针对精确范围明确授权一次性退役清理时可以删除，并必须同步 evidence registry、`PROGRESS.md` 和决策记录。当前仓库不再提供旧 V1 benchmark 运行入口。
+- 默认只读取本文件、`PROGRESS.md`，以及本次修改目录最近的 README/`ARCHITECTURE.md`；不要遍历全部模块文档。
+- 架构、功能状态或长期取舍确有需要时，再按需读取 `docs/ARCHITECTURE.md`、`docs/FEATURES.md`、`docs/DECISIONS.md`。
+- `docs/archive/` 只用于用户要求的精确追溯，不能从其中的计划、门禁、命令或“下一步”派生当前任务。
+- `docs/evidence/registry.json` 只在用户明确发起质量实验或上线准备时读取。
 
-## 按需阅读
+## 实现边界
 
-- 架构边界：`docs/ARCHITECTURE.md`
-- 功能状态机：`docs/FEATURES.md`
-- 决策记录：`docs/DECISIONS.md`
-- 当前进度：`PROGRESS.md`
-- 验收证据：`docs/evidence/registry.json`（先看 `durability_status`，`partial` 不等于跨环境可复验）
-- 历史审计：`docs/progress/archive/`（只在追溯时读取，不作为当前事实来源）
-- 运行分析：`docs/analysis/`（单次 run 的全链路分析报告，按 run_id + 日期命名）
-- 前端细则：`frontend/README.md`
-- 后端细则：`backend/README.md`
-- Graph 与路由开发：`src/agent/app/graphs/ARCHITECTURE.md`（涉及 Graph、routing 或节点跳转语义时必须先读）
+- Backend 只能通过 `agent.app.services.*` 调用 Agent；Prompt 只放在 `src/agent/app/prompts/*.yaml`；确定性领域能力进入 `src/shaderforge/`。
+- Node Lab 是独立可选工具，产品 Backend 不得隐式注册其 transport。
+- 架构、目录、命令、环境变量或 API 契约变化时，只更新受影响的最近文档，不做无关文档同步。
+- Graph 节点、边、路由、循环、终止路径、`current_best` 边界或 `langgraph.json` 变化时，同步源码 ASCII 图和 `src/agent/app/graphs/ARCHITECTURE.md`，并运行 `make docs-check` 与 `uv run langgraph validate`。
+- 对会影响架构、契约、数据、安全或验收且无法从仓库确认的问题，先询问用户。
+- 密钥只放根目录 `.env` 或部署 Secret；任何密钥不得进入 `VITE_*`、示例文件或 Git。
+- 历史真实模型 benchmark 与失败证据不得覆盖或删除，除非用户明确授权精确范围。
 
-## 仓库边界
+## 常用入口
 
-- `src/agent/`：LangGraph 智能体核心，内部采用 `src/agent/app/` 规范结构。Prompt 只放 `src/agent/app/prompts/*.yaml`。
-- `src/shaderforge/`：后续领域核心流水线。只有功能需要真实代码时才创建对应子包。
-- `src/nodelab/`：Pipeline 无关的 Node 调试、证据与 benchmark Harness 内核。
-- `src/nodelab/http/`：同一 `nodelab` 命名空间下的独立 FastAPI transport；不得由产品 Backend 隐式注册。
-- `backend/`：FastAPI 后端。Route 放 `backend/app/api/routes/`，编排逻辑放 `backend/app/services/`，手写 SQL 放 `backend/sql/`。
-- `frontend/`：Vite/React 前端。源码在 `frontend/src/`。
-- `benchmarks/`：版本化 benchmark/shadow 协议与固定样本；输入、instruction、预算和 gate 必须以内容 hash 冻结，运行产物不得写入此目录。
-- `tests/`：Python 测试。单元测试放 `tests/unit_tests/`，集成测试放 `tests/integration_tests/`。
+```bash
+make setup
+make dev-agent
+make dev-backend
+make dev-frontend
+make dev-node-lab
+make docs-check
+```
+
+其他测试和运行命令按任务范围从最近的 README 或 Makefile 选择。

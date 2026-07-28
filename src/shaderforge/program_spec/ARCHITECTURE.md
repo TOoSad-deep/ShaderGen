@@ -1,6 +1,6 @@
 # ShaderForge Program Spec 架构
 
-`program_spec/` 承载 LayerPlanV1 与 ShaderProgramSpecV1 的安全契约：严格解析/规范化、可信层哈希重算、ValidationAttestation 签发与匹配。设计基线见 `docs/superpowers/specs/2026-07-26-layerplan-glsl-shadow-design.md`。
+`program_spec/` 承载 LayerPlanV1 与 ShaderProgramSpecV1 的当前安全契约：严格解析/规范化、可信层哈希重算、ValidationAttestation 签发与匹配。实现与本文件是当前依据，历史实验设计已归档。
 
 ## 真相层级定位
 

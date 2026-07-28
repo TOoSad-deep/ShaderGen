@@ -6,7 +6,6 @@ import ast
 import json
 import re
 import sys
-from hashlib import sha256
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,9 +18,6 @@ PROGRESS_REQUIRED_HEADINGS = (
     "## 下一步",
     "## 未解决缺口",
     "## 当前验证基线",
-    "## 最近重要变更",
-    "## 历史索引",
-    "## 维护规则",
 )
 MERMAID_DIRECT_EDGE = re.compile(
     r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s+-->\s+([A-Za-z_][A-Za-z0-9_]*)"
@@ -69,6 +65,13 @@ REPOSITORY_ROOT_FILES = frozenset(
         "pyproject.toml",
     }
 )
+ARCHIVED_DOCUMENT_GLOB = "docs/archive/**/*.md"
+RETIRED_LIVE_DOCUMENT_DIRS = (
+    "docs/superpowers",
+    "docs/analysis",
+    "docs/progress/archive",
+    "human_doc",
+)
 
 
 def _read(path: str) -> str:
@@ -96,22 +99,8 @@ def _check_root_markdown_classification() -> None:
         "根目录出现未分类 Markdown："
         + ", ".join(unclassified)
         + "。实时入口需加入显式白名单；历史总结需移入 "
-        "docs/progress/archive/ 并在首屏标注非当前事实。",
+        "docs/archive/ 并在首屏标注归档状态。",
     )
-
-
-def _registered_graph_count() -> int:
-    """从 LangGraph 注册表读取当前对外图数量，避免文档检查固化旧数字."""
-    try:
-        value = json.loads(_read("langgraph.json"))
-    except (json.JSONDecodeError, OSError) as exc:
-        ERRORS.append(f"无法读取 langgraph.json：{type(exc).__name__}。")
-        return 0
-    graphs = value.get("graphs") if isinstance(value, dict) else None
-    if not isinstance(graphs, dict) or not graphs:
-        ERRORS.append("langgraph.json 的 graphs 必须是非空 object。")
-        return 0
-    return len(graphs)
 
 
 def _registered_graphs() -> dict[str, str]:
@@ -140,22 +129,6 @@ def _check_feature_state_machine() -> None:
         len(active_rows) <= 1, "docs/FEATURES.md 同一时间最多只能有一个 active 功能。"
     )
 
-    h01 = _feature_row("H01")
-    _require("单元测试通过" in h01, "H01 evidence 需要记录单元测试通过。")
-    graph_count = _registered_graph_count()
-    if graph_count:
-        expected_graph_evidence = f"{graph_count} 个 graph"
-        _require(
-            expected_graph_evidence in h01,
-            "H01 evidence 需要反映 langgraph.json 当前注册的 "
-            f"{expected_graph_evidence}。",
-        )
-    _require(
-        "25 个单元测试" not in h01, "H01 evidence 不应硬编码易过期的 25 个单元测试。"
-    )
-    _require("20 个单元测试" not in h01, "H01 evidence 仍包含过时的 20 个单元测试。")
-    _require("8 个单元测试" not in h01, "H01 evidence 仍包含过时的 8 个单元测试。")
-
     f09 = _feature_row("F09")
     _require(
         "PNG" in f09 and "scene_mvp" in f09,
@@ -181,142 +154,108 @@ def _check_progress_handoff() -> None:
         "PROGRESS.md 必须明确不是逐会话追加日志。",
     )
     _require(
-        "docs/progress/archive/" in progress,
-        "PROGRESS.md 必须提供 docs/progress/archive/ 历史索引。",
-    )
-    _require(
-        "docs/evidence/registry.json" in progress,
-        "PROGRESS.md 必须链接版本化验收证据注册表。",
+        "docs/archive/" in progress,
+        "PROGRESS.md 必须提供 docs/archive/ 统一历史索引。",
     )
 
-    recent_changes = ""
-    if "## 最近重要变更" in progress:
-        recent_changes = progress.split("## 最近重要变更", 1)[1].split("\n## ", 1)[0]
-    change_entries = [
-        line for line in recent_changes.splitlines() if line.startswith("- ")
-    ]
-    _require(
-        len(change_entries) <= 5,
-        f"PROGRESS.md 的最近重要变更最多保留 5 条；当前为 {len(change_entries)} 条。",
-    )
 
-    archive_paths = sorted((ROOT / "docs/progress/archive").glob("*.md"))
-    _require(bool(archive_paths), "docs/progress/archive/ 至少需要一个历史快照。")
+def _check_document_authority() -> None:
+    """确保历史材料退出实时文档面，并保持当前决策有界."""
+    archive_paths = sorted(ROOT.glob(ARCHIVED_DOCUMENT_GLOB))
+    _require(bool(archive_paths), "docs/archive/ 至少需要一个归档 Markdown。")
     for path in archive_paths:
-        archive = _read(str(path.relative_to(ROOT)))
-        archive_preamble = "\n".join(archive.splitlines()[:12])
+        preamble = "\n".join(path.read_text(encoding="utf-8").splitlines()[:12])
         _require(
-            "历史" in archive_preamble
-            and ("不代表当前" in archive_preamble or "非当前事实" in archive_preamble),
-            f"{path.relative_to(ROOT)} 必须在首屏明确标注为历史且非当前事实。",
+            "> 归档状态：" in preamble,
+            f"{path.relative_to(ROOT)} 必须在首屏声明“> 归档状态：”。",
         )
 
+    for relative_dir in RETIRED_LIVE_DOCUMENT_DIRS:
+        live_markdown = list((ROOT / relative_dir).rglob("*.md"))
+        _require(
+            not live_markdown,
+            f"{relative_dir}/ 已退出实时文档面，Markdown 必须移入 docs/archive/。",
+        )
 
-def _check_evidence_registry() -> None:
-    registry_path = ROOT / "docs/evidence/registry.json"
-    _require(registry_path.is_file(), "缺少 docs/evidence/registry.json。")
-    if not registry_path.is_file():
-        return
-    try:
-        registry = json.loads(registry_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        ERRORS.append(f"docs/evidence/registry.json 不是合法 JSON：{exc.msg}。")
-        return
-
-    _require(
-        registry.get("schema_version") == 1,
-        "docs/evidence/registry.json 只接受 schema_version=1。",
+    decisions = _read("docs/DECISIONS.md")
+    index_rows = re.findall(
+        r"^\| (D[0-9]{3}) \| (accepted|updated) \|",
+        decisions,
+        re.MULTILINE,
     )
-    entries = registry.get("entries")
-    _require(isinstance(entries, list) and bool(entries), "证据注册表必须非空。")
-    if not isinstance(entries, list):
-        return
+    index_ids = [decision_id for decision_id, _status in index_rows]
+    _require(
+        len(index_ids) == len(set(index_ids)),
+        "docs/DECISIONS.md 当前决策表存在重复编号。",
+    )
+    _require(
+        len(index_ids) <= 25,
+        f"docs/DECISIONS.md 当前决策最多 25 条；当前 {len(index_ids)} 条。",
+    )
+    required_current_decisions = {
+        "D095",
+        "D097",
+        "D098",
+        "D099",
+        "D100",
+        "D101",
+        "D102",
+    }
+    _require(
+        required_current_decisions.issubset(index_ids),
+        "docs/DECISIONS.md 缺少当前 engine/process/归档决策："
+        + ", ".join(sorted(required_current_decisions - set(index_ids)))
+        + "。",
+    )
+    _require(
+        "archive/2026-07/decisions/DECISIONS-through-D099.md" in decisions,
+        "docs/DECISIONS.md 必须链接完整历史决策归档。",
+    )
 
-    evidence_ids: set[str] = set()
-    for entry in entries:
-        if not isinstance(entry, dict):
-            ERRORS.append("证据注册表 entry 必须是 object。")
-            continue
-        evidence_id = entry.get("evidence_id")
+    root_readme = _read("README.md")
+    for required_text in (
+        "direct_glsl_layerplan_v1（默认）",
+        "fresh shader_graph_v1 fallback",
+        "`docs/archive/` 不参与默认开发上下文",
+    ):
         _require(
-            isinstance(evidence_id, str) and bool(evidence_id.strip()),
-            "证据注册表 entry 缺少 evidence_id。",
+            required_text in root_readme,
+            f"README.md 缺少当前 direct-first/风险分级事实：{required_text}。",
         )
-        if isinstance(evidence_id, str):
-            _require(
-                evidence_id not in evidence_ids,
-                f"证据注册表 evidence_id 重复：{evidence_id}。",
-            )
-            evidence_ids.add(evidence_id)
-        durability = entry.get("durability_status")
+
+    architecture = _read("docs/ARCHITECTURE.md")
+    for required_text in (
+        "direct_default（无 policy 文件时的默认值）",
+        "fresh ShaderGraph fallback child",
+        "休眠能力只在用户明确发起对应任务时读取",
+    ):
         _require(
-            durability in {"durable", "partial", "missing"},
-            f"{evidence_id} 的 durability_status 无效。",
+            required_text in architecture,
+            f"docs/ARCHITECTURE.md 缺少当前运行事实：{required_text}。",
         )
-        artifacts = entry.get("artifacts")
-        _require(isinstance(artifacts, list), f"{evidence_id} 缺少 artifacts。")
-        if not isinstance(artifacts, list):
-            continue
-        for artifact in artifacts:
-            if not isinstance(artifact, dict):
-                ERRORS.append(f"{evidence_id} 的 artifact 必须是 object。")
-                continue
-            path_value = artifact.get("path")
-            availability = artifact.get("availability")
-            expected_size = artifact.get("size_bytes")
-            expected_sha = artifact.get("sha256")
-            _require(
-                isinstance(path_value, str) and bool(path_value),
-                f"{evidence_id} 的 artifact 缺少 path。",
-            )
-            _require(
-                availability
-                in {
-                    "git",
-                    "git_lfs",
-                    "release",
-                    "object_store",
-                    "local_ignored",
-                    "removed",
-                },
-                f"{evidence_id} 的 artifact availability 无效。",
-            )
-            _require(
-                isinstance(expected_size, int)
-                and not isinstance(expected_size, bool)
-                and expected_size > 0,
-                f"{evidence_id} 的 artifact size_bytes 必须是正整数。",
-            )
-            _require(
-                isinstance(expected_sha, str)
-                and bool(re.fullmatch(r"[0-9a-f]{64}", expected_sha)),
-                f"{evidence_id} 的 artifact sha256 无效。",
-            )
-            if not isinstance(path_value, str):
-                continue
-            artifact_path = ROOT / path_value
-            must_exist = availability in {"git", "git_lfs"}
-            _require(
-                artifact_path.is_file() or not must_exist,
-                f"{evidence_id} 的持久 Artifact 不存在：{path_value}。",
-            )
-            if not artifact_path.is_file():
-                continue
-            payload = artifact_path.read_bytes()
-            _require(
-                len(payload) == expected_size,
-                f"{evidence_id} 的 {path_value} 字节数与 registry 不一致。",
-            )
-            _require(
-                sha256(payload).hexdigest() == expected_sha,
-                f"{evidence_id} 的 {path_value} SHA-256 与 registry 不一致。",
-            )
+
+    backend_readme = _read("backend/README.md")
+    for required_text in (
+        "scene=null",
+        "无授权 `direct_default`",
+        "测试按根 `AGENTS.md` 选择",
+    ):
+        _require(
+            required_text in backend_readme,
+            f"backend/README.md 缺少当前响应或验证边界：{required_text}。",
+        )
 
 
 def _check_agent_architecture_docs() -> None:
     app_dir = ROOT / "src/agent/app"
     for child in sorted(app_dir.iterdir()):
-        if child.is_dir() and not child.name.startswith("__"):
+        if not child.is_dir() or child.name.startswith("__"):
+            continue
+        has_substantive_content = any(
+            path.is_file() and path.name not in {"__init__.py", "ARCHITECTURE.md"}
+            for path in child.iterdir()
+        )
+        if has_substantive_content:
             _require(
                 (child / "ARCHITECTURE.md").exists(),
                 f"{child.relative_to(ROOT)} 缺少 ARCHITECTURE.md。",
@@ -497,41 +436,23 @@ def _check_graph_visualizations() -> None:
 
 def _check_agent_readme_harness_router() -> None:
     readme = _read("src/agent/README.md")
-    architecture = _read("src/agent/ARCHITECTURE.md")
     for heading in (
-        "## 当前状态",
         "## 开始前",
-        "## Agent 改动门禁",
-        "## 完成交接",
-        "## 按需阅读",
+        "## 边界",
+        "## 验证",
     ):
         _require(heading in readme, f"src/agent/README.md 缺少 {heading}。")
 
     for required_text in (
-        "当前 active 功能以 `docs/FEATURES.md` 为准",
-        "当前进度和下一步以 `PROGRESS.md` 为准",
-        "`make docs-check`",
-        "`uv run pytest tests/unit_tests`",
-        "`uv run langgraph validate`",
-        "会话结束前原地更新 `PROGRESS.md`",
+        "本次修改目录最近的 `ARCHITECTURE.md`",
+        "不要预先遍历全部子模块文档",
+        "make docs-check",
+        "uv run langgraph validate",
+        "全量检查和真实模型调用遵循根 `AGENTS.md`",
     ):
         _require(
             required_text in readme,
             f"src/agent/README.md 缺少 harness 入口内容：{required_text}",
-        )
-
-    app_architectures = sorted(
-        str(path.relative_to(ROOT))
-        for path in (ROOT / "src/agent/app").glob("*/ARCHITECTURE.md")
-    )
-    for relative_path in app_architectures:
-        _require(
-            relative_path in readme,
-            f"src/agent/README.md 导航缺少 {relative_path}。",
-        )
-        _require(
-            relative_path in architecture,
-            f"src/agent/ARCHITECTURE.md 索引缺少 {relative_path}。",
         )
 
 
@@ -644,8 +565,10 @@ def _check_environment_documentation() -> None:
         frontend_keys and all(key.startswith("VITE_") for key in frontend_keys),
         "frontend/.env.example 只能包含 VITE_* 公开变量。",
     )
-    for key in sorted(server_keys):
-        _require(f"{key}=" in root_readme, f"README.md 配置清单缺少 {key}。")
+    _require(
+        "[.env.example](.env.example)" in root_readme,
+        "README.md 必须链接服务端 .env.example。",
+    )
     for key in sorted(frontend_keys):
         _require(key in frontend_readme, f"frontend/README.md 缺少 {key}。")
 
@@ -787,7 +710,7 @@ def _main() -> int:
     _check_root_markdown_classification()
     _check_feature_state_machine()
     _check_progress_handoff()
-    _check_evidence_registry()
+    _check_document_authority()
     _check_agent_architecture_docs()
     _check_langgraph_registration()
     _check_graph_visualizations()

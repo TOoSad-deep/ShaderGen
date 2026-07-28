@@ -1,6 +1,6 @@
 # layerplan_glsl_shadow 节点包
 
-LayerPlan + 直接 GLSL Author shadow 实验（设计基线：`docs/superpowers/specs/2026-07-26-layerplan-glsl-shadow-design.md`）的三个独立有界 Author helper。**未接入任何生产 Graph**；只有显式调用方（后续 shadow 臂编排，另立 ADR）才能使用。
+LayerPlan + 直接 GLSL 的三个独立有界 Author helper。它们不注册或修改任何 LangGraph，但当前由默认 direct engine 与休眠的 shadow A/B Harness 共用。当前调用关系以本文件、Service 架构和代码为准。
 
 ## 组成
 
@@ -15,6 +15,5 @@ LayerPlan + 直接 GLSL Author shadow 实验（设计基线：`docs/superpowers/
 - GLSL 输出契约与真实 canonical WebGL1 Renderer 完全一致：fragment_source 必须含 canonical 兼容声明（precision mediump float、varying vec2 v_uv、uniform sampler2D u_image、uniform vec2 u_resolution、uniform float u_time、void main()），满足 `validate_shader` 全量静态规则；`uniform sampler2D u_image;` 是**仅声明、不可采样**的兼容占位——禁止 texture2D/textureCube/texture/texelFetch 调用、扩展与任何其他 sampler 声明（`glsl_renderer_contract_violation`）；保留 uniform（u_image/u_resolution/u_time）由 Renderer 自动上传，不进入 uniform_schema/uniform_values/tunable_manifest。静态校验直接使用 canonical `validate_program_spec_safety`/`validate_shader`，无任何豁免或绕过。
 - Author 结果返回装配好的 canonical Spec/Plan：`author_identity` 绑定真实参考图/指令哈希、content type、角色输入上下文、model_ref、prompt_version 与 Gateway effective 采样身份；Arm B 额外绑定 `plan_sha256`，Refine 绑定 `parent_spec_sha256`。若走结构修复，还用 `repair_context_sha256` 绑定 repair Prompt、首轮输出/错误、Schema 以及首轮与第二次实际调用身份。
 - 复用 `agent.app.nodes.png_to_shader_min.model_author.invoke_min_author` 的有界调用（最多语义一次 + 结构修复一次）与统一 LLMGateway；请求为 temperature=0、`json_object`，但实际生效采样以 family/Gateway 记录为准（例如 kimi 强制 temperature=1），缺可信 effective identity 时 fail-closed。
-- A/B 的预期控制差异是 `layer_plan` 参数是否注入同一份 `LayerPlanV1`；Prompt 主体、模型、请求采样与预算尽量保持相同，但无 seed 的模型采样、执行顺序和服务端漂移仍是混杂因素，单 run 只具探索性。
 - Prompt 主体在 `agent.app.prompts`：`layerplan_visual_analysis_v1.yaml`、`direct_glsl_initial_v1.yaml`、`direct_glsl_refine_v1.yaml`；结构修复复用 `min_author_repair_v1`。
 - 所有错误收敛为结果对象上的 `error_code`，不冒泡未分类异常；预算耗尽返回 `llm_budget_exhausted` 且不调用模型。
