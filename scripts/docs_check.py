@@ -215,7 +215,8 @@ def _check_document_authority() -> None:
     root_readme = _read("README.md")
     for required_text in (
         "direct_glsl_layerplan_v1（默认）",
-        "fresh shader_graph_v1 fallback",
+        "fresh direct_glsl_layerplan_v1 retry（最多一次）",
+        "不再作为 direct 失败后的自动 fallback",
         "`docs/archive/` 不参与默认开发上下文",
     ):
         _require(
@@ -226,7 +227,8 @@ def _check_document_authority() -> None:
     architecture = _read("docs/ARCHITECTURE.md")
     for required_text in (
         "direct_default（无 policy 文件时的默认值）",
-        "fresh ShaderGraph fallback child",
+        "fresh direct child（最多重试一次）",
+        "两次 direct attempt 都失败时",
         "休眠能力只在用户明确发起对应任务时读取",
     ):
         _require(

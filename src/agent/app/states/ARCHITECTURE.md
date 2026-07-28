@@ -7,4 +7,4 @@
 - 模型原始响应、reasoning、完整 Patch value、图片和 GLSL 不进入轻量状态或日志摘要。
 - 数据库连接、Store、Renderer 和 Gateway 由 Builder/Service 持有，不进入 State。
 - Memory/checkpoint 基础设施暂时保留，但当前产品 Graph 不读取或写入旧 V1 Memory。
-- `pending_replay_step` 和 `replay_step_refs` 也是 `UntrackedValue`，只服务显式 legacy MinScene Builder 的私有 replay 引用；完整 typed Patch、候选 Scene 和渲染只落到 run 的 `private/replay/`，ShaderGraph fallback engine 目前不消费这两个字段。
+- `pending_replay_step` 和 `replay_step_refs` 也是 `UntrackedValue`，只服务显式 legacy MinScene Builder 的私有 replay 引用；完整 typed Patch、候选 Scene 和渲染只落到 run 的 `private/replay/`，ShaderGraph engine 目前不消费这两个字段。

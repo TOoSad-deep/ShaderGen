@@ -471,7 +471,7 @@ async def execute_shader_generation(
             run_id=run_id,
             stage="engine_rollout",
             retryable=exc.code
-            in {"direct_and_fallback_failed", "shader_graph_attempt_failed"},
+            in {"direct_attempts_failed", "shader_graph_attempt_failed"},
             stop_reason=exc.code,
         ) from exc
     except Exception as exc:

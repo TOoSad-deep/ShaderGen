@@ -181,18 +181,24 @@ class _Factory:
         self,
         *,
         failure_code: str | None = None,
+        failure_codes: tuple[str | None, ...] | None = None,
         identity_drift: bool = False,
     ) -> None:
         self.failure_code = failure_code
+        self.failure_codes = failure_codes
         self.identity_drift = identity_drift
         self.contexts: list[EngineAttemptContext] = []
         self.executors: list[_Executor] = []
 
     def __call__(self, context: EngineAttemptContext) -> _Executor:
         self.contexts.append(context)
+        failure_code = self.failure_code
+        if self.failure_codes is not None:
+            position = min(len(self.contexts) - 1, len(self.failure_codes) - 1)
+            failure_code = self.failure_codes[position]
         executor = _Executor(
             context,
-            failure_code=self.failure_code,
+            failure_code=failure_code,
             identity_drift=self.identity_drift,
         )
         self.executors.append(executor)
@@ -347,7 +353,7 @@ async def test_direct_success_publishes_parent_only_after_child_success(
 
 
 @pytest.mark.anyio
-async def test_direct_failure_creates_fresh_old_fallback_and_never_exposes_child(
+async def test_direct_failure_creates_fresh_direct_retry_and_never_runs_dsl(
     tmp_path: Path,
 ) -> None:
     policy = _policy(stage="direct_default")
@@ -361,8 +367,8 @@ async def test_direct_failure_creates_fresh_old_fallback_and_never_exposes_child
         promotion_verifier=_Verifier(),
         direct_implementation_identity=_DIRECT_IDENTITY,
     )
-    direct = _Factory(failure_code="direct_compile_failed")
-    old = _Factory()
+    direct = _Factory(failure_codes=("direct_compile_failed", None))
+    old = _Factory(failure_code="dsl_must_not_run")
     artifacts = _artifact_service(tmp_path)
     coordinator = EngineParentRunCoordinator(
         direct_factory=direct,
@@ -382,15 +388,17 @@ async def test_direct_failure_creates_fresh_old_fallback_and_never_exposes_child
     )
 
     direct_id = child_attempt_id(parent, "direct_glsl_layerplan_v1", 0)
-    fallback_id = child_attempt_id(parent, "shader_graph_v1", 1)
-    assert direct_id != fallback_id
+    retry_id = child_attempt_id(parent, "direct_glsl_layerplan_v1", 1)
+    assert direct_id != retry_id
     assert direct.contexts[0].attempt_id == direct_id
-    assert old.contexts[0].attempt_id == fallback_id
+    assert direct.contexts[1].attempt_id == retry_id
     assert direct.contexts[0].artifact_scope == "private_attempt"
-    assert old.contexts[0].artifact_scope == "private_attempt"
-    assert result.engine == "shader_graph_v1"
-    assert result.engine_run["fallback_from"] == "direct_glsl_layerplan_v1"
-    assert result.engine_run["fallback_reason"] == "direct_compile_failed"
+    assert direct.contexts[1].artifact_scope == "private_attempt"
+    assert not old.contexts
+    assert result.engine == "direct_glsl_layerplan_v1"
+    assert result.engine_run["selected_attempt_id"] == str(retry_id)
+    assert result.engine_run["fallback_from"] is None
+    assert result.engine_run["fallback_reason"] is None
     assert [item["status"] for item in result.engine_run["attempt_refs"]] == [
         "failed",
         "succeeded",
@@ -399,12 +407,16 @@ async def test_direct_failure_creates_fresh_old_fallback_and_never_exposes_child
     with pytest.raises(FileNotFoundError):
         artifacts.public_store.resolve_run(str(direct_id))
     with pytest.raises(FileNotFoundError):
-        artifacts.public_store.resolve_run(str(fallback_id))
-    assert artifacts.verify_parent(str(parent))["engine"] == "shader_graph_v1"
+        artifacts.public_store.resolve_run(str(retry_id))
+    assert artifacts.verify_parent(str(parent))["engine"] == (
+        "direct_glsl_layerplan_v1"
+    )
 
 
 @pytest.mark.anyio
-async def test_both_attempts_fail_without_publishing_parent(tmp_path: Path) -> None:
+async def test_both_direct_attempts_fail_without_publishing_parent(
+    tmp_path: Path,
+) -> None:
     policy = _policy()
     parent = uuid4()
     plan = resolve_parent_run_plan(
@@ -416,14 +428,16 @@ async def test_both_attempts_fail_without_publishing_parent(tmp_path: Path) -> N
         direct_implementation_identity=_DIRECT_IDENTITY,
     )
     artifacts = _artifact_service(tmp_path)
+    direct = _Factory(failure_code="direct_draw_failed")
+    old = _Factory(failure_code="old_render_failed")
     coordinator = EngineParentRunCoordinator(
-        direct_factory=_Factory(failure_code="direct_draw_failed"),
-        shader_graph_factory=_Factory(failure_code="old_render_failed"),
+        direct_factory=direct,
+        shader_graph_factory=old,
         artifacts=artifacts,
     )
     with pytest.raises(
         ParentRunFailure,
-        match="direct_and_fallback_failed",
+        match="direct_attempts_failed",
     ) as raised:
         await coordinator.execute(
             request=ParentRunRequest(
@@ -440,6 +454,12 @@ async def test_both_attempts_fail_without_publishing_parent(tmp_path: Path) -> N
         "failed",
         "failed",
     ]
+    assert [item.engine for item in raised.value.attempt_refs] == [
+        "direct_glsl_layerplan_v1",
+        "direct_glsl_layerplan_v1",
+    ]
+    assert len(direct.contexts) == 2
+    assert not old.contexts
     with pytest.raises(FileNotFoundError):
         artifacts.public_store.resolve_run(str(parent))
 

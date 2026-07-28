@@ -1,6 +1,6 @@
 # Prompts 架构
 
-当前默认 direct engine 使用 LayerPlan/direct GLSL Prompt，ShaderGraph Prompt 在 fresh fallback 中使用。
+当前默认 direct engine 使用 LayerPlan/direct GLSL Prompt。ShaderGraph Prompt 只在服务端明确选择 ShaderGraph engine 时使用，不参与 direct 失败重试。
 
 - `shader_graph_author_initial_v1.yaml`：从 `fallback_shader_graph` 出发改进，返回完整严格 shader_graph_v1 ShaderDocument；含按 Layer 分解、细线=segment、柔和高光/暗斑=ellipse+radial alpha、弧形带=ellipse CSG 弯月近似与全部数值硬约束。
 - `shader_graph_author_refine_v1.yaml`：返回一个绑定 `base_document_sha256` 的原子 typed layer patch；含按问题类型选择五种 op 的规则与层数上限下的 replace/remove 优先策略。

@@ -7,7 +7,7 @@
 ## 当前状态
 
 - 当前唯一产品功能是 `scene_mvp`，唯一 `active` 功能是 F09。
-- 无显式 engine policy 时默认执行 `direct_glsl_layerplan_v1`；direct 失败创建隔离的 `shader_graph_v1` fallback attempt。
+- 无显式 engine policy 时默认执行 `direct_glsl_layerplan_v1`；单次 attempt 的结构修复仍失败后，创建一个隔离的 fresh direct attempt 重试。两次均失败则返回 `direct_attempts_failed`，不自动降级到 ShaderGraph。
 - 模型、Renderer、engine attempt 和前端等待统一由 `src/shaderforge/config/runtime_timeouts.yaml` 提供有界默认值；Python 与 Vite 严格校验该文件。
 - `langgraph.json` 只注册 `png_to_shader_min`。Node Lab、Memory/checkpoint 和质量实验设施都不在默认产品链路。
 
@@ -22,7 +22,7 @@ F09：贯通“上传 PNG → 生成 Shader → WebGL 渲染 → 查看 GLSL、R
 
 ## 未解决缺口
 
-- direct GLSL 可能因模型输出不满足 Parser/Renderer 契约而进入 fallback，按真实案例修复。
+- direct GLSL 仍可能因模型输出不满足 Parser/Renderer 契约而失败；当前通过 attempt 内结构修复和一次 fresh direct 重试处理，后续继续按真实失败案例增强定向修复。
 - Backend 仍阻塞执行；前端停止等待不等于服务端取消。
 - 进度状态是单进程内存数据，进程重启后丢失。
 

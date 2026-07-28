@@ -1,6 +1,6 @@
 # Agent
 
-默认产品请求由 Backend 调用 direct Service；失败时才执行 `langgraph.json` 注册的 `png_to_shader_min` ShaderGraph fallback。
+默认产品请求由 Backend 调用 direct Service；失败时由 Backend 创建一个 fresh direct attempt 重试，不自动执行 `langgraph.json` 注册的 `png_to_shader_min`。ShaderGraph Service 仅在服务端明确选为主 engine 时运行。
 
 ## 开始前
 

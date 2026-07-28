@@ -1,6 +1,6 @@
 # ShaderGen
 
-ShaderGen 把参考图片转换为可评估的无贴图 WebGL1 fragment shader。当前产品只有 `scene_mvp`：React 负责上传和展示，FastAPI 负责编排，默认先执行 LayerPlan + direct GLSL；direct 失败时创建隔离的 ShaderGraph fallback。
+ShaderGen 把参考图片转换为可评估的无贴图 WebGL1 fragment shader。当前产品只有 `scene_mvp`：React 负责上传和展示，FastAPI 负责编排，默认执行 LayerPlan + direct GLSL；一次 direct attempt 内会进行结构修复，仍失败则创建一个全新、隔离的 direct attempt 重试，不自动降级到 ShaderGraph。
 
 ## 快速开始
 
@@ -22,8 +22,7 @@ Frontend
         -> advisory LayerPlan
         -> canonical ShaderProgramSpecV1
         -> WebGL1 校验、渲染与评分
-     -> direct 失败时 fresh shader_graph_v1 fallback
-        -> png_to_shader_min LangGraph
+     -> direct 失败时 fresh direct_glsl_layerplan_v1 retry（最多一次）
   -> final-render / metrics / manifest
 ```
 
@@ -31,7 +30,8 @@ Frontend
 - `SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 可让新请求直接使用 ShaderGraph。
 - `POST /api/shader/generate` 不接受客户端 engine 或 generation mode 选择。
 - API 通过 `engine`、`representation` 和 `engine_run` 报告实际执行来源。
-- direct 成功时 `min_pipeline.scene=null`；fallback 成功时返回 `shader_graph_v1` Scene。
+- direct 成功时 `min_pipeline.scene=null`；两次 direct attempt 都失败时请求明确返回 `direct_attempts_failed`。
+- ShaderGraph 只在服务端 policy 或 kill switch 明确把它选为主 engine 时运行，不再作为 direct 失败后的自动 fallback。
 
 ## 配置
 

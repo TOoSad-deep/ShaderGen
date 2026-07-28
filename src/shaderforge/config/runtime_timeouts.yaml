@@ -10,7 +10,7 @@ renderer:
   resource_close_seconds: 10
 
 engine:
-  # direct 与 fresh ShaderGraph fallback 各自拥有一个独立 attempt。
+  # 首次 direct 与 fresh direct retry 各自拥有一个独立 attempt。
   attempt_seconds: 7200
   close_seconds: 60
 

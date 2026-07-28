@@ -114,6 +114,7 @@ class _FakeDirectResult:
             validation_attestation=attestation,
         )
         self.status = "ok" if ok else "inconclusive"
+        self.failure_code = None if ok else "author_output_invalid"
         self.current_best = (
             SimpleNamespace(
                 spec=spec,
@@ -154,6 +155,7 @@ class _FakeDirectResult:
         return {
             "schema_version": "direct_glsl_attempt_result_v1",
             "status": self.status,
+            "failure_code": self.failure_code,
             "identity": {
                 "implementation_identity_sha256": _IDENTITY,
             },
@@ -183,15 +185,26 @@ class _FakeDirectRunner:
 
 
 class _DirectFactory:
-    def __init__(self, *, ok: bool, raise_error: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        ok: bool,
+        outcomes: tuple[bool, ...] | None = None,
+        raise_error: bool = False,
+    ) -> None:
         self.ok = ok
+        self.outcomes = outcomes
         self.raise_error = raise_error
         self.runners: list[_FakeDirectRunner] = []
 
     def __call__(self, config: Any) -> _FakeDirectRunner:
+        ok = self.ok
+        if self.outcomes is not None:
+            position = min(len(self.runners), len(self.outcomes) - 1)
+            ok = self.outcomes[position]
         runner = _FakeDirectRunner(
             config,
-            ok=self.ok,
+            ok=ok,
             raise_error=self.raise_error,
         )
         self.runners.append(runner)
@@ -297,6 +310,7 @@ def _build(
     monkeypatch: pytest.MonkeyPatch,
     *,
     direct_ok: bool,
+    direct_outcomes: tuple[bool, ...] | None = None,
     direct_error: bool = False,
     old_fail: bool = False,
 ) -> tuple[Any, _PublicService, _DirectFactory, _OldFactory]:
@@ -306,7 +320,11 @@ def _build(
         lambda: {"identity_sha256": _IDENTITY},
     )
     public = _PublicService(tmp_path / "public")
-    direct = _DirectFactory(ok=direct_ok, raise_error=direct_error)
+    direct = _DirectFactory(
+        ok=direct_ok,
+        outcomes=direct_outcomes,
+        raise_error=direct_error,
+    )
     old = _OldFactory(fail=old_fail)
     policy = _policy()
     runtime = build_engine_rollout_runtime(
@@ -491,7 +509,7 @@ async def test_parent_response_contract_reports_invalid_field(
 
 
 @pytest.mark.anyio
-async def test_runtime_direct_failure_uses_fresh_private_old_child(
+async def test_runtime_direct_failure_uses_fresh_private_direct_retry(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -499,6 +517,7 @@ async def test_runtime_direct_failure_uses_fresh_private_old_child(
         tmp_path,
         monkeypatch,
         direct_ok=False,
+        direct_outcomes=(False, True),
     )
     parent = uuid4()
     result = await runtime.execute(
@@ -512,12 +531,14 @@ async def test_runtime_direct_failure_uses_fresh_private_old_child(
         )
     )
 
-    fallback = child_attempt_id(parent, "shader_graph_v1", 1)
-    assert result.engine == "shader_graph_v1"
-    assert result.engine_run["fallback_from"] == "direct_glsl_layerplan_v1"
-    assert result.engine_run["fallback_reason"] == "direct_attempt_inconclusive"
-    assert direct.runners[0].closed
-    assert old.services[0].closed
+    retry = child_attempt_id(parent, "direct_glsl_layerplan_v1", 1)
+    assert result.engine == "direct_glsl_layerplan_v1"
+    assert result.engine_run["selected_attempt_id"] == str(retry)
+    assert result.engine_run["fallback_from"] is None
+    assert result.engine_run["fallback_reason"] is None
+    assert all(runner.closed for runner in direct.runners)
+    assert len(direct.runners) == 2
+    assert not old.services
     direct_attempt = child_attempt_id(
         parent,
         "direct_glsl_layerplan_v1",
@@ -528,17 +549,17 @@ async def test_runtime_direct_failure_uses_fresh_private_old_child(
             str(direct_attempt)
         ).read_bytes("private/failure-summary.json")
     )
-    assert failure["failure_code"] == "direct_attempt_inconclusive"
+    assert failure["failure_code"] == "author_output_invalid"
     assert "private-instruction" not in json.dumps(failure)
-    assert runtime.artifacts.private_attempt_store.resolve_run(str(fallback))
+    assert runtime.artifacts.private_attempt_store.resolve_run(str(retry))
     with pytest.raises(FileNotFoundError):
-        public.artifacts.resolve_run(str(fallback))
+        public.artifacts.resolve_run(str(retry))
     manifest = json.loads(
         (await runtime.read_public_artifact(str(parent), "manifest")).data
     )
     assert manifest["run_id"] == str(parent)
-    assert manifest["engine"] == "shader_graph_v1"
-    assert manifest["engine_run"]["selected_attempt_id"] == str(fallback)
+    assert manifest["engine"] == "direct_glsl_layerplan_v1"
+    assert manifest["engine_run"]["selected_attempt_id"] == str(retry)
     _assert_private_permissions(tmp_path / "private")
 
 
@@ -551,6 +572,7 @@ async def test_runtime_generate_emits_parent_progress_and_preserves_failed_child
         tmp_path,
         monkeypatch,
         direct_ok=False,
+        direct_outcomes=(False, True),
     )
     events: list[dict[str, Any]] = []
     parent = uuid4()
@@ -565,20 +587,22 @@ async def test_runtime_generate_emits_parent_progress_and_preserves_failed_child
     )
 
     assert generated.run_id == str(parent)
-    assert generated.engine == "shader_graph_v1"
-    assert generated.engine_run["fallback_from"] == "direct_glsl_layerplan_v1"
+    assert generated.engine == "direct_glsl_layerplan_v1"
+    assert generated.engine_run["fallback_from"] is None
     assert {event.get("phase") for event in events} >= {
         "engine_start",
         "direct_start",
         "direct_failed",
-        "engine_fallback",
+        "engine_retry",
+        "direct_completed",
         "engine_completed",
-        "render",
     }
     direct_failed = next(
         event for event in events if event.get("phase") == "direct_failed"
     )
-    assert direct_failed["failure_code"] == "direct_attempt_inconclusive"
+    assert direct_failed["failure_code"] == "author_output_invalid"
+    assert direct_failed["attempt_index"] == 0
+    assert all(event.get("phase") != "engine_fallback" for event in events)
     assert "private-instruction" not in json.dumps(events)
 
 
@@ -587,26 +611,30 @@ async def test_direct_exception_emits_generic_safe_failed_progress(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    runtime, _public, _direct, _old = _build(
+    runtime, _public, _direct, old = _build(
         tmp_path,
         monkeypatch,
         direct_ok=False,
         direct_error=True,
     )
     events: list[dict[str, Any]] = []
-    generated = await runtime.generate(
-        b"private-image",
-        "image/png",
-        project_id="project-direct-error",
-        run_id=str(uuid4()),
-        quality_preset="fast",
-        instruction="private-instruction",
-        on_progress=lambda event, _render: events.append(dict(event)),
-    )
+    with pytest.raises(ParentRunFailure, match="direct_attempts_failed"):
+        await runtime.generate(
+            b"private-image",
+            "image/png",
+            project_id="project-direct-error",
+            run_id=str(uuid4()),
+            quality_preset="fast",
+            instruction="private-instruction",
+            on_progress=lambda event, _render: events.append(dict(event)),
+        )
 
-    assert generated.engine == "shader_graph_v1"
-    failed = next(event for event in events if event.get("phase") == "direct_failed")
-    assert failed["failure_code"] == "direct_attempt_failed"
+    failed = [event for event in events if event.get("phase") == "direct_failed"]
+    assert len(failed) == 2
+    assert {event["attempt_index"] for event in failed} == {0, 1}
+    assert all(event["failure_code"] == "direct_attempt_failed" for event in failed)
+    assert any(event.get("phase") == "engine_retry" for event in events)
+    assert not old.services
     assert "fixture error" not in json.dumps(events)
     assert "private-instruction" not in json.dumps(events)
 
@@ -633,18 +661,18 @@ async def test_runtime_close_and_aclose_are_idempotent_and_observable(
 
 
 @pytest.mark.anyio
-async def test_both_failed_attempts_keep_private_safe_summaries(
+async def test_both_failed_direct_attempts_keep_private_safe_summaries(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    runtime, public, _direct, _old = _build(
+    runtime, public, _direct, old = _build(
         tmp_path,
         monkeypatch,
         direct_ok=False,
         old_fail=True,
     )
     parent = uuid4()
-    with pytest.raises(ParentRunFailure, match="direct_and_fallback_failed"):
+    with pytest.raises(ParentRunFailure, match="direct_attempts_failed"):
         await runtime.execute(
             request=ParentRunRequest(
                 parent_run_id=parent,
@@ -656,17 +684,15 @@ async def test_both_failed_attempts_keep_private_safe_summaries(
             )
         )
 
-    for engine, index, expected in (
-        ("direct_glsl_layerplan_v1", 0, "direct_attempt_inconclusive"),
-        ("shader_graph_v1", 1, "shader_graph_attempt_failed"),
-    ):
-        attempt = child_attempt_id(parent, engine, index)  # type: ignore[arg-type]
+    for index in (0, 1):
+        attempt = child_attempt_id(parent, "direct_glsl_layerplan_v1", index)
         summary = json.loads(
             runtime.artifacts.private_attempt_store.resolve_run(
                 str(attempt)
             ).read_bytes("private/failure-summary.json")
         )
-        assert summary["failure_code"] == expected
+        assert summary["failure_code"] == "author_output_invalid"
         assert "private-instruction" not in json.dumps(summary)
+    assert not old.services
     with pytest.raises(FileNotFoundError):
         public.artifacts.resolve_run(str(parent))

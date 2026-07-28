@@ -15,6 +15,8 @@ from agent.app.contracts.llm import (
     EffectiveCallIdentity,
     LLMCallOptions,
     LLMGateway,
+    LLMGatewayError,
+    LLMInvocationError,
     LLMResponse,
 )
 from agent.app.messages.structured_multimodal import canonical_json
@@ -138,9 +140,7 @@ def _repair_context_sha256(
         "validation_error_details": getattr(error, "details", ()),
         "schema_sha256": sha256(canonical_json(schema).encode("utf-8")).hexdigest(),
         "original_effective_identity": (
-            original_identity.to_dict()
-            if original_identity is not None
-            else None
+            original_identity.to_dict() if original_identity is not None else None
         ),
         "repair_effective_identity": (
             repaired_identity.to_dict() if repaired_identity is not None else None
@@ -182,12 +182,26 @@ async def invoke_min_author(
     calls = 1
     try:
         response = await gateway.ainvoke(messages, options)
-    except Exception as exc:
+    except LLMInvocationError as exc:
         return MinAuthorCallResult(
             None,
             calls,
             None,
-            f"llm_invocation_failed:{type(exc).__name__}",
+            "llm_transient_failure" if exc.retryable else "llm_invocation_failed",
+        )
+    except LLMGatewayError:
+        return MinAuthorCallResult(
+            None,
+            calls,
+            None,
+            "llm_invocation_failed",
+        )
+    except Exception:
+        return MinAuthorCallResult(
+            None,
+            calls,
+            None,
+            "llm_invocation_failed",
         )
     latency_ms = max(0, int(response.latency_ms))
     total_tokens = _response_total_tokens(response)
@@ -224,12 +238,32 @@ async def invoke_min_author(
                 ),
                 repair_options,
             )
-        except Exception as exc:
+        except LLMInvocationError as exc:
             return MinAuthorCallResult(
                 None,
                 calls,
                 response.model_ref,
-                f"llm_repair_failed:{type(exc).__name__}",
+                ("llm_transient_failure" if exc.retryable else "llm_invocation_failed"),
+                latency_ms=latency_ms,
+                total_tokens=total_tokens,
+                effective_identity=response.effective_identity,
+            )
+        except LLMGatewayError:
+            return MinAuthorCallResult(
+                None,
+                calls,
+                response.model_ref,
+                "llm_invocation_failed",
+                latency_ms=latency_ms,
+                total_tokens=total_tokens,
+                effective_identity=response.effective_identity,
+            )
+        except Exception:
+            return MinAuthorCallResult(
+                None,
+                calls,
+                response.model_ref,
+                "llm_invocation_failed",
                 latency_ms=latency_ms,
                 total_tokens=total_tokens,
                 effective_identity=response.effective_identity,

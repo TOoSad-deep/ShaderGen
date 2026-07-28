@@ -117,6 +117,8 @@ INCONCLUSIVE_CODES = frozenset(
     {
         "layer_plan_generation_failed",
         "llm_budget_exhausted",
+        "llm_invocation_failed",
+        "llm_transient_failure",
         "author_output_invalid",
         "author_identity_unavailable",
         "static_validation_failed",
@@ -814,7 +816,7 @@ class LayerPlanGlslShadowRunner:
         if error_code in INCONCLUSIVE_CODES:
             arm.inconclusive_code = error_code
         elif error_code.startswith("llm_"):
-            arm.inconclusive_code = "llm_budget_exhausted"
+            arm.inconclusive_code = "llm_invocation_failed"
         else:
             arm.inconclusive_code = "author_output_invalid"
 

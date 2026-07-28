@@ -13,8 +13,8 @@ Frontend React
         -> Initial/Refine direct GLSL Author
         -> canonical ShaderProgramSpecV1
         -> 静态校验 -> WebGL1 prepare/draw -> metric
-     -> direct 失败时 fresh ShaderGraph fallback child
-        -> png_to_shader_min LangGraph
+     -> direct 失败时 fresh direct child（最多重试一次）
+        -> 独立 Runner / Renderer / cache / 预算 / 私有 Store
   -> 选中 child 的 final-render / metrics / manifest
 ```
 
@@ -22,9 +22,9 @@ Frontend React
 
 ## 组件边界
 
-- `frontend/`：上传、进度、实际 engine/fallback、Render、GLSL 和失败信息。
+- `frontend/`：上传、进度、实际 engine/attempt、Render、GLSL 和失败信息。
 - `backend/`：HTTP、parent/child attempt 编排、进度、过程账本和生命周期。
-- `src/agent/`：LLM Gateway、direct Author/Runner、ShaderGraph fallback、Prompt、Parser 和 State。
+- `src/agent/`：LLM Gateway、direct Author/Runner、显式 ShaderGraph engine、Prompt、Parser 和 State。
 - `src/shaderforge/`：ProgramSpec、ShaderGraph、静态校验、WebGL1 渲染、评分、优化和 Artifact。
 - `src/nodelab/`：独立可选 Node 调试工具，不进入产品 Backend。
 
@@ -49,11 +49,11 @@ Direct 成功时：
 
 完整 LayerPlan、ProgramSpec、Prompt、Render bytes 和原始错误只保存在私有 attempt 边界。
 
-## ShaderGraph fallback
+## ShaderGraph engine
 
 `langgraph.json` 只注册 `png_to_shader_min`。模型或感知产生的 ShaderDocument 必须经 specialized Compiler、真实 WebGL1 渲染和复合评分；候选只有 strict total-loss 改善时才能提交。
 
-Fallback 成功时：
+服务端 policy 或 kill switch 明确将 ShaderGraph 选为主 engine 时，成功结果为：
 
 - `engine=shader_graph_v1`
 - `representation=shader_document_v1`
@@ -64,7 +64,7 @@ Fallback 成功时：
 
 ## Parent run 与公开 Artifact
 
-每个 HTTP `run_id` 是 parent run。每个 child attempt 使用独立 Renderer、cache、预算和私有 Store；direct 失败只能创建新的 fallback attempt，不能在同一 attempt 内切换表示。
+每个 HTTP `run_id` 是 parent run。每个 child attempt 使用独立 Runner、Renderer、cache、预算和私有 Store。Direct attempt 内先执行有界结构修复；仍失败时只能创建一个新的 direct attempt，不能切换表示或自动调用 ShaderGraph。两次 direct attempt 都失败时，parent 以 `direct_attempts_failed` 结束。
 
 公开 Artifact 仅包括：
 
@@ -81,7 +81,7 @@ API 通过 `engine`、`representation`、`engine_run` 报告实际结果。`POST
 `src/shaderforge/config/runtime_timeouts.yaml` 是模型、Renderer、engine attempt 和前端等待的唯一默认配置源：
 
 - 模型单次 HTTP 默认 3600 秒，Renderer prepare/draw 默认 300/120 秒。
-- 每个 direct、fresh fallback 或 production-shadow attempt 默认 7200 秒。
+- 每个 direct、显式 ShaderGraph 或 production-shadow attempt 默认 7200 秒。
 - 前端 fast/balanced/high/manual POST 默认 5/6/8/12 小时，进度 GET 60 秒，POST 后观察 2 小时。
 
 Python 与 Vite 都严格校验正有限数、未知字段和内外层覆盖关系。更长等待不提供服务端取消，也不允许无限 timeout。

@@ -301,7 +301,7 @@ def resolve_parent_run_plan(
 
 
 class EngineParentRunCoordinator:
-    """显式 direct-first/fresh-old-fallback/parent-publish 协调器."""
+    """显式 direct-first/fresh-direct-retry/parent-publish 协调器."""
 
     def __init__(
         self,
@@ -311,6 +311,7 @@ class EngineParentRunCoordinator:
         artifacts: EngineRolloutArtifactService,
         attempt_timeout_seconds: float = RUNTIME_TIMEOUTS.engine.attempt_seconds,
         close_timeout_seconds: float = RUNTIME_TIMEOUTS.engine.close_seconds,
+        direct_attempt_limit: int = 2,
     ) -> None:
         """注入私有 attempt factory；本类自身不持有共享 Renderer/cache."""
         for name, value in (
@@ -323,6 +324,12 @@ class EngineParentRunCoordinator:
                 or value <= 0
             ):
                 raise ValueError(f"{name} 必须是正数。")
+        if (
+            isinstance(direct_attempt_limit, bool)
+            or not isinstance(direct_attempt_limit, int)
+            or not 1 <= direct_attempt_limit <= 2
+        ):
+            raise ValueError("direct_attempt_limit 必须是 1 或 2。")
         self._factories: dict[EngineId, AttemptExecutorFactory] = {
             "direct_glsl_layerplan_v1": direct_factory,
             "shader_graph_v1": shader_graph_factory,
@@ -330,6 +337,7 @@ class EngineParentRunCoordinator:
         self._artifacts = artifacts
         self._attempt_timeout_seconds = float(attempt_timeout_seconds)
         self._close_timeout_seconds = float(close_timeout_seconds)
+        self._direct_attempt_limit = direct_attempt_limit
 
     async def execute(
         self,
@@ -337,7 +345,7 @@ class EngineParentRunCoordinator:
         request: ParentRunRequest,
         plan: ParentRunPlan,
     ) -> ParentRunResult:
-        """执行冻结计划；direct 失败只可创建新的 old-engine child attempt."""
+        """执行冻结计划；direct 失败只可创建 fresh direct child 重试."""
         if (
             request.parent_run_id != plan.parent_run_id
             or request.project_id != plan.project_id
@@ -347,41 +355,48 @@ class EngineParentRunCoordinator:
                 attempt_refs=(),
             )
         attempt_refs: list[AttemptRef] = []
-        fallback_from: EngineId | None = None
-        fallback_reason: str | None = None
-        primary_context = self._context(
-            plan,
-            engine=plan.primary_engine,
-            attempt_index=0,
-        )
-        try:
-            selected = await self._execute_attempt(request, primary_context)
-            attempt_refs.append(self._success_ref(primary_context))
-        except EngineAttemptFailure as exc:
-            attempt_refs.append(self._failure_ref(primary_context, exc.code))
-            if plan.primary_engine != "direct_glsl_layerplan_v1":
+        selected: EngineAttemptSuccess
+        if plan.primary_engine == "direct_glsl_layerplan_v1":
+            for attempt_index in range(self._direct_attempt_limit):
+                context = self._context(
+                    plan,
+                    engine="direct_glsl_layerplan_v1",
+                    attempt_index=attempt_index,
+                )
+                try:
+                    selected = await self._execute_attempt(request, context)
+                except EngineAttemptFailure as exc:
+                    attempt_refs.append(self._failure_ref(context, exc.code))
+                    if attempt_index + 1 >= self._direct_attempt_limit:
+                        raise ParentRunFailure(
+                            "direct_attempts_failed",
+                            attempt_refs=tuple(attempt_refs),
+                        ) from exc
+                    self._publish_direct_retry(
+                        request,
+                        attempt_index=attempt_index + 1,
+                        failure_code=exc.code,
+                    )
+                    continue
+                attempt_refs.append(self._success_ref(context))
+                break
+            else:  # pragma: no cover - range 至少执行一次且仅以上分支可继续
+                raise AssertionError("direct attempt loop did not terminate")
+        else:
+            primary_context = self._context(
+                plan,
+                engine=plan.primary_engine,
+                attempt_index=0,
+            )
+            try:
+                selected = await self._execute_attempt(request, primary_context)
+                attempt_refs.append(self._success_ref(primary_context))
+            except EngineAttemptFailure as exc:
+                attempt_refs.append(self._failure_ref(primary_context, exc.code))
                 raise ParentRunFailure(
                     "shader_graph_attempt_failed",
                     attempt_refs=tuple(attempt_refs),
                 ) from exc
-            fallback_from = "direct_glsl_layerplan_v1"
-            fallback_reason = exc.code
-            fallback_context = self._context(
-                plan,
-                engine="shader_graph_v1",
-                attempt_index=1,
-            )
-            try:
-                selected = await self._execute_attempt(request, fallback_context)
-                attempt_refs.append(self._success_ref(fallback_context))
-            except EngineAttemptFailure as fallback_exc:
-                attempt_refs.append(
-                    self._failure_ref(fallback_context, fallback_exc.code)
-                )
-                raise ParentRunFailure(
-                    "direct_and_fallback_failed",
-                    attempt_refs=tuple(attempt_refs),
-                ) from fallback_exc
         selected_engine = selected.engine
         selected_representation = selected.representation
         engine_run = {
@@ -394,8 +409,8 @@ class EngineParentRunCoordinator:
             "selected_representation": selected_representation,
             "selected_attempt_id": str(selected.attempt_id),
             "attempt_refs": [item.to_dict() for item in attempt_refs],
-            "fallback_from": fallback_from,
-            "fallback_reason": fallback_reason,
+            "fallback_from": None,
+            "fallback_reason": None,
             "promotion_authorization_sha256": (plan.promotion_authorization_sha256),
         }
         try:
@@ -432,6 +447,31 @@ class EngineParentRunCoordinator:
             engine_run=engine_run,
             published_artifacts=published,
         )
+
+    @staticmethod
+    def _publish_direct_retry(
+        request: ParentRunRequest,
+        *,
+        attempt_index: int,
+        failure_code: str,
+    ) -> None:
+        callback = request.progress_callback
+        if callback is None:
+            return
+        try:
+            callback(
+                {
+                    "node": "engine_rollout",
+                    "phase": "engine_retry",
+                    "status": "running",
+                    "engine": "direct_glsl_layerplan_v1",
+                    "attempt_index": attempt_index,
+                    "failure_code": failure_code,
+                },
+                None,
+            )
+        except Exception:
+            return
 
     @staticmethod
     def _context(

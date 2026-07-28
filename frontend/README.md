@@ -1,6 +1,6 @@
 # Frontend
 
-前端提供 `scene_mvp` 产品页和独立 Node Lab 工作台。产品页不选择 engine，只展示 Backend 实际返回的 direct 或 ShaderGraph fallback 结果。
+前端提供 `scene_mvp` 产品页和独立 Node Lab 工作台。产品页不选择 engine，只展示 Backend 实际返回的 engine、attempt 和结果。
 
 ## 产品页契约
 
@@ -8,7 +8,7 @@
 - `App.tsx` 负责上传、质量档位、轮询和结果展示。
 - `src/runStages.ts` 只根据服务端事实推导运行阶段、失败位置、预算和来源；不猜测百分比、执行中节点或最终 provenance。
 - 进度轮询保持 single-flight、事件按 seq 去重；停止等待不等于取消服务端 run。
-- direct 成功时 `scene=null`，页面展示 Direct Program；fallback 返回 `shader_graph_v1` 时才展示 Layer inspector。
+- direct 成功时 `scene=null`，页面展示 Direct Program；fresh direct 重试仍展示为 Direct Program，不显示 fallback。服务端明确选择 `shader_graph_v1` 时才展示 Layer inspector。
 - 缺少 engine discriminator 的旧响应仅做兼容展示，不根据 `scene` 猜测 engine。
 - 前端不发送 `generation_mode`，也不调用休眠的项目 Memory API。
 

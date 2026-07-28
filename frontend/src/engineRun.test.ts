@@ -89,6 +89,44 @@ describe("engine run observability", () => {
     expect(view?.shadowSubmissionReason).toBe("shadow_queued");
   });
 
+  it("shows a fresh direct retry without mislabeling it as fallback", () => {
+    const view = buildEngineRunView(
+      "direct_glsl_layerplan_v1",
+      "shader_program_spec_v1",
+      {
+        stage: "direct_default",
+        selected_attempt_id: "direct-attempt-1",
+        attempt_refs: [
+          {
+            attempt_id: "direct-attempt-0",
+            engine: "direct_glsl_layerplan_v1",
+            representation: "shader_program_spec_v1",
+            status: "failed",
+            failure_code: "llm_transient_failure",
+          },
+          {
+            attempt_id: "direct-attempt-1",
+            engine: "direct_glsl_layerplan_v1",
+            representation: "shader_program_spec_v1",
+            status: "succeeded",
+          },
+        ],
+        fallback_from: null,
+        fallback_reason: null,
+      },
+    );
+
+    expect(view?.attempts).toHaveLength(2);
+    expect(view?.attempts.map((attempt) => attempt.engineLabel)).toEqual([
+      "Direct Program",
+      "Direct Program",
+    ]);
+    expect(view?.attempts.map((attempt) => attempt.selected)).toEqual([false, true]);
+    expect(view?.attempts[0].failureCode).toBe("llm_transient_failure");
+    expect(view?.fallbackFrom).toBeNull();
+    expect(view?.fallbackReason).toBeNull();
+  });
+
   it("preserves unknown attempt status for forward compatibility", () => {
     expect(attemptStatusLabel("retrying")).toBe("retrying");
     expect(attemptStatusLabel(null)).toBe("状态未知");

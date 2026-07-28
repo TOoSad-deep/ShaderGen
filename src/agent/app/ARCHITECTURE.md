@@ -8,7 +8,7 @@
     -> nodes/layerplan_glsl_shadow/
     -> shaderforge.program_spec / rendering / evaluation
 
-失败 fallback:
+服务端显式选择 ShaderGraph:
   services/png_to_shader_min.py
     -> graphs/png_to_shader_min_graph.py
     -> nodes/png_to_shader_min/
@@ -17,7 +17,7 @@
 
 - `contracts/`：LLM 与最小 Scene/Patch 契约。
 - `llms/`：Gateway 和 provider/model-family 适配。
-- `graphs/`：ShaderGraph fallback 的 Graph Builder、节点/边和路由。
+- `graphs/`：显式 ShaderGraph engine 的 Graph Builder、节点/边和路由。
 - `nodes/`：`png_to_shader_min` Graph Node，以及 direct/shadow 共用的有界 Author helper。
 - `prompts/`、`parsers/`、`messages/`：模型输入输出边界。
 - `states/`：`PngToShaderMinState`。

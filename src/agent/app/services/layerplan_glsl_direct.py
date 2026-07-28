@@ -288,7 +288,7 @@ def _safe_failure_codes(arm: ArmResult) -> tuple[str, ...]:
         if raw in INCONCLUSIVE_CODES:
             code = str(raw)
         elif isinstance(raw, str) and raw.startswith("llm_"):
-            code = "llm_budget_exhausted"
+            code = "llm_invocation_failed"
         else:
             code = "author_output_invalid"
         if code not in codes:

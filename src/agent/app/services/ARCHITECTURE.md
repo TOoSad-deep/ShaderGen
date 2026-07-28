@@ -1,6 +1,6 @@
 # Services 架构
 
-`agent.app.services` 是 Backend 调用 Agent 的唯一公共边界，暴露默认 direct engine 和隔离的 ShaderGraph fallback。
+`agent.app.services` 是 Backend 调用 Agent 的唯一公共边界，暴露默认 direct engine 和隔离的显式 ShaderGraph engine。
 
 ## Direct
 
@@ -9,10 +9,10 @@
 - 结果中的 LayerPlan、ProgramSpec、Render 和原始错误留在私有 attempt；公开摘要只含安全状态、身份和指标。
 - Service 不注册 LangGraph，也不发布 parent Artifact。
 
-## ShaderGraph fallback
+## ShaderGraph engine
 
 - `png_to_shader_min.py` 组合 Graph、LLM Gateway、私有 Artifact Store 和 run-scoped Renderer registry。
-- fallback child 使用独立 Store、Renderer、cache 和预算，不复用 direct attempt 的可变状态。
+- ShaderGraph child 使用独立 Store、Renderer、cache 和预算，不复用其他 attempt 的可变状态；direct 失败不会自动调用本 Service。
 - `read_public_artifact()` 只接受 `final-render`、`metrics`、`manifest`。
 - Graph 正常终止和 Service 异常路径都幂等清理资源。
 

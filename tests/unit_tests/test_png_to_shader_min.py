@@ -7,7 +7,7 @@ from langchain_core.messages import AIMessage
 from PIL import Image, ImageDraw
 
 from agent.app.config.png_to_shader_min import MIN_PIPELINE_CONFIG
-from agent.app.contracts.llm import LLMResponse
+from agent.app.contracts.llm import LLMInvocationError, LLMResponse
 from agent.app.contracts.png_to_shader_min import (
     apply_min_author_patch,
     summarize_min_author_patch,
@@ -580,8 +580,33 @@ async def test_min_author_initial_failure_falls_back_to_perception(tmp_path) -> 
 
     assert update["scene"] == state["scene"]
     assert update["llm_call_count"] == 2
-    assert str(update["author_error"]).startswith("llm_repair_failed:")
+    assert update["author_error"] == "llm_invocation_failed"
     assert gateway.calls == 2
+
+
+@pytest.mark.anyio
+async def test_min_author_classifies_retryable_provider_failure(tmp_path) -> None:
+    state = _author_state()
+    gateway = _FakeGateway(
+        LLMInvocationError(
+            "provider disconnected",
+            model_ref="fake:min-author",
+            provider="fake",
+            retryable=True,
+        )
+    )
+    nodes = make_min_nodes(
+        LocalArtifactStore(tmp_path),
+        MinRendererRegistry(_FakeRenderer),  # type: ignore[arg-type]
+        gateway,
+    )
+
+    update = await nodes["author_initial"](state)
+
+    assert update["scene"] == state["scene"]
+    assert update["llm_call_count"] == 1
+    assert update["author_error"] == "llm_transient_failure"
+    assert gateway.calls == 1
 
 
 @pytest.mark.anyio

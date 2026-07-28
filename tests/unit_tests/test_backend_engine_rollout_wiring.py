@@ -172,12 +172,12 @@ async def test_usecase_selects_rollout_runtime_and_exposes_discriminator() -> No
 @pytest.mark.anyio
 async def test_usecase_preserves_safe_parent_failure_and_attempt_summary() -> None:
     direct_attempt = str(uuid4())
-    fallback_attempt = str(uuid4())
+    retry_attempt = str(uuid4())
 
     class _FailedRuntime:
         async def generate(self, *_args: Any, **_kwargs: Any) -> Any:
             raise ParentRunFailure(
-                "direct_and_fallback_failed",
+                "direct_attempts_failed",
                 attempt_refs=(
                     AttemptRef(
                         attempt_id=direct_attempt,
@@ -187,11 +187,11 @@ async def test_usecase_preserves_safe_parent_failure_and_attempt_summary() -> No
                         failure_code="direct_attempt_failed",
                     ),
                     AttemptRef(
-                        attempt_id=fallback_attempt,
-                        engine="shader_graph_v1",
-                        representation="shader_document_v1",
+                        attempt_id=retry_attempt,
+                        engine="direct_glsl_layerplan_v1",
+                        representation="shader_program_spec_v1",
                         status="failed",
-                        failure_code="shader_graph_attempt_failed",
+                        failure_code="llm_transient_failure",
                     ),
                 ),
             )
@@ -221,18 +221,16 @@ async def test_usecase_preserves_safe_parent_failure_and_attempt_summary() -> No
 
     error = raised.value
     assert error.status_code == 502
-    assert error.code == "direct_and_fallback_failed"
+    assert error.code == "direct_attempts_failed"
     assert error.stage == "engine_rollout"
-    assert error.stop_reason == "direct_and_fallback_failed"
+    assert error.stop_reason == "direct_attempts_failed"
     assert "internal_pipeline_error" not in str(error)
     snapshot = progress.read(str(run_id))
     assert snapshot["status"] == "failed"
     failure_event = next(
-        event
-        for event in snapshot["events"]
-        if event.get("phase") == "engine_failed"
+        event for event in snapshot["events"] if event.get("phase") == "engine_failed"
     )
-    assert failure_event["failure_code"] == "direct_and_fallback_failed"
+    assert failure_event["failure_code"] == "direct_attempts_failed"
     assert failure_event["attempt_refs"] == [
         {
             "attempt_id": direct_attempt,
@@ -242,11 +240,11 @@ async def test_usecase_preserves_safe_parent_failure_and_attempt_summary() -> No
             "failure_code": "direct_attempt_failed",
         },
         {
-            "attempt_id": fallback_attempt,
-            "engine": "shader_graph_v1",
-            "representation": "shader_document_v1",
+            "attempt_id": retry_attempt,
+            "engine": "direct_glsl_layerplan_v1",
+            "representation": "shader_program_spec_v1",
             "status": "failed",
-            "failure_code": "shader_graph_attempt_failed",
+            "failure_code": "llm_transient_failure",
         },
     ]
     assert "private-instruction" not in str(failure_event)
@@ -451,9 +449,7 @@ async def test_lifespan_rejects_rollout_root_overlapping_actual_public_root(
         engine_rollout_private_artifact_root=public_root / "private-rollout",
         production_shadow_artifact_root=tmp_path / "private-shadow",
     )
-    public_service = SimpleNamespace(
-        artifacts=SimpleNamespace(base_root=public_root)
-    )
+    public_service = SimpleNamespace(artifacts=SimpleNamespace(base_root=public_root))
 
     async def open_database(app: FastAPI, _url: str | None) -> None:
         app.state.db_pool = None

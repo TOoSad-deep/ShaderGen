@@ -90,6 +90,7 @@ def _publish_direct_progress(
     *,
     phase: str,
     status: str,
+    attempt_index: int,
     failure_code: str | None = None,
 ) -> None:
     """发布不含输入、源码、plan/spec 或 child 路径的 direct 安全事件."""
@@ -101,13 +102,14 @@ def _publish_direct_progress(
         "phase": phase,
         "status": status,
         "engine": "direct_glsl_layerplan_v1",
+        "attempt_index": attempt_index,
     }
     if failure_code is not None:
         event["failure_code"] = failure_code
     try:
         callback(event, None)
     except Exception:
-        # 可观测性故障不得改变 engine 选择、fallback 或产品结果。
+        # 可观测性故障不得改变 engine 选择、重试或产品结果。
         return
 
 
@@ -253,9 +255,7 @@ class EngineRolloutGenerationResult:
             config_fingerprint=pipeline.config_fingerprint,
             report_schema_version=pipeline.report_schema_version,
             patch_candidate_draw_budget=pipeline.patch_candidate_draw_budget,
-            patch_evidence=tuple(
-                dict(item) for item in pipeline.patch_evidence
-            ),
+            patch_evidence=tuple(dict(item) for item in pipeline.patch_evidence),
             renderer_path=pipeline.renderer_path,
             target_mae=pipeline.target_mae,
             target_loss=pipeline.target_loss,
@@ -263,11 +263,7 @@ class EngineRolloutGenerationResult:
             prepare_duration_ms=pipeline.prepare_duration_ms,
             uniform_render_count=pipeline.uniform_render_count,
             uniform_render_p95_ms=pipeline.uniform_render_p95_ms,
-            scene=(
-                dict(pipeline.scene)
-                if pipeline.scene is not None
-                else None
-            ),
+            scene=(dict(pipeline.scene) if pipeline.scene is not None else None),
             trace=tuple(dict(item) for item in pipeline.trace),
             shader_graph_shadow=(
                 dict(pipeline.shader_graph_shadow)
@@ -298,11 +294,9 @@ class FrozenPromotionEvidenceVerifier:
             digest is None
             or receipt.authorization_sha256 != digest
             or receipt.target_stage != authorization.target_stage
-            or receipt.registry_entry_id
-            != authorization.durable_registry_entry_id
+            or receipt.registry_entry_id != authorization.durable_registry_entry_id
             or receipt.durable_evidence_uri != authorization.durable_evidence_uri
-            or receipt.durable_evidence_sha256
-            != authorization.durable_evidence_sha256
+            or receipt.durable_evidence_sha256 != authorization.durable_evidence_sha256
             or receipt.direct_implementation_identity
             != authorization.direct_implementation_identity
         ):
@@ -312,9 +306,7 @@ class FrozenPromotionEvidenceVerifier:
             target_stage=receipt.target_stage,
             durable_registry_entry_id=receipt.registry_entry_id,
             durable_evidence_sha256=receipt.durable_evidence_sha256,
-            direct_implementation_identity=(
-                receipt.direct_implementation_identity
-            ),
+            direct_implementation_identity=(receipt.direct_implementation_identity),
         )
 
 
@@ -369,7 +361,7 @@ def _direct_response_payload(
     """把 direct candidate 映射为不含 ProgramSpec/LayerPlan 的公开响应摘要."""
     best = result.current_best
     if result.status != "ok" or best is None:
-        raise EngineAttemptFailure("direct_attempt_inconclusive")
+        raise EngineAttemptFailure(result.failure_code or "direct_attempt_inconclusive")
     try:
         quality = MIN_QUALITY_BUDGETS[quality_preset]
     except KeyError as exc:
@@ -393,8 +385,7 @@ def _direct_response_payload(
             "render_budget": result.config.draw_budget,
             "llm_call_count": total_llm_calls,
             "llm_budget": (
-                result.config.plan_llm_budget
-                + result.config.direct_author_llm_budget
+                result.config.plan_llm_budget + result.config.direct_author_llm_budget
             ),
             "refine_budget": result.config.refine_budget,
             "run_classification": "independent_experiment",
@@ -477,10 +468,9 @@ def _claim_private_attempt(
     """以 attempt 目录的原子 mkdir 实现确定性 child 的 write-once claim."""
     project_id = request.project_id
     attempt_id = str(context.attempt_id)
-    if (
-        not _PRIVATE_IDENTIFIER.fullmatch(project_id)
-        or not _PRIVATE_IDENTIFIER.fullmatch(attempt_id)
-    ):
+    if not _PRIVATE_IDENTIFIER.fullmatch(
+        project_id
+    ) or not _PRIVATE_IDENTIFIER.fullmatch(attempt_id):
         raise EngineAttemptFailure("engine_attempt_identity_invalid")
     project_root = store.base_root / project_id
     project_root.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -595,6 +585,7 @@ class DirectEngineAttemptExecutor:
             request,
             phase="direct_start",
             status="running",
+            attempt_index=context.attempt_index,
         )
         claimed = False
         result: DirectAttemptResult | None = None
@@ -659,6 +650,7 @@ class DirectEngineAttemptExecutor:
                 request,
                 phase="direct_failed",
                 status="failed",
+                attempt_index=context.attempt_index,
                 failure_code=exc.code,
             )
             raise
@@ -675,6 +667,7 @@ class DirectEngineAttemptExecutor:
                 request,
                 phase="direct_failed",
                 status="failed",
+                attempt_index=context.attempt_index,
                 failure_code="direct_attempt_failed",
             )
             raise EngineAttemptFailure("direct_attempt_failed") from exc
@@ -682,6 +675,7 @@ class DirectEngineAttemptExecutor:
             request,
             phase="direct_completed",
             status="completed",
+            attempt_index=context.attempt_index,
         )
         return EngineAttemptSuccess(
             attempt_id=context.attempt_id,
@@ -742,13 +736,10 @@ class PrivateShaderGraphAttemptExecutor:
                     on_progress=request.progress_callback,
                 ),
             )
-            if (
-                result.project_id != request.project_id
-                or result.run_id != str(context.attempt_id)
+            if result.project_id != request.project_id or result.run_id != str(
+                context.attempt_id
             ):
-                raise EngineAttemptFailure(
-                    "shader_graph_attempt_identity_mismatch"
-                )
+                raise EngineAttemptFailure("shader_graph_attempt_identity_mismatch")
             artifacts = await asyncio.to_thread(
                 self._artifacts.read_private_attempt,
                 str(context.attempt_id),
@@ -891,17 +882,6 @@ class EngineRolloutRuntime:
             ),
             plan=plan,
         )
-        if result.engine_run.get("fallback_from") is not None:
-            publish(
-                {
-                    "node": "engine_rollout",
-                    "phase": "engine_fallback",
-                    "status": "completed",
-                    "engine": result.engine,
-                    "fallback_from": result.engine_run["fallback_from"],
-                    "fallback_reason": result.engine_run["fallback_reason"],
-                }
-            )
         publish(
             {
                 "node": "engine_rollout",
@@ -963,10 +943,7 @@ def build_engine_rollout_runtime(
     """仅为有效 canary/direct-default 构造真实 runtime，其他阶段零副作用."""
     if resolution.effective_stage not in {"canary", "direct_default"}:
         return None
-    if (
-        promotion_verification is None
-        and policy.promotion_authorization is not None
-    ):
+    if promotion_verification is None and policy.promotion_authorization is not None:
         raise PromotionAuthorityUnavailable("promotion_authority_unavailable")
     identity_value = current_direct_glsl_implementation_identity().get(
         "identity_sha256"
@@ -975,8 +952,7 @@ def build_engine_rollout_runtime(
         raise PromotionAuthorityUnavailable("direct_implementation_identity_invalid")
     if (
         promotion_verification is not None
-        and identity_value
-        != promotion_verification.direct_implementation_identity
+        and identity_value != promotion_verification.direct_implementation_identity
     ):
         raise PromotionAuthorityUnavailable("direct_implementation_identity_drift")
     private_attempt_root.mkdir(mode=0o700, parents=True, exist_ok=True)

@@ -2,10 +2,10 @@
 
 最小 Shader DSL V1 的领域契约与确定性 specialized WebGL1 Compiler，按
 本包承载 ShaderGraph DSL 的当前执行契约；历史演进设计已归档，不作为实现依据。
-当前 ShaderGraph fallback engine 以 ShaderDocument 作为执行真相；Model Author、
+当前显式 ShaderGraph engine 以 ShaderDocument 作为执行真相；Model Author、
 typed layer patch、node-id 参数优化、CandidateSnapshot、Compiler、program cache
 和 final Artifact 已贯通。默认 direct engine 不调用本 DSL；MinScene 适配只用于
-ShaderGraph 感知 fallback 与 legacy 审计。上述历史 spec 不是当前任务清单。
+ShaderGraph 感知初始文档与 legacy 审计。上述历史 spec 不是当前任务清单。
 
 - `document.py`：严格 ShaderDocument 契约。有序 1..8 个 Layer（数组顺序固定为后到前）；
   层内 ShapeExpr 为 circle/ellipse/rounded_box/segment 与二元 union/subtract/intersect
