@@ -30,6 +30,15 @@ MANIFEST = ROOT / "benchmarks/layerplan_glsl_shadow/manifest_v1.yaml"
 GATE = ROOT / "benchmarks/layerplan_glsl_shadow/gate_v1.yaml"
 MANIFEST_V2 = ROOT / "benchmarks/layerplan_glsl_shadow/manifest_v2.yaml"
 GATE_V2 = ROOT / "benchmarks/layerplan_glsl_shadow/gate_v2.yaml"
+FROZEN_V2_MANIFEST_SHA256 = (
+    "ac4eb80838c1b49ac948a4892ce0ce9a133534062d67e79cfc404307d5d0b394"
+)
+FROZEN_V2_GATE_SHA256 = (
+    "1f1a4b3786cfef12e7e5c5c738a6f69877da3babe8295af59446d4b12079fd8b"
+)
+FROZEN_V2_IMPLEMENTATION_IDENTITY_SHA256 = (
+    "76897856088dd9adebd99d87c8585a00b68c524ea5438774d9a85a1e8fdfb9a4"
+)
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -65,6 +74,30 @@ def _copy_protocol(tmp_path: Path) -> tuple[Path, Path]:
     return manifest_path, gate_path
 
 
+def _copy_current_v2_protocol(tmp_path: Path) -> tuple[Path, Path]:
+    """在临时目录绑定当前实现身份，不改写仓库内冻结的历史 v2 suite."""
+    manifest_path = tmp_path / "manifest_v2.yaml"
+    gate_path = tmp_path / "gate_v2.yaml"
+    manifest_payload = _load_yaml(MANIFEST_V2)
+    manifest_payload["implementation_identity"] = (
+        current_direct_glsl_implementation_identity()
+    )
+    _write_yaml(manifest_path, manifest_payload)
+    manifest = load_shadow_suite_manifest(manifest_path)
+
+    gate_payload = _load_yaml(GATE_V2)
+    gate_payload["manifest_sha256"] = manifest.manifest_sha256
+    gate_payload["implementation_identity_sha256"] = (
+        manifest.implementation_identity_sha256
+    )
+    gate_payload["config_fingerprints"] = {
+        "AB": manifest.config_fingerprint_for_order("AB"),
+        "BA": manifest.config_fingerprint_for_order("BA"),
+    }
+    _write_yaml(gate_path, gate_payload)
+    return manifest_path, gate_path
+
+
 def test_repository_protocol_loads_and_cross_balances() -> None:
     manifest = load_shadow_suite_manifest(MANIFEST)
     gate = load_shadow_suite_gate(GATE, manifest=manifest)
@@ -85,23 +118,35 @@ def test_repository_protocol_loads_and_cross_balances() -> None:
     assert gate.gate_sha256 == sha256(GATE.read_bytes()).hexdigest()
 
 
-def test_repository_v2_protocol_binds_current_implementation() -> None:
+def test_repository_v2_protocol_remains_loadable_as_frozen_history() -> None:
     manifest = load_shadow_suite_manifest(MANIFEST_V2)
     gate = load_shadow_suite_gate(GATE_V2, manifest=manifest)
     identity = current_direct_glsl_implementation_identity()
 
     assert manifest.schema_version == "layerplan_glsl_shadow_manifest_v2"
-    assert dict(manifest.implementation_identity or {}) == identity
-    assert manifest.implementation_identity_sha256 == identity["identity_sha256"]
+    assert manifest.manifest_sha256 == FROZEN_V2_MANIFEST_SHA256
+    assert sha256(MANIFEST_V2.read_bytes()).hexdigest() == FROZEN_V2_MANIFEST_SHA256
+    assert (
+        manifest.implementation_identity_sha256
+        == FROZEN_V2_IMPLEMENTATION_IDENTITY_SHA256
+    )
+    assert identity["identity_sha256"] != FROZEN_V2_IMPLEMENTATION_IDENTITY_SHA256
     assert gate.schema_version == "layerplan_glsl_shadow_gate_v2"
-    assert gate.implementation_identity_sha256 == identity["identity_sha256"]
+    assert gate.gate_sha256 == FROZEN_V2_GATE_SHA256
+    assert sha256(GATE_V2.read_bytes()).hexdigest() == FROZEN_V2_GATE_SHA256
+    assert (
+        gate.implementation_identity_sha256
+        == FROZEN_V2_IMPLEMENTATION_IDENTITY_SHA256
+    )
     legacy = load_shadow_suite_manifest(MANIFEST)
     assert manifest.config_fingerprint_for_order("AB") != (
         legacy.config_fingerprint_for_order("AB")
     )
     assert manifest.arm_config(1).implementation_identity_sha256 == (
-        identity["identity_sha256"]
+        FROZEN_V2_IMPLEMENTATION_IDENTITY_SHA256
     )
+    with pytest.raises(ShadowSuiteContractError, match="只允许 --verify"):
+        require_current_protocol_for_live(manifest, gate)
 
 
 def test_legacy_protocol_remains_loadable_without_v2_identity() -> None:
@@ -161,19 +206,83 @@ def test_v2_gate_rejects_identity_or_generation_mismatch(tmp_path: Path) -> None
         load_shadow_suite_gate(GATE, manifest=manifest)
 
 
-def test_legacy_protocol_is_verify_only() -> None:
+def test_noncurrent_protocols_are_verify_only(tmp_path: Path) -> None:
     legacy_manifest = load_shadow_suite_manifest(MANIFEST)
     legacy_gate = load_shadow_suite_gate(GATE, manifest=legacy_manifest)
     with pytest.raises(ShadowSuiteContractError, match="只允许 --verify"):
         require_current_protocol_for_live(legacy_manifest, legacy_gate)
 
-    current_manifest = load_shadow_suite_manifest(MANIFEST_V2)
-    current_gate = load_shadow_suite_gate(GATE_V2, manifest=current_manifest)
+    frozen_v2_manifest = load_shadow_suite_manifest(MANIFEST_V2)
+    frozen_v2_gate = load_shadow_suite_gate(GATE_V2, manifest=frozen_v2_manifest)
+    with pytest.raises(ShadowSuiteContractError, match="只允许 --verify"):
+        require_current_protocol_for_live(frozen_v2_manifest, frozen_v2_gate)
+
+    manifest_path, gate_path = _copy_current_v2_protocol(tmp_path)
+    current_manifest = load_shadow_suite_manifest(manifest_path)
+    current_gate = load_shadow_suite_gate(gate_path, manifest=current_manifest)
     require_current_protocol_for_live(current_manifest, current_gate)
 
     forged = replace(current_manifest, rounds=4)
     with pytest.raises(ShadowSuiteContractError, match="内存对象或文件已漂移"):
         require_current_protocol_for_live(forged, current_gate)
+
+
+def test_suite_cli_defaults_historical_v2_only_for_verify() -> None:
+    from scripts.run_layerplan_glsl_shadow_suite import (
+        HISTORICAL_V2_GATE,
+        HISTORICAL_V2_MANIFEST,
+        _parse_args,
+        _resolve_protocol_paths,
+    )
+
+    verify_args = _parse_args(["--verify", "historical-report"])
+    assert _resolve_protocol_paths(verify_args) == (
+        HISTORICAL_V2_MANIFEST,
+        HISTORICAL_V2_GATE,
+    )
+
+    explicit_args = _parse_args(
+        [
+            "--verify",
+            "custom-report",
+            "--manifest",
+            "custom-manifest.yaml",
+            "--gate",
+            "custom-gate.yaml",
+        ]
+    )
+    assert _resolve_protocol_paths(explicit_args) == (
+        Path("custom-manifest.yaml"),
+        Path("custom-gate.yaml"),
+    )
+
+
+def test_suite_cli_live_requires_explicit_protocol_pair(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    from scripts.run_layerplan_glsl_shadow_suite import main
+
+    assert main(["--output-root", "out", "--allow-live-model"]) == 2
+    assert "live 模式没有默认协议" in capsys.readouterr().err
+
+    assert main(["--manifest", str(MANIFEST_V2)]) == 2
+    assert "--manifest 与 --gate 必须成对提供" in capsys.readouterr().err
+
+    assert (
+        main(
+            [
+                "--manifest",
+                str(MANIFEST_V2),
+                "--gate",
+                str(GATE_V2),
+                "--output-root",
+                "out",
+                "--allow-live-model",
+            ]
+        )
+        == 2
+    )
+    assert "只允许 --verify" in capsys.readouterr().err
 
 
 def test_instruction_hash_drift_is_rejected(tmp_path: Path) -> None:

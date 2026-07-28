@@ -268,6 +268,17 @@ def test_parse_layer_plan_valid() -> None:
     assert semantics["layers"][1]["role"] == "subject"
 
 
+def test_layer_plan_schema_exposes_canonical_coordinate_contract() -> None:
+    schema = layer_plan_json_schema()
+    description = schema["properties"]["layers"]["items"]["properties"]["region"][
+        "description"
+    ]
+
+    assert "origin (0,0) is bottom-left" in description
+    assert "y grows up" in description
+    assert "lower-left corner" in description
+
+
 @pytest.mark.parametrize(
     "key",
     ["validation_attestation", "plan_sha256", "reference_sha256", "author_identity"],
@@ -801,13 +812,22 @@ async def test_direct_glsl_repair_v2_receives_only_safe_violation_hints() -> Non
 
 
 def test_prompt_definitions_are_versioned_and_bind_contract() -> None:
-    assert VISUAL_ANALYSIS_PROMPT.version
-    assert DIRECT_GLSL_INITIAL_PROMPT.version == "direct_glsl_initial_v2_1"
-    assert DIRECT_GLSL_REFINE_PROMPT.version == "direct_glsl_refine_v2_1"
+    assert VISUAL_ANALYSIS_PROMPT.version == "layerplan_visual_analysis_v1_2"
+    assert DIRECT_GLSL_INITIAL_PROMPT.version == "direct_glsl_initial_v2_2"
+    assert DIRECT_GLSL_REFINE_PROMPT.version == "direct_glsl_refine_v2_2"
     assert DIRECT_GLSL_REPAIR_PROMPT.version == "min_author_repair_v2_1"
     assert "layer_plan_v1" in VISUAL_ANALYSIS_PROMPT.prompt
     assert "webgl1_static_no_texture_v1" in DIRECT_GLSL_INITIAL_PROMPT.prompt
     assert "incumbent" in DIRECT_GLSL_REFINE_PROMPT.prompt
+    assert "左下角原点" in VISUAL_ANALYSIS_PROMPT.prompt
+    assert "y = 1 - (y_top + height)" in VISUAL_ANALYSIS_PROMPT.prompt
+    for prompt in (DIRECT_GLSL_INITIAL_PROMPT, DIRECT_GLSL_REFINE_PROMPT):
+        assert "v_uv=(0,0) 是画布左下角" in prompt.prompt
+        assert "顶部" in prompt.prompt
+        assert "较大的 v_uv.y" in prompt.prompt
+        assert "孤立圆形白斑" in prompt.prompt
+    assert "阴影的位置和形态必须服从参考图" in DIRECT_GLSL_INITIAL_PROMPT.prompt
+    assert "自阴影、内凹阴影或接触暗部" in DIRECT_GLSL_INITIAL_PROMPT.prompt
     for prompt in (
         VISUAL_ANALYSIS_PROMPT,
         DIRECT_GLSL_INITIAL_PROMPT,

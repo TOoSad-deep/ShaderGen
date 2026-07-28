@@ -1,4 +1,4 @@
-"""执行最新冻结的 LayerPlan/direct GLSL shadow suite."""
+"""复验历史 LayerPlan/direct GLSL suite，或显式运行当前冻结协议."""
 
 from __future__ import annotations
 
@@ -18,16 +18,24 @@ from agent.app.services.layerplan_glsl_shadow_suite import (
 from shaderforge.rendering import PlaywrightWebGL1Renderer
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MANIFEST = ROOT / "benchmarks/layerplan_glsl_shadow/manifest_v2.yaml"
-DEFAULT_GATE = ROOT / "benchmarks/layerplan_glsl_shadow/gate_v2.yaml"
+HISTORICAL_V2_MANIFEST = ROOT / "benchmarks/layerplan_glsl_shadow/manifest_v2.yaml"
+HISTORICAL_V2_GATE = ROOT / "benchmarks/layerplan_glsl_shadow/gate_v2.yaml"
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="LayerPlan/direct GLSL 四样本 × AB/BA shadow suite。",
     )
-    parser.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
-    parser.add_argument("--gate", default=str(DEFAULT_GATE))
+    parser.add_argument(
+        "--manifest",
+        default=None,
+        help="live 必须显式提供；--verify 缺省使用历史 v2。",
+    )
+    parser.add_argument(
+        "--gate",
+        default=None,
+        help="必须与 --manifest 成对提供；--verify 缺省使用历史 v2。",
+    )
     parser.add_argument("--output-root", default=None)
     parser.add_argument(
         "--allow-live-model",
@@ -40,6 +48,21 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="只复验已有 shadow-suite-* 目录及其引用的全部单 run。",
     )
     return parser.parse_args(argv)
+
+
+def _resolve_protocol_paths(args: argparse.Namespace) -> tuple[Path, Path]:
+    manifest = Path(args.manifest) if args.manifest is not None else None
+    gate = Path(args.gate) if args.gate is not None else None
+    if (manifest is None) != (gate is None):
+        raise ValueError("--manifest 与 --gate 必须成对提供。")
+    if manifest is not None and gate is not None:
+        return manifest, gate
+    if args.verify is not None:
+        return HISTORICAL_V2_MANIFEST, HISTORICAL_V2_GATE
+    raise ValueError(
+        "live 模式没有默认协议：仓库 v2 仅供历史 --verify；"
+        "请显式提供当前 --manifest 与 --gate。"
+    )
 
 
 async def _run(args: argparse.Namespace) -> Path:
@@ -59,8 +82,15 @@ async def _run(args: argparse.Namespace) -> Path:
 def main(argv: list[str] | None = None) -> int:
     """CLI 入口；默认拒绝触发真实模型."""
     args = _parse_args(argv)
-    manifest = load_shadow_suite_manifest(Path(args.manifest))
-    gate = load_shadow_suite_gate(Path(args.gate), manifest=manifest)
+    try:
+        manifest_path, gate_path = _resolve_protocol_paths(args)
+        manifest = load_shadow_suite_manifest(manifest_path)
+        gate = load_shadow_suite_gate(gate_path, manifest=manifest)
+    except (OSError, ValueError) as exc:
+        print(str(exc), file=sys.stderr)  # noqa: T201
+        return 2
+    args.manifest = str(manifest_path)
+    args.gate = str(gate_path)
     if args.verify is not None:
         payload = verify_shadow_suite_report(
             Path(args.verify), manifest=manifest, gate=gate
