@@ -34,6 +34,7 @@ MERMAID_NODE_DECLARATION = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\[|\()
 SHADERFORGE_PUBLIC_IMPORT_ROOTS = frozenset(
     {
         "shaderforge",
+        "shaderforge.config",
         "shaderforge.public",
         "shaderforge.contracts",
         "shaderforge.dsl",

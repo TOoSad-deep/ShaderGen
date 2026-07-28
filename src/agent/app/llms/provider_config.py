@@ -9,6 +9,7 @@ from typing import Any
 from pydantic import SecretStr
 
 from agent.app.contracts.llm import ResponseFormat, normalize_response_format
+from shaderforge.config import RUNTIME_TIMEOUTS
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,11 @@ PROVIDER_ENVS = {
     ),
 }
 PROVIDER_NAMES = frozenset(PROVIDER_ENVS)
+
+
+def llm_request_timeout_seconds() -> float:
+    """返回统一 YAML 中冻结的模型单次 HTTP 请求超时."""
+    return RUNTIME_TIMEOUTS.llm.request_seconds
 
 
 def provider_settings(

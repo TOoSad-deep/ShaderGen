@@ -6,6 +6,7 @@ from langchain_openai import ChatOpenAI
 
 from agent.app.contracts.llm import ResponseFormat
 from agent.app.llms.provider_config import (
+    llm_request_timeout_seconds,
     provider_settings,
     response_format_model_kwargs,
 )
@@ -55,4 +56,5 @@ def get_kimi_model(
         base_url=settings.base_url,
         model_kwargs=response_format_model_kwargs(response_format),
         max_completion_tokens=max_output_tokens,
+        timeout=llm_request_timeout_seconds(),
     )

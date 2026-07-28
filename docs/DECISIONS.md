@@ -764,3 +764,10 @@
 - 决策：根据用户确认的单人、单环境开发边界，不再把 durable promotion evidence、人工授权或 canary 演练作为本地产品路径切换的前置条件。未配置 `SHADERGEN_ENGINE_POLICY_PATH` 时，Backend 默认冻结无 `PromotionAuthorizationV1` 的 `direct_default` policy：每个新父 run 先执行 `direct_glsl_layerplan_v1/shader_program_spec_v1`，direct 失败仍创建全新的私有 `shader_graph_v1/shader_document_v1` fallback attempt；选中结果继续通过父 manifest/API `engine/representation/engine_run` discriminator 公开。`SHADERGEN_DIRECT_GLSL_KILL_SWITCH=1` 仍立即让新 run 回到旧引擎。
 - 原因：D095 的授权与灰度模型面向多环境生产发布；当前项目只有开发者本人使用，不存在独立生产/测试环境或跨团队审批链。继续要求上传私有 bundle、登记 durable registry、签发 canary authorization 只增加流程负担，不改变该单环境中的责任主体。
 - 影响：无授权 `direct_default` 不读取 evidence registry，`promotion_authorization_sha256` 保持 `null`，但 direct/fallback attempt 隔离、私有 Artifact 权限、Renderer/cache/预算隔离、父原子发布、历史 v1 reader 和 kill switch 均保留。显式 `canary` 仍必须携带并验证 `PromotionAuthorizationV1`；显式 `direct_default` 若携带授权，也继续逐字段校验 registry。该决策覆盖 D095/D096 对“默认路径必须等待 durable”的限制，不删除或改写任何历史 benchmark、盲评或 promotion bundle。
+
+## D098 - 单环境长任务统一扩大有界等待窗口
+
+- 日期：2026-07-27
+- 决策：针对 direct-first 实际运行中浏览器 4 分钟先停止、服务端 direct attempt 5 分钟后才 timeout、随后 fresh fallback 继续完成的错位，将所有相关等待窗口按内小外大统一扩大。模型单次 HTTP 请求默认 3600 秒；WebGL1 prepare/draw 默认 300/120 秒；每个 direct、fresh ShaderGraph fallback 或 production-shadow attempt 默认 7200 秒，协调器关闭 60 秒，shadow 单资源关闭 30 秒。浏览器 fast/balanced/high/manual POST 默认等待 5/6/8/12 小时，单次进度 GET 等待 60 秒，POST 结算后继续观察 2 小时。所有值统一收敛到版本化 `src/shaderforge/config/runtime_timeouts.yaml`，Python 与 Vite 共读同一文件并严格校验正有限数、未知字段和内外层覆盖关系；修改后重启 Backend/前端开发服务器并重新构建生产前端。
+- 原因：run `3221e887-0389-46a0-a7d5-166f4f0e32eb` 中，direct 在 300 秒 attempt 上限触发 `engine_attempt_timeout`，fresh old fallback 随后约 53 秒成功；前端 fast 的 4 分钟边界必然更早提示“停止等待”。只增大浏览器或只增大 engine 会把最短边界移动到另一层，无法避免同类错位。
+- 影响：慢模型与串行 fallback 不再轻易被客户端或协调器提前截断，但服务端仍是阻塞式 API，浏览器停止等待仍不代表取消；极慢或失去响应的供应商现在可能更久才失败。所有窗口仍保持有限，kill switch、engine 隔离、Graph 拓扑、候选接受、预算、公开 API 与 Artifact 契约均不变。

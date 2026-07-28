@@ -14,6 +14,7 @@ from agent.app.contracts.llm import (
     normalize_thinking_mode,
 )
 from agent.app.llms.provider_config import (
+    llm_request_timeout_seconds,
     provider_settings,
     response_format_model_kwargs,
 )
@@ -109,4 +110,5 @@ def get_qwen_model(
             capture_reasoning,
             SHADER_GEN_QWEN_OUTPUT_THINKING,
         ),
+        timeout=llm_request_timeout_seconds(),
     )

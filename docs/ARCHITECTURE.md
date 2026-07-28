@@ -95,6 +95,16 @@ fallback 与 manifest union 契约见
 或 durable 存储故障不能阻止旧引擎恢复。开关回到 `0` 后，无授权
 `direct_default` 直接恢复 direct-first；显式携带授权的 policy 仍须重新通过校验。
 
+长任务的 timeout 按内小外大保持有界：OpenAI-compatible 模型单次 HTTP 请求默认
+3600 秒，WebGL1 prepare/draw 默认 300/120 秒；每个 direct、fresh fallback 或
+production-shadow attempt 默认 7200 秒。以上全部由
+`src/shaderforge/config/runtime_timeouts.yaml` 统一配置并在 Python 启动与 Vite
+构建时严格校验。direct 失败后 fallback 是新的串行
+attempt，所以浏览器 POST 的 fast/balanced/high/manual 默认等待分别为
+5/6/8/12 小时，每次进度 GET 最多 60 秒；POST 停止等待后仍观察 2 小时。配置只接受
+正有限秒数并校验外层覆盖两个串行 attempt。这些上限减少慢模型造成的假超时，但不提供服务端取消，
+也不把挂起任务改造成无限等待。
+
 ## HTTP 与进度
 
 `POST /api/shader/generate` 不再包含模式分流，固定执行 `scene_mvp`。客户端可预生成 `run_id`，在 POST 阻塞期间轮询：

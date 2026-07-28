@@ -73,6 +73,7 @@ packages = [
     "backend.app.services",
     "backend.sql",
     "shaderforge",
+    "shaderforge.config",
     "shaderforge.contracts",
     "shaderforge.dsl",
     "shaderforge.evaluation",
@@ -94,6 +95,7 @@ packages = [
 "agent.app.config" = ["*.yaml"]
 "agent.app.prompts" = ["*.yaml"]
 "backend.sql" = ["*.sql"]
+"shaderforge.config" = ["*.yaml"]
 
 [tool.ruff]
 lint.select = [

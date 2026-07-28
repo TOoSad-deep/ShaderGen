@@ -53,6 +53,13 @@ Backend 负责 FastAPI HTTP 边界、应用生命周期、过程账本和 `scene
   相同或任一方向嵌套；lifespan 取得默认产品 Service 的实际 `artifacts.base_root`
   后，再拒绝两个私有根与该公开根相同或嵌套。测试替身若没有可证明的
   `artifacts.base_root`，只执行前一项可证明检查，不猜测路径。
+- 长任务等待保持“很宽但有限”：每个 direct、fresh ShaderGraph fallback 或
+  production-shadow attempt 默认最多 7200 秒，协调器关闭最多 60 秒，shadow
+  单资源关闭最多 30 秒。全部读取
+  `src/shaderforge/config/runtime_timeouts.yaml` 的 `engine` 与
+  `production_shadow` 段，且只接受正有限秒数。direct 与 fallback 是独立且可能串行
+  的 attempt，因此同一 YAML 会校验浏览器等待覆盖两者的合计上界，而不是只覆盖单
+  attempt。
 
 ## 分层
 

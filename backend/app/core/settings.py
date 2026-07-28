@@ -22,6 +22,7 @@ from backend.app.core.promotion_authorization import (
     require_verification_matches_policy,
     verify_runtime_promotion_authorization,
 )
+from shaderforge.config import RUNTIME_TIMEOUTS
 
 DEFAULT_CORS_ORIGINS = (
     "http://127.0.0.1:5173",
@@ -90,14 +91,22 @@ class BackendSettings:
     production_shadow_artifact_root: Path = DEFAULT_PRODUCTION_SHADOW_ARTIFACT_ROOT
     production_shadow_queue_capacity: int = 4
     production_shadow_worker_count: int = 1
-    production_shadow_attempt_timeout_seconds: float = 180.0
-    production_shadow_close_timeout_seconds: float = 5.0
-    production_shadow_resource_close_timeout_seconds: float = 3.0
+    production_shadow_attempt_timeout_seconds: float = (
+        RUNTIME_TIMEOUTS.production_shadow.attempt_seconds
+    )
+    production_shadow_close_timeout_seconds: float = (
+        RUNTIME_TIMEOUTS.production_shadow.close_seconds
+    )
+    production_shadow_resource_close_timeout_seconds: float = (
+        RUNTIME_TIMEOUTS.production_shadow.resource_close_seconds
+    )
     engine_rollout_private_artifact_root: Path = (
         DEFAULT_ENGINE_ROLLOUT_PRIVATE_ARTIFACT_ROOT
     )
-    engine_rollout_attempt_timeout_seconds: float = 300.0
-    engine_rollout_close_timeout_seconds: float = 5.0
+    engine_rollout_attempt_timeout_seconds: float = (
+        RUNTIME_TIMEOUTS.engine.attempt_seconds
+    )
+    engine_rollout_close_timeout_seconds: float = RUNTIME_TIMEOUTS.engine.close_seconds
 
     def __post_init__(self) -> None:
         """冻结前严格拒绝可能让 shadow 失去有界性的配置."""

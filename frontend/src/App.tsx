@@ -21,6 +21,7 @@ import {
   nextPollDelayMs,
   PROGRESS_REQUEST_TIMEOUT_MS,
 } from "./runStages";
+import { RUNTIME_TIMEOUTS } from "./runtimeTimeouts";
 import { FailureDetails } from "./components/FailureDetails";
 import { MinRunLivePanel } from "./components/MinRunLivePanel";
 import { SceneMvpSummary } from "./components/SceneMvpSummary";
@@ -55,13 +56,14 @@ interface RunObserver {
   request: AbortController | null;
 }
 
-const PROGRESS_OBSERVATION_GRACE_MS = 5 * 60 * 1000;
+const PROGRESS_OBSERVATION_GRACE_MS =
+  RUNTIME_TIMEOUTS.progressObservationGraceSeconds * 1000;
 
 const DEFAULT_REQUEST_TIMEOUT_MS: Record<QualityPreset, number> = {
-  fast: 4 * 60 * 1000,
-  balanced: 7 * 60 * 1000,
-  high: 12 * 60 * 1000,
-  manual: 30 * 60 * 1000,
+  fast: RUNTIME_TIMEOUTS.generationRequestSeconds.fast * 1000,
+  balanced: RUNTIME_TIMEOUTS.generationRequestSeconds.balanced * 1000,
+  high: RUNTIME_TIMEOUTS.generationRequestSeconds.high * 1000,
+  manual: RUNTIME_TIMEOUTS.generationRequestSeconds.manual * 1000,
 };
 
 function newClientRunId(): string {
@@ -74,8 +76,6 @@ function newClientRunId(): string {
 }
 
 function generationRequestTimeoutMs(qualityPreset: QualityPreset): number {
-  const configured = Number(import.meta.env.VITE_GENERATION_REQUEST_TIMEOUT_MS);
-  if (Number.isFinite(configured) && configured >= 10_000) return configured;
   return DEFAULT_REQUEST_TIMEOUT_MS[qualityPreset];
 }
 

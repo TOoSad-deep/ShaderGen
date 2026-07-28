@@ -31,6 +31,7 @@ from backend.app.core.engine_policy import (
     shader_engine_policy_sha256,
     stable_project_bucket,
 )
+from shaderforge.config import RUNTIME_TIMEOUTS
 
 AttemptStatus = Literal["succeeded", "failed"]
 _SAFE_CODE = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
@@ -308,8 +309,8 @@ class EngineParentRunCoordinator:
         direct_factory: AttemptExecutorFactory,
         shader_graph_factory: AttemptExecutorFactory,
         artifacts: EngineRolloutArtifactService,
-        attempt_timeout_seconds: float = 300.0,
-        close_timeout_seconds: float = 5.0,
+        attempt_timeout_seconds: float = RUNTIME_TIMEOUTS.engine.attempt_seconds,
+        close_timeout_seconds: float = RUNTIME_TIMEOUTS.engine.close_seconds,
     ) -> None:
         """注入私有 attempt factory；本类自身不持有共享 Renderer/cache."""
         for name, value in (

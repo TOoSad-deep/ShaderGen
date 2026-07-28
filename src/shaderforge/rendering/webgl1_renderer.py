@@ -22,6 +22,7 @@ from playwright.async_api import (
     Error as PlaywrightError,
 )
 
+from shaderforge.config import RUNTIME_TIMEOUTS
 from shaderforge.contracts.webgl1 import (
     WEBGL1_STATIC_NO_TEXTURE_V1,
     RenderContract,
@@ -529,8 +530,10 @@ class PlaywrightWebGL1Renderer:
         *,
         contract: RenderContract = WEBGL1_STATIC_NO_TEXTURE_V1,
         replay_on_worker_failure: int = 1,
-        prepare_timeout_ms: float = 30_000,
-        draw_timeout_ms: float = 15_000,
+        prepare_timeout_ms: float = (
+            RUNTIME_TIMEOUTS.renderer.prepare_seconds * 1000
+        ),
+        draw_timeout_ms: float = RUNTIME_TIMEOUTS.renderer.draw_seconds * 1000,
     ) -> None:
         """配置渲染契约、worker 失败重放次数与 prepare/draw 有界超时."""
         if contract != WEBGL1_STATIC_NO_TEXTURE_V1:
@@ -655,7 +658,10 @@ class PlaywrightWebGL1Renderer:
             if resource is None:
                 return
             try:
-                await asyncio.wait_for(resource.close(), timeout=1.0)
+                await asyncio.wait_for(
+                    resource.close(),
+                    timeout=RUNTIME_TIMEOUTS.renderer.resource_close_seconds,
+                )
             except (TimeoutError, PlaywrightError, OSError, RuntimeError):
                 pass
 
@@ -663,7 +669,10 @@ class PlaywrightWebGL1Renderer:
         await close_quietly(browser)
         if playwright is not None:
             try:
-                await asyncio.wait_for(playwright.stop(), timeout=1.0)
+                await asyncio.wait_for(
+                    playwright.stop(),
+                    timeout=RUNTIME_TIMEOUTS.renderer.resource_close_seconds,
+                )
             except (TimeoutError, PlaywrightError, OSError, RuntimeError):
                 pass
 

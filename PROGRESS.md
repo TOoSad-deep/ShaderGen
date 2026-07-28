@@ -1,11 +1,12 @@
 # 进度
 
-最后更新：2026-07-27
+最后更新：2026-07-28
 
 > 本文件是有界的当前交接页，不是逐会话追加日志。功能状态以 `docs/FEATURES.md` 为准，长期取舍以 `docs/DECISIONS.md` 为准，完整旧记录见 `docs/progress/archive/`。
 
 ## 当前状态
 
+- 已按 D098 把 direct-first 长任务的等待窗口按内小外大统一扩大，并收敛到 Python/Vite 共读的 `src/shaderforge/config/runtime_timeouts.yaml`：模型单次 HTTP 默认 3600 秒，Renderer prepare/draw 默认 300/120 秒，单 engine attempt 默认 7200 秒；前端四档 POST 默认 5/6/8/12 小时、进度 GET 60 秒、POST 后观察 2 小时。YAML 严格校验正有限数、未知字段和内外层覆盖关系，未引入无限等待或取消语义。
 - 已按 D089 完成前端运行可观测性收口：`frontend/src/runStages.ts` 单一纯函数视图模型统一推导运行状态、12 节点事实、失败定位、预算/current_best、Initial Author 输出来源与首轮真实选择；`author_source`/`selected_source` 均不冒充最终 provenance。轮询 single-flight、失败/连续 pending capped backoff、事件按 seq 去重排序；只有匹配 run_id 的稳定应用错误或 run 创建前的 `client_validation/request_validation` 停止观察，状态 live region 不包含每秒计时。产品 API/Graph/事件契约未变。
 - 已按 D083–D085 完成 Node Lab 结构收拢：HTTP transport 已迁入 `src/nodelab/http/`，Schema 与 Route 分层，稳定 API/CLI/8090 端口保持不变；干净 wheel 门禁确认旧 `nodelab_service` 不再打包，产品 Backend 仍不注册 Lab route。
 - 已按 D086 将当前 `scene_mvp` 12 个生产 Node 接入独立 Node Lab：Provider/Executor 位于 `agent.app.nodes.png_to_shader_min.node_lab`，受信任组合根位于 `agent.app.services.node_lab`；Artifact hydration、带指纹状态恢复、AI-off 与真实模型门禁均已贯通。`/lab` 已支持 descriptor 驱动 Artifact 输入、等价 SHA 合并、推荐父 Step、空目录/离线恢复与响应式可访问性。
@@ -44,7 +45,7 @@
 - 当前产品缺少 durable 冻结 benchmark 与独立人工偏好门禁；生产模型已切换为 `kimi:k3-256k`（D080），旧 Qwen 证据不外推，且 Initial 仍常由 scorer 判定不如 fallback。
 - D072/D075 报告仅为 `partial` 且候选空间已被 D070 替换，不能用于 ShaderGraph 发布或直接把 patch maturity 从 1/12 调到 32 draw。
 - `scene_mvp` 仍没有 CMA-ES、2000 draw 生产预算、优化中断/恢复和对应质量证据。
-- 服务端仍是阻塞式 API；浏览器停止等待不等于服务端取消。任务化/cancel、outbox/reaper 和多 worker 分布式锁属于后续可靠性设计。
+- 服务端仍是阻塞式 API；D098 只扩大有界等待，浏览器停止等待仍不等于服务端取消。任务化/cancel、outbox/reaper 和多 worker 分布式锁属于后续可靠性设计。
 - 进度注册表是单进程内存态、重启即失且无历史 run 查询：终态后前端只能展示本次会话已缓存事件，无法回放历史 run 阶段视图；后端也不提供节点开始/进行中百分比、完整 run 时长或最终 current_best provenance，前端按 D089 只展示事件级真实事实。
 - 历史 V1/Node Lab real-model 完整报告与公开 review package 已按授权随旧 `output/` 删除；registry 对应条目为 `missing`，只能审计定位。
 - 当前 scene_mvp Node Lab 尚无覆盖真实 Chromium Renderer、工作台操作、断线恢复和真实模型的自动浏览器 E2E；LabRun 也没有单 run cancel/close API，Renderer 只能在 finalize 或进程退出时回收。
@@ -52,6 +53,7 @@
 
 ## 当前验证基线
 
+- 2026-07-28 D098 统一 timeout YAML 验证：`make check` 全绿（702 个 Python 单测、docs-check、干净 sdist→wheel 且包含 `shaderforge.config/runtime_timeouts.yaml`、1 个 LangGraph validate、32 个 Node 内置测试、32 个 Vitest、前端生产构建）；另有 75 个 timeout/provider/backend/rollout/Renderer 聚焦单测、全仓 Ruff、`mypy --strict src backend`（158 个源文件）与 `git diff --check` 通过。未调用真实模型或运行 benchmark。
 - 2026-07-27 D097 直切验证：`BackendSettings.from_env()` 在无 policy/registry 配置时返回 `direct_default`、无 `PromotionAuthorizationV1`、有效阶段 `direct_default`；83 个聚焦 policy/rollout/lifecycle 单测和 `make check` 全绿（693 个 Python 单测、docs-check、干净 wheel、1 个 LangGraph validate、32 个 Node 内置测试、32 个 Vitest、前端构建），全仓 Ruff 与 `mypy --strict src backend`（156 个源文件）通过。使用无数据库、无 policy、无 registry 配置完成真实 Backend lifespan smoke，`GET /health` 返回 200 后正常关闭；未调用真实模型或运行 benchmark。
 - 2026-07-27 合并主干验证：`make check` 全绿（690 个 Python 单测、docs-check、干净 sdist→wheel 边界、1 个 LangGraph validate、32 个 Node 内置测试、32 个 Vitest、前端生产构建）；真实 Chromium 全量集成 `23 passed, 1 skipped`，`make test-scene-mvp-ui` 通过。
 - 全仓 Ruff、`mypy --strict src backend`（156 个源文件）、`uv lock --check`、冻结 v1/v2 manifest/gate 原字节对比分支和 `git diff --check` 通过。合并时新增 Vitest include 边界，避免 Node 内置测试被重复收集。
@@ -60,7 +62,7 @@
 
 ## 最近重要变更
 
-- 2026-07-27：按 D096 完成匿名人工盲评与私有 promotion bundle：LayerPlan Arm B 偏好 `5/8=0.625`，人工 gate=`supported`；自动 suite、8 个 run、盲评与人工结果合并为 `f42aefb…` 并离线递归验签。由于 bundle 尚未迁入用户授权的 durable 介质，生产保持 `no_go_pending_durable`。
+- 2026-07-28：按 D098 将模型、Renderer、engine attempt、前端 POST/进度 GET/终态观察的超时整体放大并保持有限，再统一暴露为 Python/Vite 共读的版本化 YAML，修复浏览器 4 分钟早于服务端 direct+fallback 串行路径停止等待的边界错位。
 - 2026-07-27：按 D097 将单人单环境默认路径直接切换为无授权 `direct_default`；保留 fresh old fallback、父 discriminator、历史 reader 与 kill switch，显式 canary 仍使用原严格授权边界。
 - 2026-07-27：按 D095 完成不可达的生产替换 runtime：启动期 durable/identity 授权、稳定 engine 选择、direct child、fresh old fallback、父 v2 Artifact/API discriminator、历史 reader 和 kill switch 已贯通；当前 registry 无 durable entry，生产仍 old，未上传或登记私有 bundle。
 - 2026-07-27：按 D089 完成前端运行可观测性并经多轮审计收口证据语义：新增 `frontend/src/runStages.ts` 单一可测试阶段视图模型与 vitest 单测，覆盖五态状态、阶段摘要、失败定位与真实计时；阶段只显示“预计下一节点（未确认开始）”，`author_source`/首轮 `selected_source` 均不冒充最终 provenance。轮询 single-flight、失败/连续 pending capped backoff、按 seq 去重；匹配 run_id 的稳定应用失败与 run 创建前的 `client_validation/request_validation` 才作为确定终态，计时与状态 live region 分离。生产 Graph/API/事件契约不变。

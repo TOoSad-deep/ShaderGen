@@ -9,6 +9,7 @@ import type {
   MinRunProgressSnapshot,
   ShaderApiFailure,
 } from "./api/shader";
+import { RUNTIME_TIMEOUTS } from "./runtimeTimeouts";
 
 // 与 src/agent/app/graphs/png_to_shader_min_graph.py 的 12 个节点一一对应。
 export const MIN_GRAPH_NODES: ReadonlyArray<{ id: string; label: string }> = [
@@ -86,7 +87,8 @@ export function initialSelectionSourceLabel(
 // 停止条件包括终态、服务端明确失败、新 run 或页面卸载（见 App.tsx）。
 export const POLL_BASE_DELAY_MS = 1200;
 export const POLL_MAX_DELAY_MS = 10_000;
-export const PROGRESS_REQUEST_TIMEOUT_MS = 10_000;
+export const PROGRESS_REQUEST_TIMEOUT_MS =
+  RUNTIME_TIMEOUTS.progressRequestSeconds * 1000;
 
 export function nextPollDelayMs(consecutiveFailures: number): number {
   if (consecutiveFailures <= 0) return POLL_BASE_DELAY_MS;

@@ -9,6 +9,7 @@ import backend.app.database.agent_memory as agent_memory
 import backend.app.database.session as database_session
 import backend.app.main as backend_main
 from backend.app.core.settings import BackendSettings
+from shaderforge.config import RUNTIME_TIMEOUTS
 
 
 def test_backend_settings_freeze_boot_environment(monkeypatch) -> None:
@@ -31,6 +32,31 @@ def test_backend_settings_reject_wildcard_cors(monkeypatch) -> None:
     monkeypatch.setenv("SHADERGEN_CORS_ORIGINS", "*")
     with pytest.raises(ValueError, match="不允许使用"):
         BackendSettings.from_env(load_environment=False)
+
+
+def test_backend_settings_use_unified_timeout_yaml() -> None:
+    settings = BackendSettings.from_env(load_environment=False)
+
+    assert (
+        settings.engine_rollout_attempt_timeout_seconds
+        == RUNTIME_TIMEOUTS.engine.attempt_seconds
+    )
+    assert (
+        settings.engine_rollout_close_timeout_seconds
+        == RUNTIME_TIMEOUTS.engine.close_seconds
+    )
+    assert (
+        settings.production_shadow_attempt_timeout_seconds
+        == RUNTIME_TIMEOUTS.production_shadow.attempt_seconds
+    )
+    assert (
+        settings.production_shadow_close_timeout_seconds
+        == RUNTIME_TIMEOUTS.production_shadow.close_seconds
+    )
+    assert (
+        settings.production_shadow_resource_close_timeout_seconds
+        == RUNTIME_TIMEOUTS.production_shadow.resource_close_seconds
+    )
 
 
 @pytest.mark.anyio

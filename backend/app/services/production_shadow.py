@@ -39,6 +39,7 @@ from backend.app.core.engine_policy import (
     shader_engine_policy_sha256,
     stable_project_bucket,
 )
+from shaderforge.config import RUNTIME_TIMEOUTS
 
 logger = logging.getLogger("backend.shader.shadow")
 
@@ -75,9 +76,13 @@ class ProductionShadowConfig:
     output_root: Path
     queue_capacity: int = 4
     worker_count: int = 1
-    attempt_timeout_seconds: float = 180.0
-    close_timeout_seconds: float = 5.0
-    resource_close_timeout_seconds: float = 3.0
+    attempt_timeout_seconds: float = (
+        RUNTIME_TIMEOUTS.production_shadow.attempt_seconds
+    )
+    close_timeout_seconds: float = RUNTIME_TIMEOUTS.production_shadow.close_seconds
+    resource_close_timeout_seconds: float = (
+        RUNTIME_TIMEOUTS.production_shadow.resource_close_seconds
+    )
 
     def __post_init__(self) -> None:
         """拒绝无界或非正的并发与超时配置."""

@@ -1,0 +1,29 @@
+version: runtime_timeouts_v1
+
+# 所有时间统一使用秒；修改后需要重启 Backend 和前端开发服务器。
+llm:
+  request_seconds: 3600
+
+renderer:
+  prepare_seconds: 300
+  draw_seconds: 120
+  resource_close_seconds: 10
+
+engine:
+  # direct 与 fresh ShaderGraph fallback 各自拥有一个独立 attempt。
+  attempt_seconds: 7200
+  close_seconds: 60
+
+production_shadow:
+  attempt_seconds: 7200
+  close_seconds: 60
+  resource_close_seconds: 30
+
+frontend:
+  generation_request_seconds:
+    fast: 18000
+    balanced: 21600
+    high: 28800
+    manual: 43200
+  progress_request_seconds: 60
+  progress_observation_grace_seconds: 7200

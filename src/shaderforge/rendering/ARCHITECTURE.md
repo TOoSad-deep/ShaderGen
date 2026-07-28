@@ -12,7 +12,7 @@
 - `prepare(fragment_source, width, height, uniform_schema)` 只做一次静态校验、编译和链接；`render_uniforms()` 每帧完整上传白名单值集、清屏、draw、`gl.finish()` 和 `readPixels`。
 - uniform 白名单只支持 `float`/`vec2`/`vec3`/`vec4`；缺失、额外名称、非有限数值、错误类型或错误向量长度都在绘制前拒绝，因此不会沿用上一帧 uniform。`u_resolution`/`u_time` 由 Renderer 保留并自动上传。
 - `capture_png=False` 只返回按左上角行序排列的 RGB bytes，不调用 `canvas.toDataURL()`；`capture_png=True` 同时返回 PNG，仅用于接受候选或最终结果。
-- 同一个 `PlaywrightWebGL1Renderer` 生命周期内复用 browser/page；worker 异常时关闭并最多重放一次。`prepare()` 与 `render_uniforms()` 都有有界超时（`prepare_timeout_ms` 默认 30000、`draw_timeout_ms` 默认 15000，必须为正有限值）：超时即取消挂起的 page 调用、重置 worker（关闭 browser/page 以便下次重建）并抛 `RendererUnavailableError`，模型 GLSL 造成的 GPU/page 长期阻塞绝不无限等待。
+- 同一个 `PlaywrightWebGL1Renderer` 生命周期内复用 browser/page；worker 异常时关闭并最多重放一次。产品默认 timeout 读取 `shaderforge/config/runtime_timeouts.yaml` 的 `renderer` 段（当前 prepare/draw/单资源关闭为 300/120/10 秒），构造器显式值仍必须为正有限数：超时即取消挂起的 page 调用、重置 worker（关闭 browser/page 以便下次重建）并抛 `RendererUnavailableError`，模型 GLSL 造成的 GPU/page 长期阻塞绝不无限等待。
 - 成功 draw 且调用方提供具体 `receipt_spec_sha256` 后，`PreparedWebGL1Renderer` 才用 Renderer 私有 signer（`_renderer_receipt_signer()`，进程本地 HMAC key，不从公共包导出）就地签发 `ExecutionReceipt`（绑定源码/Spec、RGB/PNG 像素与 browser/GL/GLSL 运行身份），挂在 `PreparedRenderResult.execution_receipt` 上；下游 runner/attestation 只持有 verify-only 的 `TrustedReceiptVerifier`，结构上无法签发；receipt 只在同进程内可验证，不是 durable 证据。
 - WebGL context 固定 `antialias: false`、`preserveDrawingBuffer: true`，且不创建、不绑定输入纹理。
 - 静态校验错误、GLSL 编译错误和 renderer 不可用是三个不同失败面；前两者返回结构化结果，最后一个抛出 `RendererUnavailableError`。

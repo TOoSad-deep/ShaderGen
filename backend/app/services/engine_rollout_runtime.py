@@ -56,6 +56,7 @@ from backend.app.services.engine_rollout import (
     VerifiedPromotionEvidence,
     resolve_parent_run_plan,
 )
+from shaderforge.config import RUNTIME_TIMEOUTS
 from shaderforge.store import LocalArtifactStore
 
 _PUBLIC_ARTIFACTS = {
@@ -950,8 +951,8 @@ def build_engine_rollout_runtime(
     promotion_verification: PromotionAuthorizationVerification | None,
     public_min_service: Any,
     private_attempt_root: Path,
-    attempt_timeout_seconds: float = 300.0,
-    close_timeout_seconds: float = 5.0,
+    attempt_timeout_seconds: float = RUNTIME_TIMEOUTS.engine.attempt_seconds,
+    close_timeout_seconds: float = RUNTIME_TIMEOUTS.engine.close_seconds,
     direct_runner_factory: DirectRunnerFactory = (
         create_owned_layerplan_glsl_direct_runner
     ),

@@ -17,8 +17,10 @@ from agent.app.config.png_to_shader_min import (
 )
 from agent.app.contracts.llm import LLMCallOptions
 from agent.app.llms import client_factory
+from agent.app.llms.provider_config import llm_request_timeout_seconds
 from backend.app.database import agent_memory
 from backend.app.main import app
+from shaderforge.config import RUNTIME_TIMEOUTS
 
 
 def model_family_module(name: str):
@@ -41,6 +43,10 @@ def test_request_validation_failure_logs_safe_field_diagnostics(caplog) -> None:
 
 def test_llm_client_factory_configured() -> None:
     assert callable(client_factory.create_chat_model)
+
+
+def test_llm_request_timeout_uses_unified_yaml() -> None:
+    assert llm_request_timeout_seconds() == RUNTIME_TIMEOUTS.llm.request_seconds
 
 
 def test_model_name_env_uses_stable_default_and_allows_override(monkeypatch) -> None:
@@ -525,6 +531,9 @@ def test_openai_compatible_provider_factories_use_default_provider_env(
     assert openai.model_name == "gpt-4.1"
     assert openai.openai_api_base == "https://openai.example.test/v1"
     assert openai.temperature == 0.4
+    assert glm.request_timeout == 3600
+    assert deepseek.request_timeout == 3600
+    assert openai.request_timeout == 3600
 
 
 def test_model_factories_can_use_dashscope_provider_credentials(monkeypatch) -> None:
