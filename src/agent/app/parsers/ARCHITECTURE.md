@@ -10,7 +10,7 @@
 ## 边界规则
 
 - Parser 只做纯文本到结构化 Python 类型的转换，不调用模型、不读取 Prompt、不决定图流程。
-- `scene_mvp` 只接受单个完整 JSON 值；产品 Initial 必须绑定感知画布，Refine 必须是 ShaderGraph 联合类型 Schema 允许的一个 patch 对象。
+- ShaderGraph engine 只接受单个完整 JSON 值；Initial 必须绑定感知画布，Refine 必须是 ShaderGraph 联合类型 Schema 允许的一个 patch 对象。Direct engine 使用 `contracts/layerplan_glsl_shadow.py` 与 `shaderforge.program_spec` 的独立严格边界。
 - Parser 不调用 `validate_shader` 或 Renderer。
 - Node 可以调用 Parser 解析模型输出后写回 State。
 - Service 不直接 import Node 内部 helper；需要对外暴露 Parser 时，只能 re-export 稳定的纯函数。

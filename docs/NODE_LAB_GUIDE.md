@@ -1,5 +1,7 @@
 # Node Lab 使用指南
 
+> 文档状态：`current/optional-tooling`。这是按需调试指南，不是产品链路、当前待办或质量门禁；只有具体需求需要逐节点调试时才启动 Node Lab。
+
 Node Lab 是 Pipeline 无关的节点实验 Harness 和独立 FastAPI 服务。它提供节点目录、不可变 LabRun/Step、Artifact、Fixture、capability 与 benchmark 契约，但不会自动导入 Agent、Graph 或 ShaderForge。
 
 ## 启动

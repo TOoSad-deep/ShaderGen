@@ -5,8 +5,8 @@
 ## 当前文件
 
 - `model_config.py`：定义 `SHADER_GEN_MODEL_NAME`、布尔环境变量解析和冻结的 `NodeModelConfig`。
-- `png_to_shader_min.yaml`：`scene_mvp` 的 run 身份、实验 ID、报告版本、MAE/loss 目标与 fast/balanced/high/manual render/LLM/Refine 硬预算；当前 `0.04/0.02` 和 `48/2/1`、`96/4/2`、`640/9/9`、manual `1000/32/30` 显式标记为 `independent_experiment`。
-- `png_to_shader_min.py`：从包资源加载上述 YAML，严格校验字段、类型、值域、档位完整性和身份一致性，生成规范配置 SHA-256，按 LLM/Refine 预算与最多 12 个参数 block 推导每档 Graph recursion limit 和 ShaderGraph program compile 上限，并向 Service/Model Author 提供不可变策略。声明 `frozen_benchmark` 时必须精确匹配 D058/D059 的目标与三档预算且禁止 manual，否则 fail-fast；独立实验必须提供 `experiment_id` 和四档配置。
+- `png_to_shader_min.yaml`：`scene_mvp` 的共享质量目标，以及 ShaderGraph engine 的 run 身份、报告版本与 fast/balanced/high/manual render/LLM/Refine 硬预算。Direct engine 读取同名质量档位的目标，但使用独立 `LayerPlanGlslDirectConfig` 预算。
+- `png_to_shader_min.py`：从包资源加载上述 YAML，严格校验字段、类型、值域、档位完整性和身份一致性，生成规范配置 SHA-256，按 LLM/Refine 预算与最多 12 个参数 block 推导每档 Graph recursion limit 和 ShaderGraph program compile 上限，并向 Graph Service/Model Author 提供不可变策略。保留的 `frozen_benchmark` 校验只用于历史配置复验，不触发或要求当前 benchmark。
 
 ## 边界规则
 

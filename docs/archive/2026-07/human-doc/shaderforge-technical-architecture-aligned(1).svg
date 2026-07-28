@@ -1,0 +1,172 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="820" viewBox="0 0 1800 820">
+  <!-- 归档：最初设计参考，不代表当前架构。 -->
+  <defs>
+    <marker id="arrow-red" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#C7000B"/>
+    </marker>
+    <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#005EB8"/>
+    </marker>
+    <style>
+      .title { font: 700 26px "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #C7000B; }
+      .layer-title { font: 700 20px "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #222; }
+      .box-title { font: 700 17px "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #222; }
+      .box-title-green { font: 700 17px "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #00843D; }
+      .body { font: 15px "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #222; }
+      .small { font: 14px "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #222; }
+      .flow-label { font: 14px "PingFang SC", "Microsoft YaHei", Arial, sans-serif; fill: #005EB8; }
+      .layer { stroke: #666; stroke-width: 2; rx: 18; }
+      .module { stroke: #999; stroke-width: 1.4; rx: 12; }
+      .red-flow { stroke: #C7000B; stroke-width: 2.6; marker-end: url(#arrow-red); }
+      .blue-flow { stroke: #005EB8; stroke-width: 2.2; marker-end: url(#arrow-blue); }
+    </style>
+  </defs>
+
+  <rect width="1800" height="820" fill="#FFFFFF"/>
+  <text x="900" y="38" text-anchor="middle" class="title">图片生成视效 Shader 技术架构图</text>
+
+  <!-- 1. 用户输入层 -->
+  <rect x="40" y="70" width="1720" height="150" class="layer" fill="#E6E6E6"/>
+  <text x="70" y="105" class="layer-title">1. 用户输入层</text>
+
+  <g>
+    <rect x="150" y="120" width="260" height="65" class="module" fill="#F7F7F7"/>
+    <text x="175" y="148" class="box-title">初始 Idea</text>
+    <text x="175" y="172" class="body">用户想要的视觉效果</text>
+  </g>
+  <g>
+    <rect x="500" y="120" width="260" height="65" class="module" fill="#F7F7F7"/>
+    <text x="525" y="148" class="box-title">初始需求</text>
+    <text x="525" y="172" class="body">风格、场景、约束</text>
+  </g>
+  <g>
+    <rect x="850" y="120" width="260" height="65" class="module" fill="#F7F7F7"/>
+    <text x="875" y="148" class="box-title">初始设计</text>
+    <text x="875" y="172" class="body">参考图、草图、描述</text>
+  </g>
+  <g>
+    <rect x="1200" y="120" width="260" height="65" class="module" fill="#F7F7F7"/>
+    <text x="1225" y="148" class="box-title">初始测试规划</text>
+    <text x="1225" y="172" class="body">验收指标、样例集</text>
+  </g>
+
+  <!-- layer flow -->
+  <line x1="900" y1="220" x2="900" y2="246" class="blue-flow"/>
+  <text x="915" y="238" class="flow-label">输入汇入</text>
+
+  <!-- 2. 核心处理层 -->
+  <rect x="40" y="250" width="1720" height="250" class="layer" fill="#FFF4C2"/>
+  <text x="70" y="285" class="layer-title">2. 核心处理层</text>
+
+  <g>
+    <rect x="70" y="330" width="185" height="92" class="module" fill="#C6EFCE"/>
+    <text x="88" y="358" class="box-title-green">Routing</text>
+    <text x="88" y="382" class="body"><tspan fill="#00843D" font-weight="700"></tspan>任务拆解</text>
+    <text x="88" y="405" class="body">智能路由</text>
+  </g>
+  <line x1="255" y1="376" x2="278" y2="376" class="red-flow"/>
+
+  <g>
+    <rect x="285" y="330" width="185" height="92" class="module" fill="#C6EFCE"/>
+    <text x="303" y="358" class="box-title-green">Agent 分析</text>
+    <text x="303" y="382" class="body"><tspan fill="#00843D" font-weight="700"></tspan>目标理解</text>
+    <text x="303" y="405" class="body">策略选择</text>
+  </g>
+  <line x1="470" y1="376" x2="493" y2="376" class="red-flow"/>
+
+  <g>
+    <rect x="500" y="330" width="185" height="92" class="module" fill="#FFFFFF"/>
+    <text x="518" y="358" class="box-title">Intent IR</text>
+    <text x="518" y="382" class="body">对象、颜色、位置</text>
+    <text x="518" y="405" class="body">约束结构化</text>
+  </g>
+  <line x1="685" y1="376" x2="708" y2="376" class="red-flow"/>
+
+  <g>
+    <rect x="715" y="330" width="185" height="92" class="module" fill="#FFFFFF"/>
+    <text x="733" y="358" class="box-title">DSL 节点图</text>
+    <text x="733" y="382" class="body">可搜索的 Shader</text>
+    <text x="733" y="405" class="body">结构表示</text>
+  </g>
+  <line x1="900" y1="376" x2="923" y2="376" class="red-flow"/>
+
+  <g>
+    <rect x="930" y="330" width="185" height="92" class="module" fill="#FFFFFF"/>
+    <text x="948" y="358" class="box-title">Renderer 渲染</text>
+    <text x="948" y="382" class="body">DSL → GLSL</text>
+    <text x="948" y="405" class="body">渲染可评估画面</text>
+  </g>
+  <line x1="1115" y1="376" x2="1138" y2="376" class="red-flow"/>
+
+  <g>
+    <rect x="1145" y="330" width="185" height="92" class="module" fill="#FFFFFF"/>
+    <text x="1163" y="358" class="box-title">Oracle / 局部损失</text>
+    <text x="1163" y="382" class="body">全局评分 + <tspan fill="#00843D" font-weight="700">局部损失</tspan></text>
+    <text x="1163" y="405" class="body">颜色、形状、边缘</text>
+  </g>
+  <line x1="1330" y1="376" x2="1353" y2="376" class="red-flow"/>
+
+  <g>
+    <rect x="1360" y="330" width="185" height="92" class="module" fill="#FFFFFF"/>
+    <text x="1378" y="358" class="box-title">Search Engine 调优</text>
+    <text x="1378" y="382" class="body">CMA-ES</text>
+    <text x="1378" y="405" class="body">MAP-Elites、结构变异</text>
+  </g>
+  <line x1="1545" y1="376" x2="1568" y2="376" class="red-flow"/>
+
+  <g>
+    <rect x="1575" y="330" width="155" height="92" class="module" fill="#FFFFFF"/>
+    <text x="1592" y="358" class="box-title">VLM / HITL</text>
+    <text x="1592" y="382" class="body">模型评审、人工评审</text>
+    <text x="1592" y="405" class="body">Store 记录</text>
+  </g>
+
+  <line x1="900" y1="500" x2="900" y2="526" class="blue-flow"/>
+  <text x="915" y="518" class="flow-label">工具 / 知识支撑与结果沉淀</text>
+
+  <!-- 3. 工具知识层 -->
+  <rect x="40" y="530" width="1720" height="230" class="layer" fill="#DDEEFF"/>
+  <text x="70" y="565" class="layer-title">3. 工具知识层</text>
+
+  <g>
+    <rect x="85" y="600" width="250" height="105" class="module" fill="#EAF6FF"/>
+    <text x="105" y="628" class="box-title">AI / Agent 知识</text>
+    <text x="105" y="652" class="small">• Prompt 策略</text>
+    <text x="105" y="674" class="small">• ReAct / LangGraph</text>
+    <text x="105" y="696" class="small">• 停止条件与预算</text>
+  </g>
+
+  <g>
+    <rect x="360" y="600" width="250" height="105" class="module" fill="#EAF6FF"/>
+    <text x="380" y="628" class="box-title">图像与颜色指标</text>
+    <text x="380" y="652" class="small">• Lab ΔE / CIEDE2000</text>
+    <text x="380" y="674" class="small">• SSIM / Edge</text>
+    <text x="380" y="696" class="small">• Mask / <tspan fill="#00843D" font-weight="700">局部损失</tspan></text>
+  </g>
+
+  <g>
+    <rect x="635" y="600" width="250" height="105" class="module" fill="#EAF6FF"/>
+    <text x="655" y="628" class="box-title">搜索优化工具</text>
+    <text x="655" y="652" class="small">• CMA-ES</text>
+    <text x="655" y="674" class="small">• MAP-Elites</text>
+    <text x="655" y="696" class="small">• 参数归一化 / 分块优化</text>
+  </g>
+
+  <g>
+    <rect x="910" y="600" width="250" height="105" class="module" fill="#EAF6FF"/>
+    <text x="930" y="628" class="box-title">Shader / 渲染知识</text>
+    <text x="930" y="652" class="small">• GLSL / WebGL</text>
+    <text x="930" y="674" class="small">• SDF / Noise / Blend</text>
+    <text x="930" y="696" class="small">• 渲染一致性测试</text>
+  </g>
+
+  <g>
+    <rect x="1185" y="600" width="250" height="105" class="module" fill="#EAF6FF"/>
+    <text x="1205" y="628" class="box-title">数据与评测</text>
+    <text x="1205" y="652" class="small">• SQLite / 文件缓存</text>
+    <text x="1205" y="674" class="small">• 版本、谱系、评分</text>
+    <text x="1205" y="696" class="small">• VLM pairwise / 人工标签</text>
+  </g>
+
+ 
+</svg>
