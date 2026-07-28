@@ -25,6 +25,6 @@
 
 ## 按需能力
 
-`layerplan_glsl_shadow.py`、盲评、suite 和 promotion evidence 仍为休眠的质量实验实现。只有用户明确发起方案比较或上线准备时才读取、运行或扩建；它们不接产品 API，也不决定默认 engine。
+`layerplan_glsl_shadow.py`、盲评、suite 和 promotion evidence 仍为休眠的质量实验实现。只有用户明确发起方案比较或上线准备时才读取、运行或扩建；它们不接产品 API，也不决定默认 engine。冻结协议在实现身份漂移后仅用于历史 `--verify`；suite live CLI 没有隐式默认协议，必须显式提供成对的当前 `--manifest`/`--gate`，且仍由实现身份检查 fail-closed。
 
 `node_lab.py` 只在显式 factory 配置下把 ShaderGraph Node 接入独立 Node Lab。

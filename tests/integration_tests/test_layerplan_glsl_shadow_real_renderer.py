@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import json
 from hashlib import sha256
+from io import BytesIO
 
 import pytest
+from PIL import Image
 
 from agent.app.contracts.layerplan_glsl_shadow import (
     assemble_program_spec,
@@ -35,6 +37,18 @@ _FRAGMENT_SOURCE = (
     "uniform float u_time;\n"
     "uniform float u_gain;\n"
     "void main(){gl_FragColor=vec4(vec3(u_gain),1.0);}\n"
+)
+
+_COORDINATE_CONTRACT_SOURCE = (
+    "precision mediump float;\n"
+    "varying vec2 v_uv;\n"
+    "uniform sampler2D u_image;\n"
+    "uniform vec2 u_resolution;\n"
+    "uniform float u_time;\n"
+    "void main(){\n"
+    "  vec3 color = v_uv.y > 0.5 ? vec3(1.0,0.0,0.0) : vec3(0.0,0.0,1.0);\n"
+    "  gl_FragColor=vec4(color,1.0);\n"
+    "}\n"
 )
 
 
@@ -121,3 +135,27 @@ async def test_shadow_contract_shape_prepares_and_draws_on_real_renderer() -> No
         issue_attestation(spec, receipt=receipt, static_ok=True)
     )
     assert is_executable(attested)
+
+
+@pytest.mark.anyio
+async def test_v_uv_matches_canonical_lower_left_region_coordinates() -> None:
+    """返回的左上行像素必须来自较大的 v_uv.y，避免图像行序反转."""
+    async with PlaywrightWebGL1Renderer() as renderer:
+        prepared = await renderer.prepare(
+            _COORDINATE_CONTRACT_SOURCE,
+            CANVAS,
+            CANVAS,
+            {},
+        )
+        result = await prepared.render_uniforms({}, capture_png=True)
+        await prepared.close()
+
+    assert result.success, result.draw_error
+    assert result.rgb_bytes is not None
+    assert result.image_bytes is not None
+    row_size = CANVAS * 3
+    assert result.rgb_bytes[:3] == bytes((255, 0, 0))
+    assert result.rgb_bytes[-row_size : -row_size + 3] == bytes((0, 0, 255))
+    png = Image.open(BytesIO(result.image_bytes)).convert("RGB")
+    assert png.getpixel((0, 0)) == (255, 0, 0)
+    assert png.getpixel((0, CANVAS - 1)) == (0, 0, 255)

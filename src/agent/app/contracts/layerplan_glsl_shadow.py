@@ -102,6 +102,12 @@ _LAYER_PLAN_JSON_SCHEMA: dict[str, object] = {
                     "z_index": {"type": "integer", "minimum": 0},
                     "region": {
                         "type": "object",
+                        "description": (
+                            "Normalized bounding box in canonical WebGL v_uv "
+                            "coordinates: origin (0,0) is bottom-left, x grows "
+                            "right, y grows up, and x/y identify the lower-left "
+                            "corner."
+                        ),
                         "additionalProperties": False,
                         "required": ["x", "y", "width", "height"],
                         "properties": {
