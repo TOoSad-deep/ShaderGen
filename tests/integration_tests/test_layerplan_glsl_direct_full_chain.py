@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
+from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,7 +14,11 @@ from agent.app.services.layerplan_glsl_direct import (
     LayerPlanGlslDirectConfig,
     LayerPlanGlslDirectRunner,
 )
-from backend.app.services.engine_rollout_runtime import build_engine_rollout_runtime
+from backend.app.services.engine_rollout import EngineAttemptFailure
+from backend.app.services.engine_rollout_runtime import (
+    _write_private_process_renders,
+    build_engine_rollout_runtime,
+)
 from shaderforge.program_spec import is_executable
 from shaderforge.store import LocalArtifactStore
 from tests.direct_fakes import (
@@ -30,7 +36,10 @@ from tests.unit_tests.test_layerplan_glsl_direct_runner import _LayeredFakeGatew
 class _OwnedFakeRunner:
     def __init__(self, config: LayerPlanGlslDirectConfig) -> None:
         self._runner = LayerPlanGlslDirectRunner(
-            gateway=_LayeredFakeGateway(),
+            gateway=_LayeredFakeGateway(
+                initial_gains=(0.9,),
+                refine_gains=(0.5, 0.75),
+            ),
             renderer=_FakeRenderer(),
             config=config,
             receipt_issuer=_TEST_ISSUER,
@@ -81,7 +90,47 @@ async def test_fake_llm_renderer_direct_chain_retains_private_canonical_result()
 
 
 @pytest.mark.anyio
+async def test_private_process_renders_reject_parameter_trial_source(
+    tmp_path: Path,
+) -> None:
+    runner = LayerPlanGlslDirectRunner(
+        gateway=_LayeredFakeGateway(),
+        renderer=_FakeRenderer(),
+        config=LayerPlanGlslDirectConfig(
+            implementation_identity_sha256="b" * 64,
+            refine_budget=0,
+        ),
+        receipt_issuer=_TEST_ISSUER,
+    )
+    result = await runner.run(_reference_png(), instruction="match")
+    assert result.current_best is not None
+    parameter_trial = replace(
+        result.current_best,
+        provenance="parameter_tuning_trial",
+    )
+    invalid_result = replace(
+        result,
+        current_best=parameter_trial,
+        candidates=(parameter_trial,),
+    )
+    private_run = LocalArtifactStore(
+        tmp_path / "private",
+        restrictive_permissions=True,
+    ).register_run("project", "attempt")
+
+    with pytest.raises(
+        EngineAttemptFailure,
+        match="direct_candidate_retention_invalid",
+    ):
+        _write_private_process_renders(private_run, invalid_result)
+
+    assert not (private_run.root / "private" / "renders").exists()
+
+
+@pytest.mark.anyio
 async def test_runtime_progress_publishes_selected_render(tmp_path: Path) -> None:
+    project_id = str(uuid4())
+    run_id = str(uuid4())
     runtime = build_engine_rollout_runtime(
         public_store=LocalArtifactStore(tmp_path / "public"),
         private_attempt_root=tmp_path / "private",
@@ -89,11 +138,11 @@ async def test_runtime_progress_publishes_selected_render(tmp_path: Path) -> Non
     )
     progress: list[tuple[dict[str, object], bytes | None]] = []
     try:
-        await runtime.generate(
+        generated = await runtime.generate(
             _reference_png(),
             "image/png",
-            project_id=str(uuid4()),
-            run_id=str(uuid4()),
+            project_id=project_id,
+            run_id=run_id,
             on_progress=lambda event, render: progress.append((event, render)),
         )
     finally:
@@ -107,3 +156,52 @@ async def test_runtime_progress_publishes_selected_render(tmp_path: Path) -> Non
     assert len(renders) == 1
     assert renders[0] is not None
     assert renders[0].startswith(b"\x89PNG\r\n\x1a\n")
+
+    attempt_id = generated.engine_run["selected_attempt_id"]
+    private_run = runtime.artifacts.private_attempt_store.resolve_run(attempt_id)
+    manifest = json.loads(private_run.read_bytes("private/manifest.json"))
+    assert manifest["schema_version"] == "direct_private_attempt_v2"
+    retention = manifest["render_retention"]
+    assert retention["schema_version"] == "direct_process_renders_v1"
+    assert retention["scope"] == "high_level_author_candidates"
+    assert retention["parameter_trials_retained"] is False
+    assert retention["render_count"] == 3
+    assert retention["final_best_sequence"] == 3
+
+    process_renders = retention["renders"]
+    assert [item["role"] for item in process_renders] == [
+        "initial",
+        "refine",
+        "refine",
+    ]
+    assert [item["sequence"] for item in process_renders] == [2, 3, 4]
+    assert [item["became_current_best"] for item in process_renders] == [
+        True,
+        True,
+        False,
+    ]
+    assert [item["is_final_best"] for item in process_renders] == [
+        False,
+        True,
+        False,
+    ]
+    for item in process_renders:
+        data = private_run.read_bytes(item["relative_path"])
+        assert data.startswith(b"\x89PNG\r\n\x1a\n")
+        assert item["sha256"] == sha256(data).hexdigest()
+        assert item["size_bytes"] == len(data)
+        assert item["content_type"] == "image/png"
+    assert len({item["sha256"] for item in process_renders}) == 3
+
+    selected = next(item for item in process_renders if item["is_final_best"])
+    rejected = process_renders[-1]
+    assert rejected["objective_loss"] > selected["objective_loss"]
+    selected_render = private_run.read_bytes(selected["relative_path"])
+    assert private_run.read_bytes("private/render.png") == selected_render
+    assert renders[0] == selected_render
+    public_files = runtime.artifacts.public_store.verify_public_final_bundle(run_id)
+    assert set(public_files) == {"render.png", "metrics.json", "manifest.json"}
+    assert public_files["render.png"] == selected_render
+    public_manifest = json.loads(public_files["manifest.json"])
+    assert "render_retention" not in public_manifest
+    assert b"private/renders/" not in public_files["manifest.json"]

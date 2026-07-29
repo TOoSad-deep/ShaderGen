@@ -85,6 +85,7 @@ logger = logging.getLogger("agent.direct")
 DIRECT_ATTEMPT_RESULT_SCHEMA_VERSION = "direct_glsl_attempt_result_v1"
 DIRECT_ENGINE_ID = "direct_glsl_layerplan_v1"
 DIRECT_REPRESENTATION = "shader_program_spec_v1"
+DIRECT_HIGH_LEVEL_CANDIDATE_PROVENANCE = "model_generated_layered_direct_glsl"
 LAYERED_AUTHORING_REPRESENTATION = LAYERED_SHADER_SPEC_V1_SCHEMA_VERSION
 LAYERED_IMPLEMENTATION_IDENTITY_SCHEMA_VERSION = "direct_layered_glsl_implementation_v1"
 LAYERED_PARSER_POLICY_VERSION = "direct_layered_author_parser_v2"
@@ -416,7 +417,7 @@ class DirectCandidate:
     residual_summary: dict[str, Any]
     parent_layered_spec_sha256: str | None
     patched_layer_id: str | None
-    provenance: str = "model_generated_layered_direct_glsl"
+    provenance: str
 
 
 @dataclass(frozen=True)
@@ -820,6 +821,7 @@ class LayerPlanGlslDirectRunner:
             residual_summary=residual_summary,
             parent_layered_spec_sha256=parent_layered_spec_sha256,
             patched_layer_id=patched_layer_id,
+            provenance=DIRECT_HIGH_LEVEL_CANDIDATE_PROVENANCE,
         )
 
     async def run(
@@ -1139,6 +1141,7 @@ def create_owned_layerplan_glsl_direct_runner(
 __all__ = [
     "DIRECT_ATTEMPT_RESULT_SCHEMA_VERSION",
     "DIRECT_ENGINE_ID",
+    "DIRECT_HIGH_LEVEL_CANDIDATE_PROVENANCE",
     "DIRECT_REPRESENTATION",
     "LAYERED_AUTHORING_REPRESENTATION",
     "LAYERED_IMPLEMENTATION_IDENTITY_SCHEMA_VERSION",

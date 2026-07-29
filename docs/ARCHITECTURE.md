@@ -31,9 +31,13 @@ POST /api/shader/generate
 
 ## Artifact boundary
 
-Child attempts write detailed LayerPlan, Layered spec, ProgramSpec and diagnostics
-to the private attempt root. Only the selected attempt is promoted to the public
-parent root, which exposes `render.png`, `metrics.json` and `manifest.json`.
+Child attempts write detailed LayerPlan, Layered spec, ProgramSpec, diagnostics
+and ordered high-level Initial/Refine renders to the private attempt root.
+Individual parameter-search trial renders never enter that history. When the
+parameter-tuning inner loop is introduced, a separate boundary contract may
+retain only its pre-tuning initial and final-best snapshots. Only the selected
+attempt is promoted to the public parent root, which exposes `render.png`,
+`metrics.json` and `manifest.json`.
 
 ## Deliberately absent
 

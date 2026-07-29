@@ -19,6 +19,7 @@ from agent.app.services.engine_rollout_artifacts import (
 )
 from agent.app.services.layerplan_glsl_direct import (
     DIRECT_ATTEMPT_RESULT_SCHEMA_VERSION,
+    DIRECT_HIGH_LEVEL_CANDIDATE_PROVENANCE,
     DirectAttemptResult,
     LayerPlanGlslDirectConfig,
     create_owned_layerplan_glsl_direct_runner,
@@ -39,7 +40,7 @@ from backend.app.services.engine_rollout import (
     resolve_parent_run_plan,
 )
 from shaderforge.config import RUNTIME_TIMEOUTS
-from shaderforge.store import LocalArtifactStore
+from shaderforge.store import LocalArtifactStore, RunArtifactStore
 
 logger = logging.getLogger("backend.engine_rollout_runtime")
 
@@ -358,6 +359,67 @@ def _write_private_failure(
     )
 
 
+def _write_private_process_renders(
+    run: RunArtifactStore,
+    result: DirectAttemptResult,
+) -> list[dict[str, Any]]:
+    """Persist successful high-level Initial/Refine renders in process order."""
+    best = result.current_best
+    if best is None:
+        raise EngineAttemptFailure("direct_attempt_inconclusive")
+
+    candidates = result.candidates
+    previous_sequence = 0
+    for candidate in candidates:
+        if (
+            candidate.role not in {"initial", "refine"}
+            or candidate.provenance != DIRECT_HIGH_LEVEL_CANDIDATE_PROVENANCE
+        ):
+            raise EngineAttemptFailure("direct_candidate_retention_invalid")
+        if candidate.sequence <= previous_sequence:
+            raise EngineAttemptFailure("direct_candidate_sequence_invalid")
+        previous_sequence = candidate.sequence
+    if sum(candidate is best for candidate in candidates) != 1:
+        raise EngineAttemptFailure("direct_current_best_invalid")
+
+    process_renders: list[dict[str, Any]] = []
+    incumbent_loss = float("inf")
+    for step_index, candidate in enumerate(candidates):
+        became_current_best = candidate.loss < incumbent_loss
+        if became_current_best:
+            incumbent_loss = candidate.loss
+        path = f"private/renders/{step_index:03d}-{candidate.role}.png"
+        artifact = run.write_bytes(
+            path,
+            candidate.png_bytes,
+            content_type="image/png",
+        )
+        process_renders.append(
+            {
+                "step_index": step_index,
+                "sequence": candidate.sequence,
+                "role": candidate.role,
+                "relative_path": artifact.relative_path,
+                "sha256": artifact.sha256,
+                "size_bytes": artifact.size_bytes,
+                "content_type": artifact.content_type,
+                "mae": candidate.mae,
+                "objective_loss": candidate.loss,
+                "became_current_best": became_current_best,
+                "is_final_best": candidate is best,
+                "layered_spec_sha256": (
+                    candidate.layered_spec.layered_spec_sha256
+                ),
+                "spec_sha256": candidate.spec.spec_sha256,
+                "parent_layered_spec_sha256": (
+                    candidate.parent_layered_spec_sha256
+                ),
+                "patched_layer_id": candidate.patched_layer_id,
+            }
+        )
+    return process_renders
+
+
 def _write_private_success(
     store: LocalArtifactStore,
     context: EngineAttemptContext,
@@ -375,6 +437,7 @@ def _write_private_success(
     run.write_json("private/program-spec.json", _private_program_spec(result))
     run.write_text("private/shader.frag", best.spec.fragment_source)
     run.write_bytes("private/render.png", best.png_bytes, content_type="image/png")
+    process_renders = _write_private_process_renders(run, result)
     run.write_json(
         "private/metrics.json",
         {
@@ -387,12 +450,20 @@ def _write_private_success(
     run.write_json(
         "private/manifest.json",
         {
-            "schema_version": "direct_private_attempt_v1",
+            "schema_version": "direct_private_attempt_v2",
             "parent_run_id": str(context.parent_run_id),
             "attempt_id": str(context.attempt_id),
             "attempt_index": context.attempt_index,
             "artifact_scope": context.artifact_scope,
             "safe_summary": result.to_safe_summary(),
+            "render_retention": {
+                "schema_version": "direct_process_renders_v1",
+                "scope": "high_level_author_candidates",
+                "parameter_trials_retained": False,
+                "render_count": len(process_renders),
+                "final_best_sequence": best.sequence,
+                "renders": process_renders,
+            },
         },
     )
 
