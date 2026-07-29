@@ -6,11 +6,14 @@ from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
+import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
+from pydantic import ValidationError
 
 from backend.app.core.settings import BackendSettings
 from backend.app.main import create_app
+from backend.app.schemas.shader import MinRunProgressEvent
 
 
 def _png() -> bytes:
@@ -21,6 +24,17 @@ def _png() -> bytes:
 
 class _Runtime:
     async def generate(self, image, content_type, **kwargs):
+        on_progress = kwargs.get("on_progress")
+        if on_progress is not None:
+            on_progress(
+                {
+                    "node": "prepare_reference",
+                    "phase": "node_completed",
+                    "status": "completed",
+                    "attempt_index": 2,
+                },
+                None,
+            )
         return SimpleNamespace(
             project_id=kwargs["project_id"],
             run_id=kwargs["run_id"],
@@ -103,6 +117,43 @@ def test_generate_api_returns_only_current_direct_discriminators(
     assert payload["representation"] == "shader_program_spec_v1"
     assert payload["engine_run"]["attempt_refs"][0]["status"] == "succeeded"
     assert response.headers["Access-Control-Expose-Headers"] == "X-Request-ID"
+
+
+def test_progress_api_preserves_the_typed_attempt_index(tmp_path: Path) -> None:
+    app = create_app(
+        BackendSettings(
+            public_artifact_root=tmp_path / "public",
+            private_attempt_artifact_root=tmp_path / "private",
+        )
+    )
+    run_id = uuid4()
+    with TestClient(app) as client:
+        client.app.state.shader_runtime = _Runtime()
+        response = client.post(
+            "/api/shader/generate",
+            files={"file": ("reference.png", _png(), "image/png")},
+            data={"run_id": str(run_id)},
+        )
+        progress = client.get(f"/api/shader/runs/{run_id}/progress")
+
+    assert response.status_code == 200
+    assert progress.status_code == 200
+    node_event = next(
+        event
+        for event in progress.json()["events"]
+        if event["node"] == "prepare_reference"
+    )
+    assert node_event["status"] == "completed"
+    assert node_event["attempt_index"] == 2
+
+
+def test_progress_event_schema_rejects_unknown_status() -> None:
+    with pytest.raises(ValidationError):
+        MinRunProgressEvent(
+            seq=1,
+            node="prepare_reference",
+            status="mystery",
+        )
 
 
 def test_generate_api_returns_503_when_direct_runtime_is_unavailable(

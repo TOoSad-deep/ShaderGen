@@ -45,6 +45,7 @@ interface LiveMinRun {
   snapshot: MinRunProgressSnapshot | null;
   status: string;
   startedAt: string | null;
+  stopReason: string | null;
 }
 
 // 运行观察器：POST 结算后仍按 capped backoff 轮询，直到服务端终态、
@@ -203,6 +204,7 @@ export function App() {
           snapshot: data.snapshot ?? current?.snapshot ?? null,
           status: data.status,
           startedAt: data.started_at ?? current?.startedAt ?? null,
+          stopReason: data.stop_reason ?? current?.stopReason ?? null,
         };
       });
     };
@@ -254,7 +256,14 @@ export function App() {
       }
     };
 
-    setLiveRun({ runId, events: [], snapshot: null, status: "pending", startedAt: null });
+    setLiveRun({
+      runId,
+      events: [],
+      snapshot: null,
+      status: "pending",
+      startedAt: null,
+      stopReason: null,
+    });
     window.setTimeout(() => void pollProgress(), 500);
     let definitiveFailure = false;
     try {
@@ -418,6 +427,7 @@ export function App() {
             snapshot={liveRun.snapshot}
             status={liveRun.status}
             startedAt={liveRun.startedAt}
+            stopReason={liveRun.stopReason}
             progressNotice={progressNotice || null}
           />
         ) : null}

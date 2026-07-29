@@ -95,6 +95,7 @@ def apply_layer_patch(
         canvas=base_spec.canvas,
         layers=result_layers,
         author_identity=author_identity,
+        derivation_provenance=None,
     )
     return LayeredShaderSpecV1(
         schema_version=LAYERED_SHADER_SPEC_V1_SCHEMA_VERSION,
@@ -103,4 +104,5 @@ def apply_layer_patch(
         layers=result_layers,
         author_identity=author_identity,
         layered_spec_sha256=result_hash,
+        derivation_provenance=None,
     )

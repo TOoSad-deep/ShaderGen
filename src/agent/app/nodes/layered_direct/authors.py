@@ -23,6 +23,7 @@ from agent.app.contracts.layered_direct_glsl import (
     parse_layer_patch_semantics,
     parse_layered_shader_spec_semantics,
 )
+from agent.app.contracts.layerplan_glsl_direct import RefineFeedback
 from agent.app.contracts.llm import EffectiveCallIdentity, LLMGateway
 from agent.app.messages.structured_multimodal import (
     labeled_image_parts,
@@ -43,6 +44,7 @@ from shaderforge.program_spec import (
     canonical_json,
     sha256_hex_text,
 )
+from shaderforge.uniform_optimization import UniformOptimizationSummaryV2
 
 DIRECT_LAYERED_INITIAL_PROMPT = load_prompt_definition("direct_layered_initial_v1")
 DIRECT_LAYERED_REFINE_PROMPT = load_prompt_definition("direct_layered_refine_v1")
@@ -51,6 +53,7 @@ DEFAULT_LAYERED_INITIAL_MAX_OUTPUT_TOKENS = 8192
 DEFAULT_LAYER_PATCH_MAX_OUTPUT_TOKENS = 4096
 AUTHOR_IDENTITY_UNAVAILABLE = "author_identity_unavailable"
 _INPUT_CONTEXT_VERSION = "direct_layered_author_input_context_v1"
+_REFINE_INPUT_CONTEXT_VERSION = "direct_layered_author_refine_input_context_v2"
 
 
 @dataclass(frozen=True)
@@ -140,11 +143,15 @@ def _refine_context_sha256(
     current_render_content_type: str,
     incumbent: ValidatedLayeredIncumbent,
     plan: LayerPlanV1,
+    refinement_index: int,
+    remaining_refine_budget: int,
+    previous_refine_feedback: RefineFeedback | None,
+    uniform_optimization_summary: UniformOptimizationSummaryV2 | None,
 ) -> str:
     return sha256_hex_text(
         canonical_json(
             {
-                "version": _INPUT_CONTEXT_VERSION,
+                "version": _REFINE_INPUT_CONTEXT_VERSION,
                 "role": "refine",
                 "reference_content_type": content_type,
                 "current_render_sha256": sha256(current_render).hexdigest(),
@@ -155,6 +162,18 @@ def _refine_context_sha256(
                 "loss": incumbent.loss,
                 "mae": incumbent.mae,
                 "plan_sha256": plan.plan_sha256,
+                "refinement_index": refinement_index,
+                "remaining_refine_budget": remaining_refine_budget,
+                "previous_refine_feedback": (
+                    previous_refine_feedback.to_dict()
+                    if previous_refine_feedback is not None
+                    else None
+                ),
+                "uniform_optimization_summary": (
+                    uniform_optimization_summary.to_safe_dict()
+                    if uniform_optimization_summary is not None
+                    else None
+                ),
             }
         )
     )
@@ -290,6 +309,10 @@ async def run_refine_layered_glsl_author(
     content_type: str = "image/png",
     current_render_content_type: str = "image/png",
     user_instruction: str = "",
+    refinement_index: int,
+    remaining_refine_budget: int,
+    previous_refine_feedback: RefineFeedback | None,
+    uniform_optimization_summary: UniformOptimizationSummaryV2 | None,
     remaining_calls: int,
     max_output_tokens: int = DEFAULT_LAYER_PATCH_MAX_OUTPUT_TOKENS,
 ) -> RefineLayeredAuthorResult:
@@ -304,6 +327,23 @@ async def run_refine_layered_glsl_author(
             {"mae": incumbent.mae, "loss": incumbent.loss, **dict(incumbent.metrics)},
         ),
         text_part("residual_summary", dict(incumbent.residual_summary)),
+        text_part(
+            "refinement_context",
+            {
+                "refinement_index": refinement_index,
+                "remaining_refine_budget": remaining_refine_budget,
+                "previous_refine_feedback": (
+                    previous_refine_feedback.to_dict()
+                    if previous_refine_feedback is not None
+                    else None
+                ),
+                "uniform_optimization_summary": (
+                    uniform_optimization_summary.to_safe_dict()
+                    if uniform_optimization_summary is not None
+                    else None
+                ),
+            },
+        ),
         text_part("expected_json_schema", schema),
         *labeled_image_parts("reference_image", reference_image, content_type),
         *labeled_image_parts(
@@ -347,6 +387,10 @@ async def run_refine_layered_glsl_author(
                         current_render_content_type=current_render_content_type,
                         incumbent=incumbent,
                         plan=layer_plan,
+                        refinement_index=refinement_index,
+                        remaining_refine_budget=remaining_refine_budget,
+                        previous_refine_feedback=previous_refine_feedback,
+                        uniform_optimization_summary=uniform_optimization_summary,
                     ),
                     repair_context_sha256=result.repair_context_sha256,
                     # AuthorIdentity 的既有父血缘语义绑定实际执行的 ProgramSpec；

@@ -23,7 +23,7 @@ from shaderforge.program_spec import (
 )
 from shaderforge.validation import repair_constant_reversed_smoothsteps
 
-LAYERED_COMPILER_VERSION = "layered_to_program_spec_v1_1"
+LAYERED_COMPILER_VERSION = "layered_to_program_spec_v1_2"
 
 
 def _function_name(index: int, layer_id: str) -> str:
@@ -135,4 +135,5 @@ def compile_layered_shader(
             "renderer_contract_id": WEBGL1_RENDERER_CONTRACT_ID,
         },
         author_identity=layered_spec.author_identity,
+        derivation_provenance=layered_spec.derivation_provenance,
     )

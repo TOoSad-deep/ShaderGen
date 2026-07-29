@@ -25,6 +25,38 @@ export interface MinPipelineTracePhase {
   message?: string | null;
 }
 
+export interface UniformOptimizationSummary {
+  schema_version?: string | null;
+  algorithm_id?: string | null;
+  algorithm_version?: string | null;
+  config_fingerprint?: string | null;
+  active_component_count?: number | null;
+  evaluated_count?: number | null;
+  accepted_count?: number | null;
+  draw_count?: number | null;
+  draw_budget?: number | null;
+  initial_loss?: number | null;
+  final_loss?: number | null;
+  loss_delta?: number | null;
+  initial_mae?: number | null;
+  final_mae?: number | null;
+  mae_delta?: number | null;
+  stop_reason?: string | null;
+  base_spec_sha256?: string | null;
+  selected_spec_sha256?: string | null;
+  private_trace_sha256?: string | null;
+  candidate_outcome?: "accepted" | "rejected" | "failed" | null;
+}
+
+export interface ProgressBudgets {
+  scope?: "attempt" | null;
+  render_budget?: number;
+  llm_budget?: number;
+  refine_budget?: number;
+  target_mae?: number;
+  target_loss?: number;
+}
+
 // scene_mvp 最小管线的运行摘要；后端字段可缺省，前端全部按可选处理。
 export interface MinPipelineSummary {
   mae?: number | null;
@@ -50,6 +82,11 @@ export interface MinPipelineSummary {
   target_loss?: number | null;
   target_reached?: boolean | null;
   renderer_path?: string | null;
+  optimization_policy_fingerprint?: string | null;
+  refinement_stop_reason?: string | null;
+  non_improving_count?: number | null;
+  duplicate_patch_count?: number | null;
+  uniform_optimization?: UniformOptimizationSummary | null;
 }
 
 export interface ShaderResponse {
@@ -143,35 +180,61 @@ export async function generateShader(
 }
 
 // scene_mvp 运行中单节点进度事件；后端白名单字段，全部按可缺省处理。
+export type MinRunProgressEventStatus = "running" | "completed" | "failed";
+
 export interface MinRunProgressEvent {
   seq: number;
   node: string;
-  status: string;
+  status: MinRunProgressEventStatus;
   phase?: string | null;
+  attempt_index?: number | null;
   elapsed_ms?: number | null;
   duration_ms?: number | null;
-  budgets?: Record<string, number> | null;
+  budgets?: ProgressBudgets | null;
   counters?: {
     render_count?: number;
     llm_call_count?: number;
     refine_count?: number;
   } | null;
-  best?: { mae?: number; loss?: number } | null;
+  best?: {
+    mae?: number;
+    loss?: number;
+    target_mae?: number;
+    target_loss?: number;
+  } | null;
   trace?: Array<Record<string, unknown>> | null;
   next_action?: string | null;
   stop_reason?: string | null;
+  reason_code?: string | null;
+  optimization_policy_fingerprint?: string | null;
+  refinement_stop_reason?: string | null;
+  non_improving_count?: number | null;
+  duplicate_patch_count?: number | null;
+  uniform_optimization?: UniformOptimizationSummary | null;
 }
 
 export interface MinRunProgressSnapshot {
-  budgets?: Record<string, number> | null;
+  budgets?: ProgressBudgets | null;
   counters?: {
     render_count?: number;
     llm_call_count?: number;
     refine_count?: number;
   } | null;
-  best?: { mae?: number; loss?: number } | null;
+  best?: {
+    mae?: number;
+    loss?: number;
+    target_mae?: number;
+    target_loss?: number;
+  } | null;
   current_node?: string | null;
   render_seq?: number | null;
+  stop_reason?: string | null;
+  reason_code?: string | null;
+  optimization_policy_fingerprint?: string | null;
+  refinement_stop_reason?: string | null;
+  non_improving_count?: number | null;
+  duplicate_patch_count?: number | null;
+  uniform_optimization?: UniformOptimizationSummary | null;
 }
 
 export type MinRunProgressStatus = "pending" | "running" | "succeeded" | "failed";
@@ -182,6 +245,7 @@ export interface MinRunProgressResponse {
   generation_mode?: string | null;
   quality_preset?: string | null;
   started_at?: string | null;
+  stop_reason?: string | null;
   latest_seq: number;
   events: MinRunProgressEvent[];
   snapshot: MinRunProgressSnapshot;

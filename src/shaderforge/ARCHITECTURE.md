@@ -4,6 +4,7 @@ ShaderForge is the deterministic domain layer:
 
 ```text
 LayerPlan + LayeredShaderSpec
+  → bounded tunable-manifest uniform derivation (optional)
   → Layered compiler
   → ShaderProgramSpec
   → safety validation

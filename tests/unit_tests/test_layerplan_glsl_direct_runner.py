@@ -8,14 +8,21 @@ from typing import Any
 
 import pytest
 
+from agent.app.nodes.layered_direct.authors import (
+    ValidatedLayeredIncumbent,
+    _refine_context_sha256,
+    run_refine_layered_glsl_author,
+)
 from agent.app.services.layerplan_glsl_direct import (
     DIRECT_ENGINE_ID,
     DIRECT_REPRESENTATION,
     DirectAttemptResult,
+    DirectOptimizationPolicy,
     LayerPlanGlslDirectConfig,
     LayerPlanGlslDirectRunner,
     current_layered_direct_glsl_implementation_identity,
 )
+from shaderforge.uniform_optimization import UniformOptimizationSummaryV2
 from tests.direct_fakes import (
     CANVAS,
 )
@@ -170,10 +177,51 @@ def test_direct_config_requires_trusted_implementation_identity() -> None:
         LayerPlanGlslDirectConfig(implementation_identity_sha256="unknown")
 
 
+@pytest.mark.parametrize(
+    ("preset", "targets"),
+    [
+        ("fast", (0.08, 0.10)),
+        ("balanced", (0.06, 0.08)),
+        ("high", (0.04, 0.06)),
+        ("manual", (0.03, 0.05)),
+    ],
+)
+def test_optimization_policy_owns_quality_target_mapping(
+    preset: str,
+    targets: tuple[float, float],
+) -> None:
+    policy = DirectOptimizationPolicy.for_quality_preset(preset)
+
+    assert (policy.target_mae, policy.target_loss) == targets
+    assert len(policy.fingerprint()) == 64
+    assert (
+        policy.fingerprint()
+        == DirectOptimizationPolicy.for_quality_preset(preset).fingerprint()
+    )
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"target_mae": float("nan")},
+        {"target_loss": -0.1},
+        {"min_delta_loss": float("inf")},
+        {"refinement_patience": -1},
+        {"refinement_patience": True},
+    ],
+)
+def test_optimization_policy_rejects_invalid_controls(
+    kwargs: dict[str, Any],
+) -> None:
+    with pytest.raises(ValueError):
+        DirectOptimizationPolicy(**kwargs)
+
+
 def test_layered_direct_implementation_identity_is_content_addressed() -> None:
     identity = current_layered_direct_glsl_implementation_identity()
 
-    assert identity["schema_version"] == "direct_layered_glsl_implementation_v1"
+    assert identity["schema_version"] == "direct_layered_glsl_implementation_v2"
+    assert identity["uniform_optimizer"]["algorithm_version"] == "uniform_coordinate_v2"
     assert identity["authoring_representation"] == "layered_shader_spec_v1"
     assert identity["execution_representation"] == DIRECT_REPRESENTATION
     assert identity == current_layered_direct_glsl_implementation_identity()
@@ -200,6 +248,70 @@ async def test_direct_runner_runs_only_layerplan_and_arm_b_initial() -> None:
     assert result.direct_ledger.llm_call_count == 1
     assert result.plan_ledger.llm_call_count == 1
     assert renderer.close_count == 1
+
+
+@pytest.mark.anyio
+async def test_refine_prompt_and_identity_bind_safe_uniform_summary() -> None:
+    reference = _reference_png()
+    initial = await _run(_LayeredFakeGateway(), _FakeRenderer())
+    current_best = initial.current_best
+    layer_plan = initial.layer_plan
+    assert current_best is not None and layer_plan is not None
+    summary = UniformOptimizationSummaryV2(
+        base_spec_sha256=current_best.spec.spec_sha256,
+        selected_spec_sha256=current_best.spec.spec_sha256,
+        config_fingerprint="c" * 64,
+        active_component_count=1,
+        evaluated_count=2,
+        accepted_count=1,
+        draw_count=2,
+        draw_budget=2,
+        initial_loss=current_best.loss + 0.01,
+        initial_mae=current_best.mae + 0.02,
+        final_loss=current_best.loss,
+        final_mae=current_best.mae,
+        loss_delta=0.01,
+        mae_delta=0.02,
+        stop_reason="local_optimum",
+    )
+    incumbent = ValidatedLayeredIncumbent(
+        layered_spec=current_best.layered_spec,
+        compiled_program_spec=current_best.spec,
+        mae=current_best.mae,
+        loss=current_best.loss,
+        metrics=current_best.metrics,
+        residual_summary=current_best.residual_summary,
+    )
+    gateway = _LayeredFakeGateway(refine_gains=(0.4,))
+
+    refined = await run_refine_layered_glsl_author(
+        gateway=gateway,
+        reference_image=reference,
+        current_render=current_best.png_bytes,
+        incumbent=incumbent,
+        layer_plan=layer_plan,
+        user_instruction="match the gray square",
+        refinement_index=1,
+        remaining_refine_budget=1,
+        previous_refine_feedback=None,
+        uniform_optimization_summary=summary,
+        remaining_calls=2,
+    )
+
+    context = _tagged_json(gateway.calls[0]["messages"], "refinement_context")
+    assert context["uniform_optimization_summary"] == summary.to_safe_dict()
+    assert refined.author_identity is not None
+    assert refined.author_identity.input_context_sha256 == _refine_context_sha256(
+        content_type="image/png",
+        current_render=current_best.png_bytes,
+        current_render_content_type="image/png",
+        incumbent=incumbent,
+        plan=layer_plan,
+        refinement_index=1,
+        remaining_refine_budget=1,
+        previous_refine_feedback=None,
+        uniform_optimization_summary=summary,
+    )
 
 
 @pytest.mark.anyio
@@ -312,7 +424,7 @@ async def test_static_failure_keeps_private_rule_diagnostics_only() -> None:
 @pytest.mark.anyio
 async def test_worse_refine_keeps_incumbent_and_closes_program() -> None:
     gateway = _LayeredFakeGateway(
-        initial_gains=(0.5,),
+        initial_gains=(0.6,),
         refine_gains=(0.9,),
     )
     renderer = _FakeRenderer()
@@ -322,6 +434,7 @@ async def test_worse_refine_keeps_incumbent_and_closes_program() -> None:
         LayerPlanGlslDirectConfig(
             implementation_identity_sha256=IMPLEMENTATION_SHA256,
             refine_budget=1,
+            uniform_tuning_draw_budget=0,
         ),
     )
 
@@ -329,7 +442,7 @@ async def test_worse_refine_keeps_incumbent_and_closes_program() -> None:
     assert result.failure_code is None
     assert len(result.candidates) == 2
     assert result.current_best is result.candidates[0]
-    assert result.current_best.spec.uniform_values["u_gain"] == 0.5
+    assert result.current_best.spec.uniform_values["u_gain"] == 0.6
     assert result.direct_ledger.accepted_candidates == 1
     assert result.direct_ledger.rejected_candidates == 1
     assert result.direct_ledger.compile_count == 1
@@ -350,6 +463,7 @@ async def test_better_single_layer_refine_replaces_incumbent() -> None:
         LayerPlanGlslDirectConfig(
             implementation_identity_sha256=IMPLEMENTATION_SHA256,
             refine_budget=1,
+            uniform_tuning_draw_budget=0,
         ),
     )
 
@@ -442,7 +556,8 @@ async def test_budget_ledgers_are_independent_and_safe_summary_is_json_only() ->
     assert result.plan_ledger.total_tokens == 15
     assert result.direct_ledger.llm_call_count == 1
     assert result.direct_ledger.total_tokens == 15
-    assert result.safety_failure_codes == ("llm_budget_exhausted",)
+    assert result.safety_failure_codes == ()
+    assert result.refinement_stop_reason == "target_reached"
     summary = result.to_safe_summary()
     encoded = json.dumps(summary, allow_nan=False)
     assert result.current_best is not None

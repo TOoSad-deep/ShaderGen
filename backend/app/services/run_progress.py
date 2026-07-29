@@ -13,6 +13,17 @@ from typing import Any
 
 MAX_EVENTS_PER_RUN = 2000
 RUN_PROGRESS_TTL_SECONDS = 30 * 60
+_SAFE_SNAPSHOT_FIELDS = frozenset(
+    {
+        "stop_reason",
+        "reason_code",
+        "optimization_policy_fingerprint",
+        "refinement_stop_reason",
+        "non_improving_count",
+        "duplicate_patch_count",
+        "uniform_optimization",
+    }
+)
 
 
 @dataclass
@@ -78,6 +89,12 @@ class RunProgressRegistry:
             value = record.get(key)
             if isinstance(value, dict):
                 snapshot[key] = value
+        # Only Backend's explicitly projected public fields may become a
+        # snapshot. Do not copy arbitrary graph event/state keys here.
+        for key in _SAFE_SNAPSHOT_FIELDS:
+            value = record.get(key)
+            if value is not None:
+                snapshot[key] = value
 
     def publish_render(self, run_id: str, png: bytes) -> None:
         """覆盖式保存最新渲染帧；只保留一帧，历史帧不占用内存."""
@@ -107,6 +124,7 @@ class RunProgressRegistry:
                 "generation_mode": None,
                 "quality_preset": None,
                 "started_at": None,
+                "stop_reason": None,
                 "events": [],
                 "latest_seq": 0,
                 "snapshot": {},
@@ -117,6 +135,7 @@ class RunProgressRegistry:
             "generation_mode": run.generation_mode,
             "quality_preset": run.quality_preset,
             "started_at": run.started_at,
+            "stop_reason": run.stop_reason,
             "events": events,
             "latest_seq": run.latest_seq,
             "snapshot": {**run.snapshot, "render_seq": run.render_seq},
@@ -141,6 +160,13 @@ class RunProgressRegistry:
             "counters": dict(snapshot.get("counters", {})),
             "best": dict(snapshot.get("best", {})),
             "budgets": dict(snapshot.get("budgets", {})),
+            "optimization_policy_fingerprint": snapshot.get(
+                "optimization_policy_fingerprint"
+            ),
+            "refinement_stop_reason": snapshot.get("refinement_stop_reason"),
+            "non_improving_count": snapshot.get("non_improving_count"),
+            "duplicate_patch_count": snapshot.get("duplicate_patch_count"),
+            "uniform_optimization": snapshot.get("uniform_optimization"),
         }
         return result
 

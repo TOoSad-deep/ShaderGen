@@ -97,6 +97,16 @@ def _spec():
     return build_program_spec(_model_output(), author_identity=_initial_identity())
 
 
+def test_model_cannot_supply_uniform_derivation_provenance() -> None:
+    payload = _model_output()
+    payload["derivation_provenance"] = {"algorithm_version": "forged"}
+
+    with pytest.raises(ProgramSpecParseError) as exc_info:
+        build_program_spec(payload, author_identity=_initial_identity())
+
+    assert exc_info.value.code == "unknown_field"
+
+
 # 显式 test-only 信任根：绝不使用进程级默认 issuer，模拟生产之外的签发。
 _SIGNER, _ISSUER = _test_receipt_capabilities(
     key=b"test-only-receipt-key", issuer_id="test_only"

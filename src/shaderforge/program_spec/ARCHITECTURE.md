@@ -11,7 +11,7 @@
 ## 防伪边界（fail-closed）
 
 - 模型语义输入只允许 `schema_version`、`fragment_source`、`uniform_schema`、`uniform_values`、`tunable_manifest`、`canvas`、`renderer_contract_id`；出现 `validation_attestation`、`author_identity` 或任何自报哈希字段（`*_sha256`/`*_hash`）即拒绝，未知字段同样拒绝。
-- `source_sha256`/`binding_sha256`/`spec_sha256`/`plan_sha256` 一律由可信层对规范化 canonical JSON（key 排序、紧凑分隔符、拒绝 NaN）重算；`spec_sha256` 只排除 `validation_attestation`（避免自哈希循环），并绑定 canonical `author_identity` 全部字段（reference/plan/instruction/model_ref/prompt_version/sampling_params/role/parent_spec_sha256/reference_content_type/input_context_sha256/repair_context_sha256）——任一身份字段篡改都会导致重算失配与 attestation 失效。
+- `source_sha256`/`binding_sha256`/`spec_sha256`/`plan_sha256` 一律由可信层对规范化 canonical JSON（key 排序、紧凑分隔符、拒绝 NaN）重算；`spec_sha256` 只排除 `validation_attestation`（避免自哈希循环），并绑定 canonical `author_identity` 全部字段（reference/plan/instruction/model_ref/prompt_version/sampling_params/role/parent_spec_sha256/reference_content_type/input_context_sha256/repair_context_sha256）——任一身份字段篡改都会导致重算失配与 attestation 失效。trusted uniform-only 派生还绑定可选 `derivation_provenance`；字段为 `None` 时不进入 canonical payload，保持未优化旧 Spec hash。
 - `author_identity` 由可信层按调用元数据绑定：`reference_sha256` 必填，refine/repair 必须绑定父 `spec_sha256`，initial 不得携带父 Spec。`sampling_params` 必须记录 Gateway 实际生效的采样身份（provider/实际 temperature/reasoning_effort/response_format/identity source），不得写请求假值；`reference_content_type` 绑定参考图媒体类型，`input_context_sha256` 绑定角色输入上下文（refine 含 current_render 哈希与 canonical 评估上下文）。发生结构修复时，`repair_context_sha256` 还绑定 repair Prompt version、首轮输出哈希、校验错误、Schema 以及首轮与第二次调用的实际身份，修复结果不得冒充原 Prompt 的直接输出；`LayerAuthorIdentity` 同样绑定 repair 上下文，全部参与 `plan_sha256`。
 - 可执行真相是 "Spec + 匹配 attestation + 可信 ExecutionReceipt" 的组合：`match_attestation` 重算内容哈希、核对 validator version 与检查项清单，并用可信 issuer 验证 receipt 的 HMAC 与像素/源码/Spec 绑定；任一不匹配即不可执行。
 
@@ -30,5 +30,7 @@
 ## 边界
 
 - 本包纯确定性、纯 stdlib，不发起模型调用，也不触碰浏览器。
-- uniform 优化只能沿 `tunable_manifest` 修改 `uniform_values`；源码/拓扑变化必须是新 Spec 并重新全量校验。
+- uniform 优化只能沿 `tunable_manifest` 修改 `uniform_values`；每个派生
+  binding 都是新 Spec，并重新经过静态校验、真实 draw、receipt 和
+  attestation；源码/拓扑变化必须走结构 Refine。
 - 静态校验不是 GLSL 编译器，真实 compile/link/draw 结论必须由可信执行环境注入。

@@ -426,6 +426,7 @@ def build_program_spec(
     model_output: Mapping[str, Any],
     *,
     author_identity: AuthorIdentity,
+    derivation_provenance: Any | None = None,
 ) -> ShaderProgramSpecV1:
     """解析模型语义输出并由可信层重算哈希，组装完整 Spec.
 
@@ -469,6 +470,7 @@ def build_program_spec(
         tunable_manifest=tunable_manifest,
         canvas=canvas,
         author_identity=author_identity,
+        derivation_provenance=derivation_provenance,
     )
     return ShaderProgramSpecV1(
         schema_version=SHADER_PROGRAM_SPEC_V1_SCHEMA_VERSION,
@@ -482,6 +484,7 @@ def build_program_spec(
         binding_sha256=binding_sha256,
         spec_sha256=spec_sha256,
         author_identity=author_identity,
+        derivation_provenance=derivation_provenance,
         validation_attestation=None,
     )
 

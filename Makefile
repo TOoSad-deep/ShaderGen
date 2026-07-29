@@ -1,4 +1,4 @@
-.PHONY: all setup dev dev-backend dev-frontend check check-wheel docs-check format lint test tests test_watch integration_tests docker_tests help extended_tests
+.PHONY: all setup dev dev-agent dev-backend dev-frontend check check-wheel docs-check format lint test tests test_watch integration_tests docker_tests help extended_tests
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -12,7 +12,10 @@ setup:
 	npm --prefix frontend install
 
 dev:
-	@echo 'Run one service per terminal: make dev-backend | make dev-frontend'
+	@echo 'Run one service per terminal: make dev-agent | make dev-backend | make dev-frontend'
+
+dev-agent:
+	uv run langgraph dev
 
 dev-backend:
 	uv run uvicorn backend.app.main:app --reload --port 8088 --no-access-log
@@ -88,6 +91,7 @@ spell_fix:
 help:
 	@echo '----'
 	@echo 'setup                        - install Python and frontend dependencies'
+	@echo 'dev-agent                    - run LangGraph Agent Server on port 2024'
 	@echo 'dev-backend                  - run FastAPI backend on port 8088'
 	@echo 'dev-frontend                 - run Vite frontend'
 	@echo 'check                        - run unit tests, docs, clean wheel, frontend unit tests and build'

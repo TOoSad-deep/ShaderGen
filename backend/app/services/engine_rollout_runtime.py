@@ -8,10 +8,12 @@ import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
 
+from agent.app.contracts.layerplan_glsl_direct import candidate_excess_dominates
 from agent.app.services.engine_rollout_artifacts import (
     EngineRolloutArtifactService,
     SelectedEngineArtifacts,
@@ -19,9 +21,13 @@ from agent.app.services.engine_rollout_artifacts import (
 )
 from agent.app.services.layerplan_glsl_direct import (
     DIRECT_ATTEMPT_RESULT_SCHEMA_VERSION,
+    DIRECT_GRAPH_NODE_NAMES,
     DIRECT_HIGH_LEVEL_CANDIDATE_PROVENANCE,
+    DIRECT_UNIFORM_CANDIDATE_PROVENANCE,
     DirectAttemptResult,
+    DirectCandidate,
     LayerPlanGlslDirectConfig,
+    NodeProgressCallback,
     create_owned_layerplan_glsl_direct_runner,
     current_layered_direct_glsl_implementation_identity,
 )
@@ -50,12 +56,35 @@ _PUBLIC_ARTIFACTS = {
     "manifest": ("manifest.json", "application/json; charset=utf-8", "manifest.json"),
 }
 _PRIVATE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-_QUALITY_TARGETS = {
-    "fast": (0.08, 0.10),
-    "balanced": (0.06, 0.08),
-    "high": (0.04, 0.06),
-    "manual": (0.03, 0.05),
-}
+_DIRECT_GRAPH_NODES = frozenset(DIRECT_GRAPH_NODE_NAMES)
+_SAFE_PROGRESS_REASON_CODES = frozenset(
+    {
+        "target_reached",
+        "global_draw_budget_exhausted",
+        "global_compile_budget_exhausted",
+        "uniform_tuning_budget_exhausted",
+        "no_tunables",
+        "no_feasible_components",
+        "local_optimum",
+        "dimension_cap_reached_local_optimum",
+        "candidate_failures_exhausted",
+        "renderer_unavailable",
+        "uniform_tuning_active",
+        "uniform_candidate_accepted",
+        "uniform_candidate_rejected",
+        "uniform_candidate_failed",
+    }
+)
+_SAFE_REFINEMENT_STOP_REASONS = frozenset(
+    {
+        "target_reached",
+        "refine_budget_exhausted",
+        "patience_exhausted",
+        "duplicate_patch",
+        "hard_resource_block",
+        "no_valid_candidate",
+    }
+)
 
 
 def _json_bytes(value: dict[str, Any]) -> bytes:
@@ -85,6 +114,8 @@ class _DirectRunner(Protocol):
         *,
         content_type: str = "image/png",
         instruction: str = "",
+        quality_preset: str = "balanced",
+        node_progress_callback: NodeProgressCallback | None = None,
     ) -> DirectAttemptResult: ...
 
     async def close(self) -> None: ...
@@ -122,6 +153,11 @@ class EngineRolloutGenerationResult:
     engine: str
     representation: str
     engine_run: dict[str, Any]
+    optimization_policy_fingerprint: str = ""
+    refinement_stop_reason: str | None = None
+    non_improving_count: int = 0
+    duplicate_patch_count: int = 0
+    uniform_optimization: dict[str, Any] | None = None
 
     @classmethod
     def from_parent_result(
@@ -170,6 +206,21 @@ class EngineRolloutGenerationResult:
                 engine=result.engine,
                 representation=result.representation,
                 engine_run=dict(result.engine_run),
+                optimization_policy_fingerprint=str(
+                    pipeline.get("optimization_policy_fingerprint", "")
+                ),
+                refinement_stop_reason=_optional_string(
+                    pipeline.get("refinement_stop_reason")
+                ),
+                non_improving_count=_non_negative_int(
+                    pipeline.get("non_improving_count", 0)
+                ),
+                duplicate_patch_count=_non_negative_int(
+                    pipeline.get("duplicate_patch_count", 0)
+                ),
+                uniform_optimization=_safe_uniform_optimization_summary(
+                    pipeline.get("uniform_optimization")
+                ),
             )
         except (KeyError, TypeError, ValueError) as exc:
             cause_types, stack_frames = safe_exception_diagnostics(exc)
@@ -197,6 +248,7 @@ def _publish_progress(
     attempt_index: int,
     failure_code: str | None = None,
     render: bytes | None = None,
+    update: dict[str, Any] | None = None,
 ) -> None:
     if request.progress_callback is None:
         return
@@ -209,6 +261,8 @@ def _publish_progress(
     }
     if failure_code is not None:
         event["failure_code"] = failure_code
+    if update is not None:
+        event.update(update)
     try:
         request.progress_callback(event, render)
     except Exception as exc:
@@ -228,6 +282,102 @@ def _publish_progress(
         )
 
 
+def _publish_node_progress(
+    request: ParentRunRequest,
+    *,
+    node_name: str,
+    status: str,
+    attempt_index: int,
+    duration_ms: float | None,
+    update: dict[str, Any] | None = None,
+) -> None:
+    """Forward a graph lifecycle event through the public-safe progress channel."""
+    if (
+        request.progress_callback is None
+        or node_name not in _DIRECT_GRAPH_NODES
+        or status not in {"running", "completed", "failed"}
+    ):
+        return
+    event = {
+        "node": node_name,
+        "phase": f"node_{status}",
+        "status": status,
+        "engine": DIRECT_ENGINE,
+        "attempt_index": attempt_index,
+    }
+    if duration_ms is not None and isfinite(duration_ms):
+        event["duration_ms"] = round(max(0.0, duration_ms), 2)
+    event.update(_safe_node_progress_update(update))
+    try:
+        request.progress_callback(event, None)
+    except Exception as exc:
+        cause_types, stack_frames = safe_exception_diagnostics(exc)
+        logger.warning(
+            "event=engine.progress_callback.failed run_id=%s project_id=%s "
+            "attempt_id=%s attempt_index=%s stage=node_progress_callback "
+            "error_code=progress_callback_failed error_type=%s "
+            "cause_type_chain=%s stack_frames=%s retryable=true suppressed=true",
+            request.parent_run_id,
+            request.project_id,
+            child_attempt_id(request.parent_run_id, attempt_index),
+            attempt_index,
+            type(exc).__name__,
+            cause_types,
+            stack_frames,
+        )
+
+
+def _safe_node_progress_update(value: Any) -> dict[str, Any]:
+    """Validate the Agent's tiny progress projection before it reaches HTTP."""
+    if not isinstance(value, dict):
+        return {}
+    projected: dict[str, Any] = {}
+    reason_code = value.get("reason_code")
+    if isinstance(reason_code, str) and reason_code in _SAFE_PROGRESS_REASON_CODES:
+        projected["reason_code"] = reason_code
+    refinement_stop_reason = value.get("refinement_stop_reason")
+    if (
+        isinstance(refinement_stop_reason, str)
+        and refinement_stop_reason in _SAFE_REFINEMENT_STOP_REASONS
+    ):
+        projected["refinement_stop_reason"] = refinement_stop_reason
+
+    uniform = value.get("uniform_optimization")
+    if not isinstance(uniform, dict):
+        return projected
+    allowed = {
+        "draw_count",
+        "draw_budget",
+        "evaluated_count",
+        "accepted_count",
+        "stop_reason",
+        "candidate_outcome",
+    }
+    if set(uniform) - allowed:
+        return projected
+    safe_uniform: dict[str, Any] = {}
+    for key in {"draw_count", "draw_budget", "evaluated_count", "accepted_count"}:
+        item = uniform.get(key)
+        if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+            return projected
+        safe_uniform[key] = item
+    stop_reason = uniform.get("stop_reason")
+    if stop_reason is not None:
+        if (
+            not isinstance(stop_reason, str)
+            or stop_reason not in _SAFE_PROGRESS_REASON_CODES
+        ):
+            return projected
+        safe_uniform["stop_reason"] = stop_reason
+    candidate_outcome = uniform.get("candidate_outcome")
+    if candidate_outcome is not None:
+        if candidate_outcome not in {"accepted", "rejected", "failed"}:
+            return projected
+        safe_uniform["candidate_outcome"] = candidate_outcome
+    projected["uniform_optimization"] = safe_uniform
+    return projected
+
+
 def _direct_response_payload(
     result: DirectAttemptResult,
     *,
@@ -236,16 +386,28 @@ def _direct_response_payload(
     best = result.current_best
     if result.status != "ok" or best is None:
         raise EngineAttemptFailure(result.failure_code or "direct_attempt_inconclusive")
-    try:
-        target_mae, target_loss = _QUALITY_TARGETS[quality_preset]
-    except KeyError as exc:
-        raise EngineAttemptFailure("direct_quality_preset_invalid") from exc
+    policy = getattr(result, "optimization_policy", None)
+    if policy is None or getattr(policy, "quality_preset", None) != quality_preset:
+        raise EngineAttemptFailure("engine_response_contract_failed")
+    target_mae = _finite_unit_float(getattr(policy, "target_mae", None))
+    target_loss = _finite_unit_float(getattr(policy, "target_loss", None))
+    optimization_policy_fingerprint = _policy_fingerprint(result, policy)
+    refinement_stop_reason = _optional_string(
+        getattr(result, "refinement_stop_reason", None)
+    )
+    non_improving_count = _non_negative_int(getattr(result, "non_improving_count", 0))
+    duplicate_patch_count = _non_negative_int(
+        getattr(result, "duplicate_patch_count", 0)
+    )
+    uniform_optimization = _safe_uniform_optimization_summary(
+        getattr(result, "uniform_optimization_summary", None)
+    )
     total_llm = result.plan_ledger.llm_call_count + result.direct_ledger.llm_call_count
     return {
         "glsl": best.spec.fragment_source,
         "generation_mode": "scene_mvp",
         "quality_preset": quality_preset,
-        "stop_reason": "direct_attempt_completed",
+        "stop_reason": refinement_stop_reason or "direct_attempt_completed",
         "render_width": result.canvas_width,
         "render_height": result.canvas_height,
         "pipeline": {
@@ -264,7 +426,12 @@ def _direct_response_payload(
             "report_schema_version": DIRECT_ATTEMPT_RESULT_SCHEMA_VERSION,
             "target_mae": target_mae,
             "target_loss": target_loss,
-            "target_reached": best.loss <= target_loss,
+            "target_reached": best.mae <= target_mae and best.loss <= target_loss,
+            "optimization_policy_fingerprint": optimization_policy_fingerprint,
+            "refinement_stop_reason": refinement_stop_reason,
+            "non_improving_count": non_improving_count,
+            "duplicate_patch_count": duplicate_patch_count,
+            "uniform_optimization": uniform_optimization,
             "trace": [
                 {
                     "phase": "direct_glsl",
@@ -274,6 +441,134 @@ def _direct_response_payload(
                 }
             ],
         },
+    }
+
+
+def _optional_string(value: Any) -> str | None:
+    """Return a non-empty public string or ``None`` without coercing objects."""
+    return value if isinstance(value, str) and value else None
+
+
+def _non_negative_int(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise EngineAttemptFailure("engine_response_contract_failed")
+    return int(value)
+
+
+def _finite_unit_float(value: Any) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not isfinite(value)
+        or not 0.0 <= float(value) <= 1.0
+    ):
+        raise EngineAttemptFailure("engine_response_contract_failed")
+    return float(value)
+
+
+def _policy_fingerprint(result: DirectAttemptResult, policy: Any) -> str:
+    """Read the Agent-owned per-run policy identity without recreating policy here."""
+    fingerprint = _optional_string(
+        getattr(result, "optimization_policy_fingerprint", None)
+    )
+    if fingerprint is None:
+        candidate = getattr(policy, "fingerprint", None)
+        fingerprint = _optional_string(candidate() if callable(candidate) else None)
+    if fingerprint is None:
+        raise EngineAttemptFailure("engine_response_contract_failed")
+    return fingerprint
+
+
+def _safe_uniform_optimization_summary(value: Any) -> dict[str, Any] | None:
+    """Project only the documented, non-secret optimizer outcome fields."""
+    if value is None:
+        return None
+    raw = value.to_dict() if hasattr(value, "to_dict") else value
+    if not isinstance(raw, dict):
+        raise EngineAttemptFailure("engine_response_contract_failed")
+    allowed = {
+        "schema_version",
+        "algorithm_id",
+        "algorithm_version",
+        "config_fingerprint",
+        "active_component_count",
+        "evaluated_count",
+        "accepted_count",
+        "draw_count",
+        "draw_budget",
+        "initial_loss",
+        "initial_mae",
+        "final_loss",
+        "final_mae",
+        "loss_delta",
+        "mae_delta",
+        "stop_reason",
+        "base_spec_sha256",
+        "selected_spec_sha256",
+        "private_trace_sha256",
+    }
+    unknown = set(raw) - allowed
+    if unknown:
+        raise EngineAttemptFailure("engine_response_contract_failed")
+    summary: dict[str, Any] = {}
+    for key, item in raw.items():
+        if key in {
+            "active_component_count",
+            "evaluated_count",
+            "accepted_count",
+            "draw_count",
+            "draw_budget",
+        }:
+            summary[key] = _non_negative_int(item)
+        elif key in {
+            "initial_loss",
+            "initial_mae",
+            "final_loss",
+            "final_mae",
+            "loss_delta",
+            "mae_delta",
+        }:
+            if item is not None:
+                if (
+                    isinstance(item, bool)
+                    or not isinstance(item, (int, float))
+                    or not isfinite(item)
+                ):
+                    raise EngineAttemptFailure("engine_response_contract_failed")
+                summary[key] = float(item)
+        elif isinstance(item, str) and item:
+            summary[key] = item
+        elif item is not None:
+            raise EngineAttemptFailure("engine_response_contract_failed")
+    return summary
+
+
+def _public_completion_update(response: dict[str, Any]) -> dict[str, Any]:
+    """Extract the explicit public-safe progress increment from final payload data."""
+    pipeline = response["pipeline"]
+    return {
+        "budgets": {
+            "render_budget": pipeline["render_budget"],
+            "llm_budget": pipeline["llm_budget"],
+            "refine_budget": pipeline["refine_budget"],
+            "scope": "attempt",
+        },
+        "counters": {
+            "render_count": pipeline["render_count"],
+            "llm_call_count": pipeline["llm_call_count"],
+        },
+        "best": {
+            "mae": pipeline["mae"],
+            "loss": pipeline["objective_loss"],
+            "target_mae": pipeline["target_mae"],
+            "target_loss": pipeline["target_loss"],
+        },
+        "reason_code": pipeline["refinement_stop_reason"],
+        "optimization_policy_fingerprint": pipeline["optimization_policy_fingerprint"],
+        "refinement_stop_reason": pipeline["refinement_stop_reason"],
+        "non_improving_count": pipeline["non_improving_count"],
+        "duplicate_patch_count": pipeline["duplicate_patch_count"],
+        "uniform_optimization": pipeline["uniform_optimization"],
     }
 
 
@@ -306,6 +601,11 @@ def _private_program_spec(result: DirectAttemptResult) -> dict[str, Any] | None:
         "renderer_contract_id": spec.renderer_contract_id,
         "spec_sha256": spec.spec_sha256,
         "author_identity": spec.author_identity.to_dict(),
+        "derivation_provenance": (
+            spec.derivation_provenance.to_dict()
+            if spec.derivation_provenance is not None
+            else None
+        ),
         "validation_attestation": (
             spec.validation_attestation.to_dict()
             if spec.validation_attestation is not None
@@ -371,10 +671,15 @@ def _write_private_process_renders(
     candidates = result.candidates
     previous_sequence = 0
     for candidate in candidates:
-        if (
-            candidate.role not in {"initial", "refine"}
-            or candidate.provenance != DIRECT_HIGH_LEVEL_CANDIDATE_PROVENANCE
-        ):
+        is_high_level = (
+            candidate.role in {"initial", "refine"}
+            and candidate.provenance == DIRECT_HIGH_LEVEL_CANDIDATE_PROVENANCE
+        )
+        is_uniform_trial = (
+            candidate.role == "uniform_optimize"
+            and candidate.provenance == DIRECT_UNIFORM_CANDIDATE_PROVENANCE
+        )
+        if not (is_high_level or is_uniform_trial):
             raise EngineAttemptFailure("direct_candidate_retention_invalid")
         if candidate.sequence <= previous_sequence:
             raise EngineAttemptFailure("direct_candidate_sequence_invalid")
@@ -382,12 +687,29 @@ def _write_private_process_renders(
     if sum(candidate is best for candidate in candidates) != 1:
         raise EngineAttemptFailure("direct_current_best_invalid")
 
-    process_renders: list[dict[str, Any]] = []
-    incumbent_loss = float("inf")
-    for step_index, candidate in enumerate(candidates):
-        became_current_best = candidate.loss < incumbent_loss
+    retained_candidates: list[tuple[DirectCandidate, bool]] = []
+    incumbent = None
+    policy = result.optimization_policy
+    for candidate in candidates:
+        became_current_best = incumbent is None or candidate_excess_dominates(
+            candidate_mae=candidate.mae,
+            candidate_loss=candidate.loss,
+            incumbent_mae=incumbent.mae,
+            incumbent_loss=incumbent.loss,
+            target_mae=policy.target_mae,
+            target_loss=policy.target_loss,
+        )
         if became_current_best:
-            incumbent_loss = candidate.loss
+            incumbent = candidate
+        if candidate.role != "uniform_optimize":
+            retained_candidates.append((candidate, became_current_best))
+    if incumbent is not best:
+        raise EngineAttemptFailure("direct_current_best_invalid")
+
+    process_renders: list[dict[str, Any]] = []
+    for step_index, (candidate, became_current_best) in enumerate(
+        retained_candidates
+    ):
         path = f"private/renders/{step_index:03d}-{candidate.role}.png"
         artifact = run.write_bytes(
             path,
@@ -435,6 +757,13 @@ def _write_private_success(
         best.layered_spec.to_dict(),
     )
     run.write_json("private/program-spec.json", _private_program_spec(result))
+    run.write_json(
+        "private/uniform-optimization-trace.json",
+        {
+            "schema_version": "uniform_optimization_trace_v1",
+            "items": result.to_private_uniform_optimization_trace(),
+        },
+    )
     run.write_text("private/shader.frag", best.spec.fragment_source)
     run.write_bytes("private/render.png", best.png_bytes, content_type="image/png")
     process_renders = _write_private_process_renders(run, result)
@@ -496,6 +825,22 @@ class DirectEngineAttemptExecutor:
         )
         claimed = False
         result: DirectAttemptResult | None = None
+
+        def publish_node_progress(
+            node_name: str,
+            status: str,
+            duration_ms: float | None,
+            update: dict[str, Any] | None = None,
+        ) -> None:
+            _publish_node_progress(
+                request,
+                node_name=node_name,
+                status=status,
+                attempt_index=context.attempt_index,
+                duration_ms=duration_ms,
+                update=update,
+            )
+
         try:
             await asyncio.to_thread(
                 _claim_private_attempt, self._store, request, context
@@ -505,6 +850,11 @@ class DirectEngineAttemptExecutor:
                 request.image,
                 content_type=request.content_type,
                 instruction=request.instruction,
+                # Agent owns preset -> DirectOptimizationPolicy resolution. Do not
+                # recreate targets in Backend: every fresh attempt receives the
+                # parent request's exact preset.
+                quality_preset=request.quality_preset,
+                node_progress_callback=publish_node_progress,
             )
             response = _direct_response_payload(
                 result,
@@ -527,6 +877,21 @@ class DirectEngineAttemptExecutor:
                         "objective_loss": best.loss,
                         "metric_breakdown": dict(best.metrics),
                         "residual_summary": dict(best.residual_summary),
+                        "optimization_policy_fingerprint": response["pipeline"][
+                            "optimization_policy_fingerprint"
+                        ],
+                        "refinement_stop_reason": response["pipeline"][
+                            "refinement_stop_reason"
+                        ],
+                        "non_improving_count": response["pipeline"][
+                            "non_improving_count"
+                        ],
+                        "duplicate_patch_count": response["pipeline"][
+                            "duplicate_patch_count"
+                        ],
+                        "uniform_optimization": response["pipeline"][
+                            "uniform_optimization"
+                        ],
                     }
                 ),
                 engine_manifest_json=_json_bytes(
@@ -565,6 +930,15 @@ class DirectEngineAttemptExecutor:
                 failure_code=exc.code,
             )
             raise
+        except asyncio.CancelledError:
+            _publish_progress(
+                request,
+                phase="direct_failed",
+                status="failed",
+                attempt_index=context.attempt_index,
+                failure_code="engine_attempt_cancelled",
+            )
+            raise
         except Exception as exc:
             cause_types, stack_frames = safe_exception_diagnostics(exc)
             logger.error(
@@ -588,6 +962,13 @@ class DirectEngineAttemptExecutor:
                     "direct_attempt_failed",
                     result,
                 )
+            _publish_progress(
+                request,
+                phase="direct_failed",
+                status="failed",
+                attempt_index=context.attempt_index,
+                failure_code="direct_attempt_failed",
+            )
             raise EngineAttemptFailure("direct_attempt_failed") from exc
         _publish_progress(
             request,
@@ -595,6 +976,7 @@ class DirectEngineAttemptExecutor:
             status="completed",
             attempt_index=context.attempt_index,
             render=best.png_bytes,
+            update=_public_completion_update(response),
         )
         return EngineAttemptSuccess(
             attempt_id=context.attempt_id,

@@ -10,6 +10,16 @@
   compile/link/draw 决定。
 - 已移除旧模型直出 ProgramSpec、ShaderGraph、Graph runtime、policy、
   fallback、promotion、shadow、Memory 和 Node Lab 运行代码。
+- 当前 Layered Direct attempt 已使用新的 LangGraph 编排；删除的是旧
+  `png_to_shader_min` graph，不是当前 LayerPlan 流程。
+- reference、LayerPlan、Initial/Refine、compile、validate、prepare、draw、
+  receipt/attestation、evaluate、incumbent selection 和 finalize 均为显式 node。
+- Refine 已具备 MAE/loss 双 target 早停、target-relative excess 双目标
+  selection、重复 Patch 检测、失败反馈、`min_delta_mae` /
+  `min_delta_loss` / `patience` 收敛，以及统一为 WebGL 左下原点的 residual。
+- `tunable_manifest` 已驱动受预算约束的确定性 uniform-only 参数搜索；
+  搜索候选沿用完整的真实 WebGL1 验证、证明和评估闭环，候选级非硬失败
+  只淘汰当前 probe 并继续有界搜索。
 - 当前公开 Artifact 只有 final-render、metrics、manifest。
 - 成功的私有 Direct attempt 按顺序保留高层 Initial/Refine 渲染图；参数
   搜索试参图不进入该历史，未来只允许保留调优前与最终最优边界快照。
