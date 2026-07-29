@@ -178,26 +178,87 @@ def test_direct_config_requires_trusted_implementation_identity() -> None:
 
 
 @pytest.mark.parametrize(
-    ("preset", "targets"),
+    ("preset", "targets", "refinement_patience"),
     [
-        ("fast", (0.08, 0.10)),
-        ("balanced", (0.06, 0.08)),
-        ("high", (0.04, 0.06)),
-        ("manual", (0.03, 0.05)),
+        ("fast", (0.08, 0.10), 1),
+        ("balanced", (0.06, 0.08), 1),
+        ("high", (0.04, 0.06), 1),
+        ("manual", (0.03, 0.05), 2),
     ],
 )
 def test_optimization_policy_owns_quality_target_mapping(
     preset: str,
     targets: tuple[float, float],
+    refinement_patience: int,
 ) -> None:
     policy = DirectOptimizationPolicy.for_quality_preset(preset)
 
     assert (policy.target_mae, policy.target_loss) == targets
+    assert policy.refinement_patience == refinement_patience
     assert len(policy.fingerprint()) == 64
     assert (
         policy.fingerprint()
         == DirectOptimizationPolicy.for_quality_preset(preset).fingerprint()
     )
+
+
+def test_direct_config_owns_manual_deep_search_budget_mapping() -> None:
+    baseline = LayerPlanGlslDirectConfig(
+        implementation_identity_sha256=IMPLEMENTATION_SHA256
+    )
+
+    for preset in ("fast", "balanced", "high"):
+        assert baseline.for_quality_preset(preset) is baseline
+
+    manual = baseline.for_quality_preset("manual")
+    assert manual.direct_author_llm_budget == 12
+    assert manual.compile_budget == 10
+    assert manual.draw_budget == 16
+    assert manual.refine_budget == 5
+    assert manual.plan_llm_budget == baseline.plan_llm_budget
+    assert (
+        manual.uniform_tuning_draw_budget == baseline.uniform_tuning_draw_budget
+    )
+    assert manual.fingerprint() != baseline.fingerprint()
+
+
+@pytest.mark.anyio
+async def test_runner_applies_manual_deep_search_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent.app.graphs import layerplan_glsl_direct as graph_module
+
+    captured: dict[str, Any] = {}
+    expected_result = object()
+
+    async def fake_graph(**kwargs: Any) -> dict[str, object]:
+        captured["context"] = kwargs["context"]
+        return {"result": expected_result}
+
+    monkeypatch.setattr(
+        graph_module,
+        "run_layerplan_glsl_direct_graph",
+        fake_graph,
+    )
+    runner = LayerPlanGlslDirectRunner(
+        gateway=_FakeGateway(),
+        renderer=_FakeRenderer(),
+        config=LayerPlanGlslDirectConfig(
+            implementation_identity_sha256=IMPLEMENTATION_SHA256
+        ),
+        receipt_issuer=_TEST_ISSUER,
+    )
+
+    result = await runner.run(_reference_png(), quality_preset="manual")
+
+    assert result is expected_result
+    context = captured["context"]
+    assert context.config.refine_budget == 5
+    assert context.config.direct_author_llm_budget == 12
+    assert context.config.compile_budget == 10
+    assert context.config.draw_budget == 16
+    assert context.config.uniform_tuning_draw_budget == 4
+    assert context.optimization_policy.refinement_patience == 2
 
 
 @pytest.mark.parametrize(

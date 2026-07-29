@@ -6,8 +6,11 @@ guarded private graph entry, and returns `DirectAttemptResult`. Graph topology,
 state and workflow helpers do not live in the service layer.
 
 The caller passes only `quality_preset`; the service resolves the Agent-owned
-per-run `DirectOptimizationPolicy`. Static config owns the attempt-wide
-compile/draw/LLM/Refine and uniform-search budgets.
+per-run `DirectOptimizationPolicy` and attempt budget profile. `fast`,
+`balanced`, and `high` use the baseline budgets. `manual` is the deep-search
+profile: 5 Refine rounds, 12 Direct author calls, 10 compiles, 16 draws, and
+Refine patience 2. Uniform-search budgets remain at the baseline so the extra
+capacity is reserved primarily for structural refinement.
 
 `engine_rollout_artifacts.py` owns private child reads and atomic public parent
 publication.

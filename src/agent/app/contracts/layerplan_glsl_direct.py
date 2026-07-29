@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from hashlib import sha256
 from io import BytesIO
 from math import isfinite
@@ -71,6 +71,20 @@ QUALITY_TARGETS: Mapping[str, tuple[float, float]] = {
     "balanced": (0.06, 0.08),
     "high": (0.04, 0.06),
     "manual": (0.03, 0.05),
+}
+QUALITY_REFINEMENT_PATIENCE: Mapping[str, int] = {
+    "fast": 1,
+    "balanced": 1,
+    "high": 1,
+    "manual": 2,
+}
+QUALITY_BUDGET_OVERRIDES: Mapping[str, Mapping[str, int]] = {
+    "manual": {
+        "direct_author_llm_budget": 12,
+        "compile_budget": 10,
+        "draw_budget": 16,
+        "refine_budget": 5,
+    }
 }
 DIRECT_OPTIMIZATION_POLICY_SCHEMA_VERSION = "direct_optimization_policy_v2"
 REFINE_FEEDBACK_METRICS = frozenset(
@@ -224,6 +238,7 @@ class DirectOptimizationPolicy:
             quality_preset=quality_preset,  # type: ignore[arg-type]
             target_mae=target_mae,
             target_loss=target_loss,
+            refinement_patience=QUALITY_REFINEMENT_PATIENCE[quality_preset],
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -378,6 +393,15 @@ class LayerPlanGlslDirectConfig:
     uniform_tuning_max_passes: int = 1
     canvas_width: int | None = None
     canvas_height: int | None = None
+
+    def for_quality_preset(self, quality_preset: str) -> LayerPlanGlslDirectConfig:
+        """Resolve attempt budgets owned by one quality preset."""
+        if quality_preset not in QUALITY_TARGETS:
+            raise ValueError("quality_preset is unsupported")
+        overrides = QUALITY_BUDGET_OVERRIDES.get(quality_preset)
+        if not overrides:
+            return self
+        return replace(self, **overrides)
 
     def __post_init__(self) -> None:
         """Fail closed on invalid attempt budgets, canvas or identity."""

@@ -173,7 +173,7 @@ class LayerPlanGlslDirectRunner:
             context=DirectGraphContext(
                 gateway=self._gateway,
                 renderer=self._renderer,
-                config=self._config,
+                config=self._config.for_quality_preset(quality_preset),
                 optimization_policy=DirectOptimizationPolicy.for_quality_preset(
                     quality_preset
                 ),
