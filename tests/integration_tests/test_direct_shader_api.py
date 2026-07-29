@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import logging
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from fastapi.testclient import TestClient
 from PIL import Image
@@ -75,6 +76,10 @@ class _MalformedRuntime:
         )
 
 
+async def _raise_unhandled_error() -> None:
+    raise RuntimeError("unhandled-test-error")
+
+
 def test_generate_api_returns_only_current_direct_discriminators(
     tmp_path: Path,
 ) -> None:
@@ -88,6 +93,7 @@ def test_generate_api_returns_only_current_direct_discriminators(
         client.app.state.shader_runtime = _Runtime()
         response = client.post(
             "/api/shader/generate",
+            headers={"Origin": "http://localhost:5173"},
             files={"file": ("reference.png", _png(), "image/png")},
             data={"quality_preset": "balanced"},
         )
@@ -96,6 +102,7 @@ def test_generate_api_returns_only_current_direct_discriminators(
     assert payload["engine"] == "direct_glsl_layerplan_v1"
     assert payload["representation"] == "shader_program_spec_v1"
     assert payload["engine_run"]["attempt_refs"][0]["status"] == "succeeded"
+    assert response.headers["Access-Control-Expose-Headers"] == "X-Request-ID"
 
 
 def test_generate_api_returns_503_when_direct_runtime_is_unavailable(
@@ -111,13 +118,51 @@ def test_generate_api_returns_503_when_direct_runtime_is_unavailable(
         client.app.state.shader_runtime = None
         response = client.post(
             "/api/shader/generate",
+            headers={"X-Request-ID": "invalid request id"},
             files={"file": ("reference.png", _png(), "image/png")},
         )
     assert response.status_code == 503
+    UUID(response.headers["X-Request-ID"])
     assert response.json()["detail"]["code"] == "service_unavailable"
 
 
-def test_response_contract_failure_marks_progress_failed(tmp_path: Path) -> None:
+def test_generate_request_validation_is_correlated_in_terminal_log(
+    tmp_path: Path,
+    caplog,
+) -> None:
+    app = create_app(
+        BackendSettings(
+            public_artifact_root=tmp_path / "public",
+            private_attempt_artifact_root=tmp_path / "private",
+        )
+    )
+    caplog.set_level(logging.WARNING, logger="backend.app")
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/shader/generate",
+            headers={"X-Request-ID": "frontend-validation-1"},
+            data={"quality_preset": "balanced"},
+        )
+
+    assert response.status_code == 422
+    assert response.headers["X-Request-ID"] == "frontend-validation-1"
+    detail = response.json()["detail"]
+    assert detail["code"] == "client_validation"
+    rejection = next(
+        record
+        for record in caplog.records
+        if "event=request.rejected" in record.getMessage()
+    )
+    assert rejection.request_id == "frontend-validation-1"
+    assert rejection.run_id == detail["run_id"]
+    assert rejection.stage == "request_validation"
+    assert "error_code=client_validation" in rejection.getMessage()
+
+
+def test_response_contract_failure_marks_progress_failed(
+    tmp_path: Path, caplog
+) -> None:
     app = create_app(
         BackendSettings(
             public_artifact_root=tmp_path / "public",
@@ -125,15 +170,63 @@ def test_response_contract_failure_marks_progress_failed(tmp_path: Path) -> None
         )
     )
     run_id = uuid4()
+    caplog.set_level(logging.ERROR)
     with TestClient(app) as client:
         client.app.state.shader_runtime = _MalformedRuntime()
         response = client.post(
             "/api/shader/generate",
+            headers={"X-Request-ID": "frontend-request-42"},
             files={"file": ("reference.png", _png(), "image/png")},
             data={"run_id": str(run_id)},
         )
         progress = client.get(f"/api/shader/runs/{run_id}/progress")
     assert response.status_code == 500
+    assert response.headers["X-Request-ID"] == "frontend-request-42"
     assert response.json()["detail"]["code"] == "response_contract_failed"
     assert progress.status_code == 200
     assert progress.json()["status"] == "failed"
+    request_failure = next(
+        record
+        for record in caplog.records
+        if "event=request.failed" in record.getMessage()
+    )
+    assert request_failure.levelno == logging.ERROR
+    assert request_failure.request_id == "frontend-request-42"
+    assert request_failure.run_id == str(run_id)
+    assert request_failure.stage == "backend_response"
+    assert "error_code=response_contract_failed" in request_failure.getMessage()
+    assert "retryable=false" in request_failure.getMessage()
+
+
+def test_unhandled_500_echoes_request_id_for_log_correlation(
+    tmp_path: Path,
+    caplog,
+) -> None:
+    app = create_app(
+        BackendSettings(
+            public_artifact_root=tmp_path / "public",
+            private_attempt_artifact_root=tmp_path / "private",
+        )
+    )
+    app.add_api_route("/test/unhandled", _raise_unhandled_error, methods=["GET"])
+    caplog.set_level(logging.ERROR, logger="backend.app")
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        response = client.get(
+            "/test/unhandled",
+            headers={
+                "X-Request-ID": "frontend-crash-1",
+                "Origin": "http://localhost:5173",
+            },
+        )
+
+    assert response.status_code == 500
+    assert response.headers["X-Request-ID"] == "frontend-crash-1"
+    assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    assert response.headers["Access-Control-Expose-Headers"] == "X-Request-ID"
+    failure = next(
+        record
+        for record in caplog.records
+        if "event=request.failed" in record.getMessage()
+    )
+    assert failure.request_id == "frontend-crash-1"

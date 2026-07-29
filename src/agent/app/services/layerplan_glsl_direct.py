@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import itertools
 import json
+import logging
 import re
 import time
 from collections.abc import Callable, Mapping
@@ -78,6 +79,8 @@ from shaderforge.rendering import (
     ShaderPreparationError,
 )
 from shaderforge.validation import ProgramSpecSafetyLimits, validate_program_spec_safety
+
+logger = logging.getLogger("agent.direct")
 
 DIRECT_ATTEMPT_RESULT_SCHEMA_VERSION = "direct_glsl_attempt_result_v1"
 DIRECT_ENGINE_ID = "direct_glsl_layerplan_v1"
@@ -1053,8 +1056,19 @@ class LayerPlanGlslDirectRunner:
                 for prepared in program_cache.values():
                     try:
                         await prepared.close()
-                    except Exception:  # noqa: BLE001 - 释放失败不掩盖结论
-                        pass
+                    except Exception as exc:  # noqa: BLE001 - 释放失败不掩盖结论
+                        # Renderer teardown errors are non-fatal, but hiding them
+                        # makes browser/process leaks impossible to diagnose. Do not
+                        # include exc_info because a renderer exception can contain
+                        # browser or provider output.
+                        logger.warning(
+                            "direct.cleanup_failed event=%s error_type=%s "
+                            "stage=%s suppressed=%s",
+                            "direct.prepared_renderer_close_failed",
+                            type(exc).__name__,
+                            "prepared_renderer_close",
+                            True,
+                        )
 
         status: Literal["ok", "inconclusive"] = (
             "ok" if current_best is not None else "inconclusive"

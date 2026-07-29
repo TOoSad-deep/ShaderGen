@@ -15,7 +15,7 @@ dev:
 	@echo 'Run one service per terminal: make dev-backend | make dev-frontend'
 
 dev-backend:
-	uv run uvicorn backend.app.main:app --reload --port 8088
+	uv run uvicorn backend.app.main:app --reload --port 8088 --no-access-log
 
 dev-frontend:
 	npm --prefix frontend run dev

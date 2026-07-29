@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from hashlib import sha256
@@ -24,6 +26,49 @@ from agent.app.prompts.prompt_loader import PromptDefinition
 MAX_STRUCTURED_ATTEMPTS = 2
 
 _ValueT = TypeVar("_ValueT")
+logger = logging.getLogger("agent.llm")
+
+
+def _safe_error_code(error: ValueError) -> str:
+    """Return a bounded parser code without ever logging parser text/details."""
+    code = getattr(error, "code", "invalid_structured_output")
+    if isinstance(code, str) and re.fullmatch(r"[a-z0-9_]{1,128}", code):
+        return code
+    return "invalid_structured_output"
+
+
+def _log_invocation_failure(
+    *,
+    stage: str,
+    error: Exception,
+    model_ref: str,
+    retryable: bool,
+    unexpected: bool = False,
+) -> None:
+    """Log only stable LLM failure classification, never request/response content."""
+    log = logger.error if unexpected else logger.warning
+    log(
+        "structured_author.failure event=%s model_ref=%s error_type=%s "
+        "retryable=%s stage=%s",
+        "structured_author.invocation_failed",
+        model_ref,
+        type(error).__name__,
+        retryable,
+        stage,
+    )
+
+
+def _log_parse_failure(*, stage: str, error: ValueError, model_ref: str) -> None:
+    """Log parse classification only; model output is treated as sensitive."""
+    logger.warning(
+        "structured_author.failure event=%s model_ref=%s error_type=%s "
+        "error_code=%s stage=%s",
+        "structured_author.parse_failed",
+        model_ref,
+        type(error).__name__,
+        _safe_error_code(error),
+        stage,
+    )
 
 
 @dataclass(frozen=True)
@@ -153,20 +198,41 @@ async def invoke_structured_author(
     try:
         response = await gateway.ainvoke(messages, options)
     except LLMInvocationError as exc:
+        _log_invocation_failure(
+            stage="initial_invocation",
+            error=exc,
+            model_ref=options.model_ref,
+            retryable=exc.retryable,
+        )
         return StructuredAuthorCallResult(
             None,
             calls,
             None,
             "llm_transient_failure" if exc.retryable else "llm_invocation_failed",
         )
-    except LLMGatewayError:
+    except LLMGatewayError as exc:
+        _log_invocation_failure(
+            stage="initial_gateway",
+            error=exc,
+            model_ref=options.model_ref,
+            retryable=False,
+        )
         return StructuredAuthorCallResult(
             None,
             calls,
             None,
             "llm_invocation_failed",
         )
-    except Exception:
+    except Exception as exc:
+        # A gateway implementation is an extension boundary. Avoid exc_info as it
+        # may expose provider request/response data in a third-party traceback.
+        _log_invocation_failure(
+            stage="initial_unexpected",
+            error=exc,
+            model_ref=options.model_ref,
+            retryable=False,
+            unexpected=True,
+        )
         return StructuredAuthorCallResult(
             None,
             calls,
@@ -178,11 +244,18 @@ async def invoke_structured_author(
     try:
         value = parser(response.text)
     except ValueError as first_error:
+        _log_parse_failure(
+            stage="initial_parse",
+            error=first_error,
+            model_ref=response.model_ref,
+        )
         repair_hints = (
             repair_hints_builder(first_error)
             if repair_hints_builder is not None
             else None
         )
+        # Preserve the existing pipeline result contract; only terminal logging is
+        # normalized through _safe_error_code.
         first_error_code = getattr(first_error, "code", "invalid_structured_output")
         if allowed < 2:
             return StructuredAuthorCallResult(
@@ -209,6 +282,12 @@ async def invoke_structured_author(
                 repair_options,
             )
         except LLMInvocationError as exc:
+            _log_invocation_failure(
+                stage="repair_invocation",
+                error=exc,
+                model_ref=options.model_ref,
+                retryable=exc.retryable,
+            )
             return StructuredAuthorCallResult(
                 None,
                 calls,
@@ -218,7 +297,13 @@ async def invoke_structured_author(
                 total_tokens=total_tokens,
                 effective_identity=response.effective_identity,
             )
-        except LLMGatewayError:
+        except LLMGatewayError as exc:
+            _log_invocation_failure(
+                stage="repair_gateway",
+                error=exc,
+                model_ref=options.model_ref,
+                retryable=False,
+            )
             return StructuredAuthorCallResult(
                 None,
                 calls,
@@ -228,7 +313,14 @@ async def invoke_structured_author(
                 total_tokens=total_tokens,
                 effective_identity=response.effective_identity,
             )
-        except Exception:
+        except Exception as exc:
+            _log_invocation_failure(
+                stage="repair_unexpected",
+                error=exc,
+                model_ref=options.model_ref,
+                retryable=False,
+                unexpected=True,
+            )
             return StructuredAuthorCallResult(
                 None,
                 calls,
@@ -244,6 +336,11 @@ async def invoke_structured_author(
         try:
             value = parser(repaired.text)
         except ValueError as second_error:
+            _log_parse_failure(
+                stage="repair_parse",
+                error=second_error,
+                model_ref=repaired.model_ref,
+            )
             return StructuredAuthorCallResult(
                 None,
                 calls,

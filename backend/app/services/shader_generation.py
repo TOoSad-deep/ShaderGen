@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 from uuid import UUID
 
+from backend.app.core.logging import safe_exception_diagnostics
 from backend.app.schemas.shader import (
     QualityPresetName,
     ShaderEngineRunSummary,
@@ -113,10 +114,18 @@ async def _record_failure(
             diagnostics=diagnostics,
         )
     except Exception as exc:
-        logger.error(
-            "shader.generate.failure_persistence_failed run_id=%s error_type=%s",
+        cause_types, stack_frames = safe_exception_diagnostics(exc)
+        logger.warning(
+            "event=shader.generate.failure_persistence_failed run_id=%s "
+            "project_id=%s attempt_id=- attempt_index=- "
+            "stage=failure_persistence error_code=failure_persistence_failed "
+            "error_type=%s cause_type_chain=%s stack_frames=%s "
+            "retryable=false suppressed=true",
             command.run_id,
+            command.project_id,
             type(exc).__name__,
+            cause_types,
+            stack_frames,
         )
 
 
@@ -134,6 +143,14 @@ async def execute_shader_generation(
     response: ShaderResponse | None = None
     trace: list[dict[str, Any]] = []
     if dependencies.runtime is None:
+        logger.warning(
+            "event=shader.generate.rejected run_id=%s project_id=%s "
+            "attempt_id=- attempt_index=- stage=runtime_init "
+            "error_code=service_unavailable error_type=ShaderGenerationUseCaseError "
+            "retryable=true suppressed=false",
+            command.run_id,
+            command.project_id,
+        )
         raise _error(
             command,
             status_code=503,
@@ -151,6 +168,15 @@ async def execute_shader_generation(
                 quality_preset=command.quality_preset,
             )
         except ValueError as exc:
+            logger.warning(
+                "event=shader.generate.rejected run_id=%s project_id=%s "
+                "attempt_id=- attempt_index=- stage=run_registry "
+                "error_code=run_conflict error_type=%s retryable=false "
+                "suppressed=false",
+                command.run_id,
+                command.project_id,
+                type(exc).__name__,
+            )
             raise _error(
                 command,
                 status_code=409,
@@ -253,6 +279,19 @@ async def execute_shader_generation(
                 )
             except Exception as exc:
                 stop_reason = "response_contract_failed"
+                cause_types, stack_frames = safe_exception_diagnostics(exc)
+                logger.error(
+                    "event=shader.generate.failed run_id=%s project_id=%s "
+                    "attempt_id=- attempt_index=- stage=backend_response "
+                    "error_code=%s error_type=%s cause_type_chain=%s "
+                    "stack_frames=%s retryable=false suppressed=false",
+                    command.run_id,
+                    command.project_id,
+                    stop_reason,
+                    type(exc).__name__,
+                    cause_types,
+                    stack_frames,
+                )
                 if run_started:
                     await _record_failure(
                         pool,
@@ -273,6 +312,15 @@ async def execute_shader_generation(
             succeeded = True
     except ProjectBusyError as exc:
         stop_reason = "project_busy"
+        logger.warning(
+            "event=shader.generate.rejected run_id=%s project_id=%s "
+            "attempt_id=- attempt_index=- stage=project_lock "
+            "error_code=%s error_type=%s retryable=true suppressed=false",
+            command.run_id,
+            command.project_id,
+            stop_reason,
+            type(exc).__name__,
+        )
         raise _error(
             command,
             status_code=409,
@@ -312,12 +360,17 @@ async def execute_shader_generation(
                 },
             )
         logger.error(
-            "shader.generate.engine_rollout_failed run_id=%s project_id=%s "
-            "failure_code=%s attempt_count=%s",
+            "event=shader.generate.failed run_id=%s project_id=%s "
+            "attempt_id=- attempt_index=- stage=engine_rollout "
+            "error_code=%s error_type=%s retryable=%s suppressed=false "
+            "attempt_count=%s attempt_refs=%s",
             command.run_id,
             command.project_id,
             exc.code,
+            type(exc).__name__,
+            str(exc.code == "direct_attempts_failed").lower(),
             len(attempt_refs),
+            attempt_refs,
         )
         raise _error(
             command,
@@ -331,6 +384,19 @@ async def execute_shader_generation(
         raise
     except Exception as exc:
         stop_reason = "internal_pipeline_error"
+        cause_types, stack_frames = safe_exception_diagnostics(exc)
+        logger.error(
+            "event=shader.generate.failed run_id=%s project_id=%s "
+            "attempt_id=- attempt_index=- stage=pipeline "
+            "error_code=%s error_type=%s cause_type_chain=%s stack_frames=%s "
+            "retryable=false suppressed=false",
+            command.run_id,
+            command.project_id,
+            stop_reason,
+            type(exc).__name__,
+            cause_types,
+            stack_frames,
+        )
         if run_started:
             await _record_failure(
                 pool,
@@ -380,10 +446,18 @@ async def execute_shader_generation(
                 record_default_model_call=False,
             )
         except Exception as exc:
-            logger.error(
-                "shader.generate.success_persistence_failed run_id=%s error_type=%s",
+            cause_types, stack_frames = safe_exception_diagnostics(exc)
+            logger.warning(
+                "event=shader.generate.success_persistence_failed run_id=%s "
+                "project_id=%s attempt_id=- attempt_index=- "
+                "stage=success_persistence error_code=success_persistence_failed "
+                "error_type=%s cause_type_chain=%s stack_frames=%s "
+                "retryable=false suppressed=true",
                 command.run_id,
+                command.project_id,
                 type(exc).__name__,
+                cause_types,
+                stack_frames,
             )
     logger.info(
         "shader.generate.succeeded run_id=%s project_id=%s attempts=%s "

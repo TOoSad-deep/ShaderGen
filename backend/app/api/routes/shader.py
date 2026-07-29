@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, File, Form, HTTPException, Request, Response, UploadFile
 
+from backend.app.core.log_context import bind_log_context, reset_log_context
 from backend.app.schemas.shader import (
     MinRunProgressResponse,
     QualityPresetName,
@@ -116,60 +117,84 @@ async def generate_shader(
     resolved_project_id = project_id or uuid4()
     # 客户端可显式携带 run_id，以便在 POST 阻塞期间轮询运行进度。
     run_id = run_id or uuid4()
+    tokens = bind_log_context(
+        run_id=str(run_id),
+        project_id=str(resolved_project_id),
+        stage="request_validation",
+    )
+    request.state.log_context = {
+        "run_id": str(run_id),
+        "project_id": str(resolved_project_id),
+        "stage": "request_validation",
+    }
     try:
-        image = await read_image_upload(file)
-    except HTTPException as exc:
-        duration_ms = (time.perf_counter() - started_at) * 1000
-        logger.warning(
-            "shader.generate.client_validation_failed run_id=%s project_id=%s "
-            "generation_mode=%s stage=request_validation "
-            "stop_reason=client_validation status_code=%s retryable=false "
-            "duration_ms=%.2f",
-            run_id,
-            resolved_project_id,
-            "scene_mvp",
-            exc.status_code,
-            duration_ms,
-        )
-        raise _generation_http_error(
-            status_code=exc.status_code,
-            message=str(exc.detail),
-            code="client_validation",
-            run_id=run_id,
-            stage="request_validation",
-            retryable=False,
-            stop_reason="client_validation",
-        ) from exc
+        try:
+            image = await read_image_upload(file)
+        except HTTPException as exc:
+            duration_ms = (time.perf_counter() - started_at) * 1000
+            request.state.log_error = {
+                "error_code": "client_validation",
+                "retryable": "false",
+            }
+            logger.warning(
+                "event=shader.generate.rejected generation_mode=%s "
+                "error_code=client_validation error_type=HTTPException "
+                "stop_reason=client_validation status_code=%s "
+                "retryable=false duration_ms=%.2f",
+                "scene_mvp",
+                exc.status_code,
+                duration_ms,
+            )
+            raise _generation_http_error(
+                status_code=exc.status_code,
+                message=str(exc.detail),
+                code="client_validation",
+                run_id=run_id,
+                stage="request_validation",
+                retryable=False,
+                stop_reason="client_validation",
+            ) from exc
 
-    service, locks = _runtime(request)
-    command = ShaderGenerationCommand(
-        image=image,
-        filename=file.filename,
-        content_type=file.content_type or "application/octet-stream",
-        project_id=resolved_project_id,
-        run_id=run_id,
-        quality_preset=quality_preset,
-        instruction=instruction.strip(),
-        started_at=started_at,
-    )
-    dependencies = ShaderGenerationDependencies(
-        pool=getattr(request.app.state, "db_pool", None),
-        runtime=service,
-        locks=locks,
-        progress=_progress_registry(request),
-    )
-    try:
-        return await execute_shader_generation(command, dependencies)
-    except ShaderGenerationUseCaseError as exc:
-        raise _generation_http_error(
-            status_code=exc.status_code,
-            message=exc.message,
-            code=exc.code,
-            run_id=exc.run_id,
-            stage=exc.stage,
-            retryable=exc.retryable,
-            stop_reason=exc.stop_reason,
-        ) from exc
+        service, locks = _runtime(request)
+        command = ShaderGenerationCommand(
+            image=image,
+            filename=file.filename,
+            content_type=file.content_type or "application/octet-stream",
+            project_id=resolved_project_id,
+            run_id=run_id,
+            quality_preset=quality_preset,
+            instruction=instruction.strip(),
+            started_at=started_at,
+        )
+        dependencies = ShaderGenerationDependencies(
+            pool=getattr(request.app.state, "db_pool", None),
+            runtime=service,
+            locks=locks,
+            progress=_progress_registry(request),
+        )
+        generation_tokens = bind_log_context(stage="generation")
+        request.state.log_context["stage"] = "generation"
+        try:
+            return await execute_shader_generation(command, dependencies)
+        except ShaderGenerationUseCaseError as exc:
+            request.state.log_context["stage"] = exc.stage
+            request.state.log_error = {
+                "error_code": exc.code,
+                "retryable": str(exc.retryable).lower(),
+            }
+            raise _generation_http_error(
+                status_code=exc.status_code,
+                message=exc.message,
+                code=exc.code,
+                run_id=exc.run_id,
+                stage=exc.stage,
+                retryable=exc.retryable,
+                stop_reason=exc.stop_reason,
+            ) from exc
+        finally:
+            reset_log_context(generation_tokens)
+    finally:
+        reset_log_context(tokens)
 
 
 @router.get("/runs/{run_id}/progress", response_model=MinRunProgressResponse)

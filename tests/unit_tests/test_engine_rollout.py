@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from uuid import uuid4
 
@@ -137,3 +138,45 @@ async def test_three_direct_failures_return_safe_attempt_refs(tmp_path: Path) ->
     assert exc_info.value.code == "direct_attempts_failed"
     assert len(exc_info.value.attempt_refs) == 3
     assert not (tmp_path / "public" / "project" / str(parent_id)).exists()
+
+
+@pytest.mark.anyio
+async def test_unexpected_attempt_failure_logs_safe_location_without_message(
+    tmp_path: Path,
+    caplog,
+) -> None:
+    class ExplodingExecutor:
+        async def execute(self, request, context):
+            raise RuntimeError("secret-provider-or-shader-content")
+
+        async def close(self) -> None:
+            return None
+
+    parent_id = uuid4()
+    coordinator = EngineParentRunCoordinator(
+        direct_factory=lambda context: ExplodingExecutor(),
+        artifacts=_artifacts(tmp_path),
+        direct_attempt_limit=1,
+    )
+    caplog.set_level(logging.ERROR, logger="backend.engine_rollout")
+
+    with pytest.raises(ParentRunFailure):
+        await coordinator.execute(
+            request=ParentRunRequest(
+                parent_run_id=parent_id,
+                project_id="project",
+                image=b"image",
+                content_type="image/png",
+                instruction="",
+                quality_preset="balanced",
+            ),
+            plan=resolve_parent_run_plan(
+                parent_run_id=parent_id,
+                project_id="project",
+            ),
+        )
+
+    assert "event=engine.attempt.failed" in caplog.text
+    assert "error_type=RuntimeError" in caplog.text
+    assert "test_engine_rollout.py" in caplog.text
+    assert "secret-provider-or-shader-content" not in caplog.text

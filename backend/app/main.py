@@ -11,10 +11,11 @@ from fastapi import FastAPI, Request
 from fastapi.exception_handlers import request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.responses import JSONResponse, Response
+from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.types import ExceptionHandler, Lifespan
 
 from backend.app.api.router import build_api_router
+from backend.app.core.log_context import scoped_log_context
 from backend.app.core.logging import configure_logging
 from backend.app.core.settings import BackendSettings
 from backend.app.database.session import close_database_pool, open_database_pool
@@ -93,16 +94,24 @@ async def log_request_validation_error(
     )
     if request.url.path == "/api/shader/generate":
         run_id = uuid4()
-        logger.warning(
-            "request.validation_failed method=%s path=%s run_id=%s "
-            "stage=request_validation stop_reason=client_validation "
-            "retryable=false error_count=%s errors=%s",
-            request.method,
-            request.url.path,
-            run_id,
-            len(exc.errors()),
-            serialized_errors,
-        )
+        request.state.log_context = {
+            "run_id": str(run_id),
+            "stage": "request_validation",
+        }
+        request.state.log_error = {
+            "error_code": "client_validation",
+            "retryable": "false",
+        }
+        with scoped_log_context(run_id=str(run_id), stage="request_validation"):
+            logger.warning(
+                "event=request.validation_failed method=%s path=%s "
+                "stop_reason=client_validation retryable=false "
+                "error_count=%s errors=%s",
+                request.method,
+                request.url.path,
+                len(exc.errors()),
+                serialized_errors,
+            )
         detail = ShaderGenerationErrorDetail(
             message="Shader 生成请求参数校验失败。",
             code="client_validation",
@@ -116,13 +125,35 @@ async def log_request_validation_error(
             content={"detail": detail.model_dump(mode="json")},
         )
     logger.warning(
-        "request.validation_failed method=%s path=%s error_count=%s errors=%s",
+        "event=request.validation_failed method=%s path=%s error_count=%s errors=%s",
         request.method,
         request.url.path,
         len(exc.errors()),
         serialized_errors,
     )
     return await request_validation_exception_handler(request, exc)
+
+
+async def unhandled_exception_response(request: Request, _exc: Exception) -> Response:
+    """为最外层 500 响应保留请求关联 id；异常已由请求中间件安全记录."""
+    request_id = getattr(request.state, "request_id", None) or str(uuid4())
+    headers = {"X-Request-ID": request_id}
+    origin = request.headers.get("Origin")
+    settings = request.app.state.settings
+    if origin in settings.cors_origins:
+        headers.update(
+            {
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Expose-Headers": "X-Request-ID",
+                "Vary": "Origin",
+            }
+        )
+    return PlainTextResponse(
+        "Internal Server Error",
+        status_code=500,
+        headers=headers,
+    )
 
 
 def create_app(settings: BackendSettings | None = None) -> FastAPI:
@@ -137,12 +168,17 @@ def create_app(settings: BackendSettings | None = None) -> FastAPI:
         RequestValidationError,
         cast(ExceptionHandler, log_request_validation_error),
     )
+    application.add_exception_handler(
+        Exception,
+        cast(ExceptionHandler, unhandled_exception_response),
+    )
     application.add_middleware(
         CORSMiddleware,
         allow_origins=list(resolved.cors_origins),
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=["X-Request-ID"],
     )
     application.middleware("http")(build_request_logging_middleware(logger))
     application.include_router(build_api_router())

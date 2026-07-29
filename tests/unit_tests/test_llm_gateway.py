@@ -1,3 +1,5 @@
+import logging
+
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
@@ -75,11 +77,12 @@ async def test_gateway_marks_configured_model_identity_fallback() -> None:
 
 
 @pytest.mark.anyio
-async def test_gateway_wraps_configuration_error_without_secret() -> None:
+async def test_gateway_wraps_configuration_error_without_secret(caplog) -> None:
     def fail_factory(options):
         raise ValueError("secret-key")
 
     gateway = LangChainLLMGateway(client_factory=fail_factory)
+    caplog.set_level(logging.WARNING, logger="agent.llm")
 
     with pytest.raises(LLMConfigurationError) as caught:
         await gateway.ainvoke(
@@ -88,16 +91,20 @@ async def test_gateway_wraps_configuration_error_without_secret() -> None:
         )
 
     assert "secret-key" not in str(caught.value)
+    assert "secret-key" not in caplog.text
+    assert "event=llm.configuration_failed" in caplog.text
+    assert "error_type=ValueError" in caplog.text
     assert caught.value.provider == "dashscope"
 
 
 @pytest.mark.anyio
-async def test_gateway_marks_timeout_retryable() -> None:
+async def test_gateway_marks_timeout_retryable(caplog) -> None:
     class FailingClient:
         async def ainvoke(self, messages):
-            raise TimeoutError("timeout")
+            raise TimeoutError("secret-provider-response")
 
     gateway = LangChainLLMGateway(client_factory=lambda options: FailingClient())
+    caplog.set_level(logging.WARNING, logger="agent.llm")
 
     with pytest.raises(LLMInvocationError) as caught:
         await gateway.ainvoke(
@@ -106,6 +113,10 @@ async def test_gateway_marks_timeout_retryable() -> None:
         )
 
     assert caught.value.retryable is True
+    assert "secret-provider-response" not in caplog.text
+    assert "event=llm.invocation_failed" in caplog.text
+    assert "error_type=TimeoutError" in caplog.text
+    assert "retryable=True" in caplog.text
 
 
 @pytest.mark.anyio

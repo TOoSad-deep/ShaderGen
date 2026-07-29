@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,6 +24,7 @@ from agent.app.services.layerplan_glsl_direct import (
     create_owned_layerplan_glsl_direct_runner,
     current_layered_direct_glsl_implementation_identity,
 )
+from backend.app.core.logging import safe_exception_diagnostics
 from backend.app.services.engine_rollout import (
     DIRECT_ENGINE,
     DIRECT_REPRESENTATION,
@@ -33,10 +35,13 @@ from backend.app.services.engine_rollout import (
     ParentRunPlan,
     ParentRunRequest,
     ParentRunResult,
+    child_attempt_id,
     resolve_parent_run_plan,
 )
 from shaderforge.config import RUNTIME_TIMEOUTS
 from shaderforge.store import LocalArtifactStore
+
+logger = logging.getLogger("backend.engine_rollout_runtime")
 
 _PUBLIC_ARTIFACTS = {
     "final-render": ("render.png", "image/png", "final-render.png"),
@@ -125,6 +130,15 @@ class EngineRolloutGenerationResult:
         payload = result.response_payload
         pipeline = payload.get("pipeline")
         if not isinstance(pipeline, dict):
+            logger.error(
+                "event=engine.response_contract.failed run_id=%s project_id=%s "
+                "attempt_id=%s attempt_index=- stage=response_contract "
+                "error_code=engine_response_contract_failed "
+                "error_type=EngineAttemptFailure retryable=false suppressed=false",
+                payload.get("run_id", "unknown"),
+                payload.get("project_id", "unknown"),
+                result.engine_run.get("selected_attempt_id", "unknown"),
+            )
             raise EngineAttemptFailure("engine_response_contract_failed")
         try:
             return cls(
@@ -157,6 +171,20 @@ class EngineRolloutGenerationResult:
                 engine_run=dict(result.engine_run),
             )
         except (KeyError, TypeError, ValueError) as exc:
+            cause_types, stack_frames = safe_exception_diagnostics(exc)
+            logger.error(
+                "event=engine.response_contract.failed run_id=%s project_id=%s "
+                "attempt_id=%s attempt_index=- stage=response_contract "
+                "error_code=engine_response_contract_failed error_type=%s "
+                "cause_type_chain=%s stack_frames=%s retryable=false "
+                "suppressed=false",
+                payload.get("run_id", "unknown"),
+                payload.get("project_id", "unknown"),
+                result.engine_run.get("selected_attempt_id", "unknown"),
+                type(exc).__name__,
+                cause_types,
+                stack_frames,
+            )
             raise EngineAttemptFailure("engine_response_contract_failed") from exc
 
 
@@ -182,8 +210,21 @@ def _publish_progress(
         event["failure_code"] = failure_code
     try:
         request.progress_callback(event, render)
-    except Exception:
-        pass
+    except Exception as exc:
+        cause_types, stack_frames = safe_exception_diagnostics(exc)
+        logger.warning(
+            "event=engine.progress_callback.failed run_id=%s project_id=%s "
+            "attempt_id=%s attempt_index=%s stage=progress_callback "
+            "error_code=progress_callback_failed error_type=%s "
+            "cause_type_chain=%s stack_frames=%s retryable=true suppressed=true",
+            request.parent_run_id,
+            request.project_id,
+            child_attempt_id(request.parent_run_id, attempt_index),
+            attempt_index,
+            type(exc).__name__,
+            cause_types,
+            stack_frames,
+        )
 
 
 def _direct_response_payload(
@@ -426,6 +467,17 @@ class DirectEngineAttemptExecutor:
                 ),
             )
         except EngineAttemptFailure as exc:
+            logger.warning(
+                "event=engine.direct_attempt.failed run_id=%s project_id=%s "
+                "attempt_id=%s attempt_index=%s stage=direct_executor "
+                "error_code=%s error_type=%s retryable=true suppressed=false",
+                context.parent_run_id,
+                request.project_id,
+                context.attempt_id,
+                context.attempt_index,
+                exc.code,
+                type(exc).__name__,
+            )
             if claimed:
                 await asyncio.to_thread(
                     _write_private_failure,
@@ -443,6 +495,20 @@ class DirectEngineAttemptExecutor:
             )
             raise
         except Exception as exc:
+            cause_types, stack_frames = safe_exception_diagnostics(exc)
+            logger.error(
+                "event=engine.direct_attempt.failed run_id=%s project_id=%s "
+                "attempt_id=%s attempt_index=%s stage=direct_executor "
+                "error_code=direct_attempt_failed error_type=%s "
+                "cause_type_chain=%s stack_frames=%s retryable=true suppressed=false",
+                context.parent_run_id,
+                request.project_id,
+                context.attempt_id,
+                context.attempt_index,
+                type(exc).__name__,
+                cause_types,
+                stack_frames,
+            )
             if claimed:
                 await asyncio.to_thread(
                     _write_private_failure,

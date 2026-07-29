@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -18,7 +19,11 @@ from agent.app.services.engine_rollout_artifacts import (
     Representation,
     SelectedEngineArtifacts,
 )
+from backend.app.core.log_context import scoped_log_context
+from backend.app.core.logging import safe_exception_diagnostics
 from shaderforge.config import RUNTIME_TIMEOUTS
+
+logger = logging.getLogger("backend.engine_rollout")
 
 AttemptStatus = Literal["succeeded", "failed"]
 _SAFE_CODE = re.compile(r"^[a-z][a-z0-9_]{0,127}$")
@@ -184,6 +189,14 @@ class EngineParentRunCoordinator:
             request.parent_run_id != plan.parent_run_id
             or request.project_id != plan.project_id
         ):
+            logger.warning(
+                "event=engine.parent_run.rejected run_id=%s project_id=%s "
+                "attempt_id=- attempt_index=- stage=parent_run_plan "
+                "error_code=parent_run_identity_mismatch "
+                "error_type=ParentRunFailure retryable=false suppressed=false",
+                request.parent_run_id,
+                request.project_id,
+            )
             raise ParentRunFailure("parent_run_identity_mismatch", attempt_refs=())
         refs: list[AttemptRef] = []
         selected: EngineAttemptSuccess | None = None
@@ -194,14 +207,41 @@ class EngineParentRunCoordinator:
                 attempt_index=attempt_index,
             )
             try:
-                selected = await self._execute_attempt(request, context)
+                with scoped_log_context(
+                    attempt_id=str(context.attempt_id),
+                    stage="engine_attempt",
+                ):
+                    selected = await self._execute_attempt(request, context)
             except EngineAttemptFailure as exc:
                 refs.append(self._failure_ref(context, exc.code))
                 if attempt_index + 1 >= self._direct_attempt_limit:
-                    raise ParentRunFailure(
+                    failure = ParentRunFailure(
                         "direct_attempts_failed",
                         attempt_refs=tuple(refs),
-                    ) from exc
+                    )
+                    logger.error(
+                        "event=engine.parent_run.failed run_id=%s project_id=%s "
+                        "attempt_id=- attempt_index=- stage=engine_rollout "
+                        "error_code=%s error_type=%s retryable=true suppressed=false "
+                        "attempt_refs=%s",
+                        request.parent_run_id,
+                        request.project_id,
+                        failure.code,
+                        type(failure).__name__,
+                        [item.to_dict() for item in failure.attempt_refs],
+                    )
+                    raise failure from exc
+                logger.warning(
+                    "event=engine.attempt.failed run_id=%s project_id=%s "
+                    "attempt_id=%s attempt_index=%s stage=engine_attempt "
+                    "error_code=%s error_type=%s retryable=true suppressed=false",
+                    request.parent_run_id,
+                    request.project_id,
+                    context.attempt_id,
+                    context.attempt_index,
+                    exc.code,
+                    type(exc).__name__,
+                )
                 self._publish_retry(
                     request,
                     attempt_index=attempt_index + 1,
@@ -228,10 +268,22 @@ class EngineParentRunCoordinator:
                 selected=selected.artifacts,
             )
         except EngineRolloutArtifactError as exc:
-            raise ParentRunFailure(
+            failure = ParentRunFailure(
                 "parent_artifact_publish_failed",
                 attempt_refs=tuple(refs),
-            ) from exc
+            )
+            logger.error(
+                "event=engine.parent_run.failed run_id=%s project_id=%s "
+                "attempt_id=- attempt_index=- stage=parent_artifact_publish "
+                "error_code=%s error_type=%s retryable=false suppressed=false "
+                "attempt_refs=%s",
+                request.parent_run_id,
+                request.project_id,
+                failure.code,
+                type(exc).__name__,
+                [item.to_dict() for item in failure.attempt_refs],
+            )
+            raise failure from exc
         base = f"/api/shader/runs/{request.parent_run_id}/artifacts"
         payload = {
             **selected.response_payload,
@@ -273,8 +325,21 @@ class EngineParentRunCoordinator:
                 },
                 None,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            cause_types, stack_frames = safe_exception_diagnostics(exc)
+            logger.warning(
+                "event=engine.progress_callback.failed run_id=%s project_id=%s "
+                "attempt_id=%s attempt_index=%s stage=progress_callback "
+                "error_code=progress_callback_failed error_type=%s "
+                "cause_type_chain=%s stack_frames=%s retryable=true suppressed=true",
+                request.parent_run_id,
+                request.project_id,
+                child_attempt_id(request.parent_run_id, attempt_index),
+                attempt_index,
+                type(exc).__name__,
+                cause_types,
+                stack_frames,
+            )
 
     async def _execute_attempt(
         self,
@@ -293,8 +358,36 @@ class EngineParentRunCoordinator:
         except EngineAttemptFailure:
             raise
         except (TimeoutError, asyncio.TimeoutError) as exc:
+            cause_types, stack_frames = safe_exception_diagnostics(exc)
+            logger.error(
+                "event=engine.attempt.failed run_id=%s project_id=%s "
+                "attempt_id=%s attempt_index=%s stage=engine_attempt "
+                "error_code=engine_attempt_timeout error_type=%s "
+                "cause_type_chain=%s stack_frames=%s retryable=true suppressed=false",
+                request.parent_run_id,
+                request.project_id,
+                context.attempt_id,
+                context.attempt_index,
+                type(exc).__name__,
+                cause_types,
+                stack_frames,
+            )
             raise EngineAttemptFailure("engine_attempt_timeout") from exc
         except Exception as exc:
+            cause_types, stack_frames = safe_exception_diagnostics(exc)
+            logger.error(
+                "event=engine.attempt.failed run_id=%s project_id=%s "
+                "attempt_id=%s attempt_index=%s stage=engine_attempt "
+                "error_code=engine_attempt_failed error_type=%s "
+                "cause_type_chain=%s stack_frames=%s retryable=true suppressed=false",
+                request.parent_run_id,
+                request.project_id,
+                context.attempt_id,
+                context.attempt_index,
+                type(exc).__name__,
+                cause_types,
+                stack_frames,
+            )
             raise EngineAttemptFailure("engine_attempt_failed") from exc
         finally:
             if executor is not None:
@@ -305,8 +398,22 @@ class EngineParentRunCoordinator:
                             closed,
                             timeout=self._close_timeout_seconds,
                         )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    cause_types, stack_frames = safe_exception_diagnostics(exc)
+                    logger.warning(
+                        "event=engine.attempt.close_failed run_id=%s project_id=%s "
+                        "attempt_id=%s attempt_index=%s stage=executor_close "
+                        "error_code=engine_attempt_close_failed error_type=%s "
+                        "cause_type_chain=%s stack_frames=%s retryable=true "
+                        "suppressed=true",
+                        request.parent_run_id,
+                        request.project_id,
+                        context.attempt_id,
+                        context.attempt_index,
+                        type(exc).__name__,
+                        cause_types,
+                        stack_frames,
+                    )
 
     @staticmethod
     def _validate_success(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Sequence
 from time import perf_counter
 
@@ -28,6 +29,8 @@ from agent.app.llms.provider_config import PROVIDER_NAMES
 
 ClientFactory = Callable[[LLMCallOptions], BaseChatModel | ChatModelBinding]
 
+logger = logging.getLogger("agent.llm")
+
 
 class LangChainLLMGateway:
     """通过 LangChain 客户端执行统一 LLM 调用."""
@@ -52,6 +55,18 @@ class LangChainLLMGateway:
             created = self._client_factory(options)
             binding = _normalize_binding(created, options)
         except Exception as exc:
+            # Provider exceptions can embed request metadata or credentials in their
+            # messages.  Keep terminal diagnostics to stable classification fields.
+            logger.warning(
+                "llm.gateway_failure event=%s provider=%s model_ref=%s "
+                "error_type=%s retryable=%s stage=%s",
+                "llm.configuration_failed",
+                provider,
+                options.model_ref,
+                type(exc).__name__,
+                False,
+                "configuration",
+            )
             raise LLMConfigurationError(
                 "LLM 配置无效。",
                 model_ref=options.model_ref,
@@ -62,11 +77,24 @@ class LangChainLLMGateway:
         try:
             message = await binding.client.ainvoke(list(messages))
         except Exception as exc:
+            retryable = _is_retryable(exc)
+            # Do not use exc_info here: third-party client tracebacks may include
+            # provider response bodies, prompts, or other sensitive request data.
+            logger.warning(
+                "llm.gateway_failure event=%s provider=%s model_ref=%s "
+                "error_type=%s retryable=%s stage=%s",
+                "llm.invocation_failed",
+                binding.resolved_provider,
+                options.model_ref,
+                type(exc).__name__,
+                retryable,
+                "invocation",
+            )
             raise LLMInvocationError(
                 "LLM 调用失败。",
                 model_ref=options.model_ref,
                 provider=provider,
-                retryable=_is_retryable(exc),
+                retryable=retryable,
             ) from exc
         latency_ms = int((self._clock() - started_at) * 1000)
 
