@@ -10,14 +10,20 @@ from zipfile import ZipFile
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
     "agent/app/contracts/layer_plan.py",
+    "agent/app/contracts/layerplan_glsl_direct.py",
+    "agent/app/graphs/layerplan_glsl_direct.py",
+    "agent/app/graphs/layerplan_glsl_direct_studio.py",
     "agent/app/nodes/layered_direct/authors.py",
     "agent/app/services/layerplan_glsl_direct.py",
+    "agent/app/states/layerplan_glsl_direct.py",
     "shaderforge/layered_spec/compiler.py",
     "shaderforge/program_spec/models.py",
 }
+FORBIDDEN_FILES = {
+    "agent/app/graphs/png_to_shader_min_graph.py",
+}
 FORBIDDEN_PREFIXES = (
     "nodelab/",
-    "agent/app/graphs/",
     "agent/app/nodes/png_to_shader_min/",
     "shaderforge/dsl/",
 )
@@ -62,7 +68,8 @@ def main() -> None:
             legacy = sorted(
                 name
                 for name in names
-                if any(name.startswith(prefix) for prefix in FORBIDDEN_PREFIXES)
+                if name in FORBIDDEN_FILES
+                or any(name.startswith(prefix) for prefix in FORBIDDEN_PREFIXES)
             )
             if legacy:
                 raise RuntimeError(f"wheel contains legacy files: {legacy}")

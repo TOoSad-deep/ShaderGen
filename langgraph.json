@@ -1,0 +1,9 @@
+{
+  "dependencies": [
+    "."
+  ],
+  "graphs": {
+    "layerplan_glsl_direct": "./src/agent/app/graphs/layerplan_glsl_direct_studio.py:graph"
+  },
+  "env": ".env"
+}

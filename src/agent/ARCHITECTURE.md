@@ -1,11 +1,15 @@
 # Agent architecture
 
 ```text
-LLM Gateway
-  → LayerPlan author
-  → Layered Initial author
-  → optional single-layer Refine author
-  → Direct attempt service
+Direct attempt service
+  → LayerPlan Direct LangGraph
+      → prepare reference
+      → LayerPlan author
+      → Layered Initial author
+      → compile → validate → WebGL prepare → draw
+      → verify receipt/attestation → evaluate → select incumbent
+      → optional LayerPatch Refine loop
+      → release resources → finalize
 ```
 
 Prompts live only in `app/prompts`; deterministic domain behavior lives in

@@ -10,6 +10,10 @@
   compile/link/draw 决定。
 - 已移除旧模型直出 ProgramSpec、ShaderGraph、Graph runtime、policy、
   fallback、promotion、shadow、Memory 和 Node Lab 运行代码。
+- 当前 Layered Direct attempt 已使用新的 LangGraph 编排；删除的是旧
+  `png_to_shader_min` graph，不是当前 LayerPlan 流程。
+- reference、LayerPlan、Initial/Refine、compile、validate、prepare、draw、
+  receipt/attestation、evaluate、incumbent selection 和 finalize 均为显式 node。
 - 当前公开 Artifact 只有 final-render、metrics、manifest。
 
 历史材料保留在 `docs/archive/` 和 `docs/evidence/`，不属于当前运行闭包。

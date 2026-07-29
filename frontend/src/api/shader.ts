@@ -143,11 +143,14 @@ export async function generateShader(
 }
 
 // scene_mvp 运行中单节点进度事件；后端白名单字段，全部按可缺省处理。
+export type MinRunProgressEventStatus = "running" | "completed" | "failed";
+
 export interface MinRunProgressEvent {
   seq: number;
   node: string;
-  status: string;
+  status: MinRunProgressEventStatus;
   phase?: string | null;
+  attempt_index?: number | null;
   elapsed_ms?: number | null;
   duration_ms?: number | null;
   budgets?: Record<string, number> | null;

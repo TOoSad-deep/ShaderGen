@@ -7,6 +7,7 @@ import {
 } from "../api/shader";
 import {
   buildRunViewModel,
+  DIRECT_STAGE_GROUPS,
   formatClock,
   formatMetric,
   formatMs,
@@ -134,53 +135,75 @@ export function MinRunLivePanel({
       <div className="min-live-grid">
         <section className="min-live-timeline" aria-label="节点时间线">
           <h3>
-            节点时间线（{vm.completedStageCount}/{vm.stages.length}）
+            节点时间线（已执行 {vm.executedStageCount}/{vm.stages.length}）
             {vm.unknownEventCount > 0 ? ` · ${vm.unknownEventCount} 个未知节点事件` : ""}
           </h3>
-          <ol>
-            {vm.stages.map((stage) => (
-              <li key={stage.id} className={`is-${stage.state}`}>
-                <span className="node-dot" aria-hidden="true" />
-                <span className="node-label">
-                  {stage.label}
-                  {stage.visits > 1 ? ` ×${stage.visits}` : ""}
-                </span>
-                <span className="node-meta">
-                  {stage.state === "completed" ? (
-                    <>
-                      <span className="visually-hidden">已完成，</span>
-                      {formatMs(stage.lastDurationMs)}
-                      {stage.lastElapsedMs !== null ? (
-                        <span className="node-cumulative">
-                          累计 {formatClock(stage.lastElapsedMs / 1000)}
+          <div className="node-groups">
+            {DIRECT_STAGE_GROUPS.map((group) => {
+              const groupStages = vm.stages.filter((stage) => stage.group === group.id);
+              const executed = groupStages.filter((stage) => stage.visits > 0).length;
+              return (
+                <section className="node-group" key={group.id}>
+                  <h4>
+                    <span>{group.label}</span>
+                    <span>
+                      {executed}/{groupStages.length}
+                    </span>
+                  </h4>
+                  <ol>
+                    {groupStages.map((stage) => (
+                      <li key={stage.id} className={`is-${stage.state}`}>
+                        <span className="node-dot" aria-hidden="true" />
+                        <span className="node-label">
+                          {stage.label}
+                          {stage.visits > 1 ? ` ×${stage.visits}` : ""}
                         </span>
-                      ) : null}
-                    </>
-                  ) : stage.state === "failed" ? (
-                    <em>失败</em>
-                  ) : stage.state === "running" ? (
-                    <em>进行中</em>
-                  ) : (
-                    "待执行"
-                  )}
-                </span>
-                {stage.summary && stage.state !== "pending" ? (
-                  <span className="node-summary">
-                    {stage.summary}
-                    {stage.details ? (
-                      <span className="node-summary-details">{stage.details}</span>
-                    ) : null}
-                  </span>
-                ) : null}
-                {stage.nextAction ? (
-                  <span className="node-route">
-                    → {stage.nextActionLabel}
-                    {stage.stopReasonLabel ? `（${stage.stopReasonLabel}）` : ""}
-                  </span>
-                ) : null}
-              </li>
-            ))}
-          </ol>
+                        <span className="node-meta">
+                          {stage.state === "completed" ? (
+                            <>
+                              <span className="visually-hidden">已完成，</span>
+                              {formatMs(stage.lastDurationMs)}
+                              {stage.lastElapsedMs !== null ? (
+                                <span className="node-cumulative">
+                                  累计 {formatClock(stage.lastElapsedMs / 1000)}
+                                </span>
+                              ) : null}
+                            </>
+                          ) : stage.state === "failed" ? (
+                            <em>失败</em>
+                          ) : stage.state === "running" ? (
+                            <em>进行中</em>
+                          ) : stage.state === "skipped" ? (
+                            <em>已跳过</em>
+                          ) : (
+                            "待执行"
+                          )}
+                        </span>
+                        {stage.summary && stage.state !== "pending" ? (
+                          <span className="node-summary">
+                            {stage.summary}
+                            {stage.details ? (
+                              <span className="node-summary-details">
+                                {stage.details}
+                              </span>
+                            ) : null}
+                          </span>
+                        ) : null}
+                        {stage.nextAction ? (
+                          <span className="node-route">
+                            → {stage.nextActionLabel}
+                            {stage.stopReasonLabel
+                              ? `（${stage.stopReasonLabel}）`
+                              : ""}
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ol>
+                </section>
+              );
+            })}
+          </div>
         </section>
 
         <section className="min-live-side">

@@ -93,8 +93,9 @@ class MinRunProgressEvent(BaseModel):
 
     seq: int
     node: str
-    status: str
+    status: Literal["running", "completed", "failed"]
     phase: str | None = None
+    attempt_index: int | None = Field(default=None, ge=0)
     elapsed_ms: float | None = None
     duration_ms: float | None = None
     budgets: dict[str, Any] = Field(default_factory=dict)

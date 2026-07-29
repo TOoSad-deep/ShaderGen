@@ -7,6 +7,7 @@ import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from math import isfinite
 from pathlib import Path
 from typing import Any, Protocol
 from uuid import UUID
@@ -18,8 +19,10 @@ from agent.app.services.engine_rollout_artifacts import (
 )
 from agent.app.services.layerplan_glsl_direct import (
     DIRECT_ATTEMPT_RESULT_SCHEMA_VERSION,
+    DIRECT_GRAPH_NODE_NAMES,
     DirectAttemptResult,
     LayerPlanGlslDirectConfig,
+    NodeProgressCallback,
     create_owned_layerplan_glsl_direct_runner,
     current_layered_direct_glsl_implementation_identity,
 )
@@ -50,6 +53,7 @@ _QUALITY_TARGETS = {
     "high": (0.04, 0.06),
     "manual": (0.03, 0.05),
 }
+_DIRECT_GRAPH_NODES = frozenset(DIRECT_GRAPH_NODE_NAMES)
 
 
 def _json_bytes(value: dict[str, Any]) -> bytes:
@@ -79,6 +83,7 @@ class _DirectRunner(Protocol):
         *,
         content_type: str = "image/png",
         instruction: str = "",
+        node_progress_callback: NodeProgressCallback | None = None,
     ) -> DirectAttemptResult: ...
 
     async def close(self) -> None: ...
@@ -182,6 +187,36 @@ def _publish_progress(
         event["failure_code"] = failure_code
     try:
         request.progress_callback(event, render)
+    except Exception:
+        pass
+
+
+def _publish_node_progress(
+    request: ParentRunRequest,
+    *,
+    node_name: str,
+    status: str,
+    attempt_index: int,
+    duration_ms: float | None,
+) -> None:
+    """Forward a graph lifecycle event through the public-safe progress channel."""
+    if (
+        request.progress_callback is None
+        or node_name not in _DIRECT_GRAPH_NODES
+        or status not in {"running", "completed", "failed"}
+    ):
+        return
+    event = {
+        "node": node_name,
+        "phase": f"node_{status}",
+        "status": status,
+        "engine": DIRECT_ENGINE,
+        "attempt_index": attempt_index,
+    }
+    if duration_ms is not None and isfinite(duration_ms):
+        event["duration_ms"] = round(max(0.0, duration_ms), 2)
+    try:
+        request.progress_callback(event, None)
     except Exception:
         pass
 
@@ -384,6 +419,20 @@ class DirectEngineAttemptExecutor:
         )
         claimed = False
         result: DirectAttemptResult | None = None
+
+        def publish_node_progress(
+            node_name: str,
+            status: str,
+            duration_ms: float | None,
+        ) -> None:
+            _publish_node_progress(
+                request,
+                node_name=node_name,
+                status=status,
+                attempt_index=context.attempt_index,
+                duration_ms=duration_ms,
+            )
+
         try:
             await asyncio.to_thread(
                 _claim_private_attempt, self._store, request, context
@@ -393,6 +442,7 @@ class DirectEngineAttemptExecutor:
                 request.image,
                 content_type=request.content_type,
                 instruction=request.instruction,
+                node_progress_callback=publish_node_progress,
             )
             response = _direct_response_payload(
                 result,
@@ -442,6 +492,15 @@ class DirectEngineAttemptExecutor:
                 failure_code=exc.code,
             )
             raise
+        except asyncio.CancelledError:
+            _publish_progress(
+                request,
+                phase="direct_failed",
+                status="failed",
+                attempt_index=context.attempt_index,
+                failure_code="engine_attempt_cancelled",
+            )
+            raise
         except Exception as exc:
             if claimed:
                 await asyncio.to_thread(
@@ -451,6 +510,13 @@ class DirectEngineAttemptExecutor:
                     "direct_attempt_failed",
                     result,
                 )
+            _publish_progress(
+                request,
+                phase="direct_failed",
+                status="failed",
+                attempt_index=context.attempt_index,
+                failure_code="direct_attempt_failed",
+            )
             raise EngineAttemptFailure("direct_attempt_failed") from exc
         _publish_progress(
             request,

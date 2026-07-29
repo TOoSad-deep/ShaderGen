@@ -33,7 +33,6 @@ def _main() -> int:
     )
 
     removed = (
-        "langgraph.json",
         "src/agent/app/graphs/png_to_shader_min_graph.py",
         "src/agent/app/services/png_to_shader_min.py",
         "src/agent/app/services/layerplan_glsl_shadow.py",
@@ -47,14 +46,25 @@ def _main() -> int:
 
     current = (
         "src/agent/app/contracts/layer_plan.py",
+        "src/agent/app/contracts/layerplan_glsl_direct.py",
+        "src/agent/app/graphs/layerplan_glsl_direct.py",
+        "src/agent/app/graphs/layerplan_glsl_direct_studio.py",
         "src/agent/app/nodes/layered_direct/authors.py",
         "src/agent/app/services/layerplan_glsl_direct.py",
+        "src/agent/app/states/layerplan_glsl_direct.py",
         "src/shaderforge/layered_spec/compiler.py",
         "src/shaderforge/program_spec/models.py",
         "backend/app/services/engine_rollout.py",
+        "backend/app/services/engine_rollout_graph.py",
     )
     for path in current:
         _require((ROOT / path).is_file(), f"current pipeline file missing: {path}")
+
+    langgraph_config = (ROOT / "langgraph.json").read_text(encoding="utf-8")
+    _require(
+        "layerplan_glsl_direct_studio.py:graph" in langgraph_config,
+        "safe LayerPlan Direct Studio adapter must be registered",
+    )
 
     app_source = (ROOT / "frontend/src/App.tsx").read_text(encoding="utf-8")
     _require('href="/lab"' not in app_source, "removed Node Lab link remains")

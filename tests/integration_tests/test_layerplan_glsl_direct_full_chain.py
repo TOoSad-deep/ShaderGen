@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -12,6 +13,7 @@ from agent.app.services.layerplan_glsl_direct import (
     LayerPlanGlslDirectConfig,
     LayerPlanGlslDirectRunner,
 )
+from backend.app.services.engine_rollout import ParentRunFailure
 from backend.app.services.engine_rollout_runtime import build_engine_rollout_runtime
 from shaderforge.program_spec import is_executable
 from shaderforge.store import LocalArtifactStore
@@ -38,6 +40,29 @@ class _OwnedFakeRunner:
 
     async def run(self, reference_image: bytes, **kwargs):
         return await self._runner.run(reference_image, **kwargs)
+
+    async def close(self) -> None:
+        return None
+
+
+class _HangingOwnedRunner:
+    def __init__(self, _config: LayerPlanGlslDirectConfig) -> None:
+        pass
+
+    async def run(self, _reference_image: bytes, **_kwargs):
+        await asyncio.Event().wait()
+        raise AssertionError("unreachable")
+
+    async def close(self) -> None:
+        return None
+
+
+class _ExplodingOwnedRunner:
+    def __init__(self, _config: LayerPlanGlslDirectConfig) -> None:
+        pass
+
+    async def run(self, _reference_image: bytes, **_kwargs):
+        raise RuntimeError("private failure detail")
 
     async def close(self) -> None:
         return None
@@ -100,10 +125,110 @@ async def test_runtime_progress_publishes_selected_render(tmp_path: Path) -> Non
         await runtime.close()
 
     renders = [
-        render
-        for event, render in progress
-        if event.get("phase") == "direct_completed"
+        render for event, render in progress if event.get("phase") == "direct_completed"
     ]
     assert len(renders) == 1
     assert renders[0] is not None
     assert renders[0].startswith(b"\x89PNG\r\n\x1a\n")
+
+    node_events = [
+        event
+        for event, render in progress
+        if event.get("phase") in {"node_running", "node_completed"}
+    ]
+    assert len(node_events) % 2 == 0
+    assert all(
+        running["node"] == completed["node"]
+        and running["status"] == "running"
+        and completed["status"] == "completed"
+        and "duration_ms" not in running
+        and isinstance(completed.get("duration_ms"), float)
+        for running, completed in zip(node_events[::2], node_events[1::2], strict=True)
+    )
+    assert {
+        "prepare_reference",
+        "author_layer_plan",
+        "author_initial",
+        "compile_candidate",
+        "validate_candidate",
+        "prepare_program",
+        "render_program",
+        "verify_receipt",
+        "attest_candidate",
+        "evaluate_candidate",
+        "select_candidate",
+        "decide_refinement",
+        "release_resources",
+        "finalize_attempt",
+    }.issubset({event["node"] for event in node_events})
+
+
+@pytest.mark.anyio
+async def test_runtime_closes_direct_lifecycle_events_on_attempt_timeout(
+    tmp_path: Path,
+) -> None:
+    runtime = build_engine_rollout_runtime(
+        public_store=LocalArtifactStore(tmp_path / "public"),
+        private_attempt_root=tmp_path / "private",
+        direct_runner_factory=_HangingOwnedRunner,
+        attempt_timeout_seconds=0.01,
+    )
+    progress: list[tuple[dict[str, object], bytes | None]] = []
+    try:
+        with pytest.raises(ParentRunFailure):
+            await runtime.generate(
+                _reference_png(),
+                "image/png",
+                project_id=str(uuid4()),
+                run_id=str(uuid4()),
+                on_progress=lambda event, render: progress.append((event, render)),
+            )
+    finally:
+        await runtime.close()
+
+    attempt_events = [
+        event for event, _render in progress if event.get("node") == "direct_glsl"
+    ]
+    assert [event["phase"] for event in attempt_events] == [
+        "direct_start",
+        "direct_failed",
+    ] * 3
+    assert all(
+        event.get("failure_code") == "engine_attempt_cancelled"
+        for event in attempt_events[1::2]
+    )
+
+
+@pytest.mark.anyio
+async def test_runtime_closes_direct_lifecycle_events_on_unexpected_failure(
+    tmp_path: Path,
+) -> None:
+    runtime = build_engine_rollout_runtime(
+        public_store=LocalArtifactStore(tmp_path / "public"),
+        private_attempt_root=tmp_path / "private",
+        direct_runner_factory=_ExplodingOwnedRunner,
+    )
+    progress: list[tuple[dict[str, object], bytes | None]] = []
+    try:
+        with pytest.raises(ParentRunFailure):
+            await runtime.generate(
+                _reference_png(),
+                "image/png",
+                project_id=str(uuid4()),
+                run_id=str(uuid4()),
+                on_progress=lambda event, render: progress.append((event, render)),
+            )
+    finally:
+        await runtime.close()
+
+    attempt_events = [
+        event for event, _render in progress if event.get("node") == "direct_glsl"
+    ]
+    assert [event["phase"] for event in attempt_events] == [
+        "direct_start",
+        "direct_failed",
+    ] * 3
+    assert all(
+        event.get("failure_code") == "direct_attempt_failed"
+        for event in attempt_events[1::2]
+    )

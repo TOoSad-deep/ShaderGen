@@ -10,9 +10,52 @@ import type {
 } from "./api/shader";
 import { RUNTIME_TIMEOUTS } from "./runtimeTimeouts";
 
-export const DIRECT_NODES: ReadonlyArray<{ id: string; label: string }> = [
-  { id: "engine_rollout", label: "Direct 尝试协调" },
-  { id: "direct_glsl", label: "Layered 生成与渲染" },
+export interface DirectNodeDefinition {
+  id: string;
+  label: string;
+  group:
+    | "orchestration"
+    | "planning"
+    | "authoring"
+    | "execution"
+    | "evaluation"
+    | "refinement"
+    | "completion";
+}
+
+export const DIRECT_STAGE_GROUPS: ReadonlyArray<{
+  id: DirectNodeDefinition["group"];
+  label: string;
+}> = [
+  { id: "orchestration", label: "运行协调" },
+  { id: "planning", label: "参考分析与规划" },
+  { id: "authoring", label: "候选生成与校验" },
+  { id: "execution", label: "渲染与可信校验" },
+  { id: "evaluation", label: "评估与路由" },
+  { id: "refinement", label: "迭代修订" },
+  { id: "completion", label: "资源释放与收尾" },
+];
+
+/** 与 Backend 进度事件共享的真实节点目录；顺序仅用于稳定展示，不表示唯一执行路径。 */
+export const DIRECT_NODES: ReadonlyArray<DirectNodeDefinition> = [
+  { id: "engine_rollout", label: "Direct 尝试协调", group: "orchestration" },
+  { id: "direct_glsl", label: "单次尝试生命周期", group: "orchestration" },
+  { id: "prepare_reference", label: "准备参考图", group: "planning" },
+  { id: "author_layer_plan", label: "生成图层计划", group: "planning" },
+  { id: "author_initial", label: "生成初始候选", group: "authoring" },
+  { id: "compile_candidate", label: "编译候选", group: "authoring" },
+  { id: "validate_candidate", label: "静态校验候选", group: "authoring" },
+  { id: "prepare_program", label: "准备渲染程序", group: "execution" },
+  { id: "render_program", label: "执行渲染", group: "execution" },
+  { id: "verify_receipt", label: "验证执行回执", group: "execution" },
+  { id: "attest_candidate", label: "签发候选证明", group: "execution" },
+  { id: "evaluate_candidate", label: "评估候选质量", group: "evaluation" },
+  { id: "select_candidate", label: "更新当前最佳", group: "evaluation" },
+  { id: "decide_refinement", label: "决定是否修订", group: "evaluation" },
+  { id: "author_refinement", label: "生成修订方案", group: "refinement" },
+  { id: "apply_refinement", label: "应用修订", group: "refinement" },
+  { id: "release_resources", label: "释放渲染资源", group: "completion" },
+  { id: "finalize_attempt", label: "汇总尝试结果", group: "completion" },
 ];
 
 const NODE_LABELS = new Map(DIRECT_NODES.map((node) => [node.id, node.label]));
@@ -23,7 +66,7 @@ export function nodeLabel(id: string): string {
 
 export type KnownRunStatus = "pending" | "running" | "succeeded" | "failed";
 export type RunStatus = KnownRunStatus | "unknown";
-export type StageState = "pending" | "running" | "completed" | "failed";
+export type StageState = "pending" | "running" | "completed" | "failed" | "skipped";
 
 const RUN_STATUS_LABELS: Record<KnownRunStatus, string> = {
   pending: "等待服务端登记",
@@ -102,6 +145,7 @@ export function mergeProgressEvents(
 export interface StageView {
   id: string;
   label: string;
+  group: DirectNodeDefinition["group"];
   state: StageState;
   visits: number;
   /** 最近一次执行的耗时（服务端相邻节点完成时刻的间隔近似值）。 */
@@ -166,6 +210,7 @@ export interface RunViewModel {
   nextStageId: string | null;
   nextStageLabel: string | null;
   completedStageCount: number;
+  executedStageCount: number;
   failure: RunFailureView | null;
   refineCount: number | null;
   quality: RunQualityView;
@@ -225,12 +270,6 @@ export function formatTraceDetails(item: Record<string, unknown>): string {
     .join(" · ");
 }
 
-function nextSequentialNodeId(nodeId: string): string | null {
-  const index = DIRECT_NODES.findIndex((node) => node.id === nodeId);
-  if (index < 0 || index + 1 >= DIRECT_NODES.length) return null;
-  return DIRECT_NODES[index + 1].id;
-}
-
 function normalizeStatus(raw: string): RunStatus {
   return raw === "pending" || raw === "running" || raw === "succeeded" || raw === "failed"
     ? raw
@@ -259,6 +298,7 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
   const stages: StageView[] = DIRECT_NODES.map((node) => ({
     id: node.id,
     label: node.label,
+    group: node.group,
     state: "pending",
     visits: 0,
     lastDurationMs: null,
@@ -273,20 +313,50 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
     stopReasonLabel: null,
   }));
   const byId = new Map(stages.map((stage) => [stage.id, stage]));
+  const latestAttemptIndex = events.reduce<number | null>((latest, event) => {
+    const attemptIndex = event.attempt_index;
+    if (typeof attemptIndex !== "number" || !Number.isFinite(attemptIndex)) {
+      return latest;
+    }
+    return latest === null ? attemptIndex : Math.max(latest, attemptIndex);
+  }, null);
+  const lastVisitStatus = new Map<string, string>();
 
   let failure: RunFailureView | null = null;
   let unknownEventCount = 0;
 
   for (const event of events) {
     const stage = byId.get(event.node);
-    if (!stage) {
+    if (
+      !stage ||
+      !["running", "completed", "failed"].includes(event.status)
+    ) {
       unknownEventCount += 1;
       continue;
     }
+    const priorVisitStatus = lastVisitStatus.get(stage.id);
     if (event.status === "running") {
-      if (stage.state !== "running") stage.visits += 1;
-    } else if (stage.visits === 0) {
+      if (priorVisitStatus !== "running") stage.visits += 1;
+    } else if (priorVisitStatus === undefined) {
       stage.visits = 1;
+    }
+    lastVisitStatus.set(stage.id, event.status);
+
+    const belongsToCurrentAttempt =
+      stage.id === "engine_rollout" ||
+      latestAttemptIndex === null ||
+      typeof event.attempt_index !== "number" ||
+      event.attempt_index === latestAttemptIndex;
+    if (!belongsToCurrentAttempt) continue;
+
+    if (event.status === "running") {
+      stage.summary = null;
+      stage.details = null;
+      stage.traceFailed = false;
+      stage.nextAction = null;
+      stage.nextActionLabel = null;
+      stage.stopReason = null;
+      stage.stopReasonLabel = null;
     }
     stage.state =
       event.status === "failed"
@@ -328,12 +398,19 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
     }
   }
 
-  // 最新事件只证明该节点已完成；路由指向或顺序上的下一个只是“预计下一节点”，
-  // 后端没有节点开始事件，不得把它当作执行中。终态下没有预计，整视图冻结为历史记录。
+  // 终态时未访问节点是条件分支未选中或前序终止，不再显示为“待执行”。
+  if (terminal) {
+    for (const stage of stages) {
+      if (stage.state === "pending") stage.state = "skipped";
+    }
+  }
+
+  // Graph 含条件分支与修订循环，目录顺序不能代表真实路由。
+  // 只有后端明确给出的 next_action 才能展示“预计下一节点”。
   let nextStageId: string | null = null;
   const last = events[events.length - 1];
   if (last && !terminal) {
-    const predictedId = last.next_action ?? nextSequentialNodeId(last.node);
+    const predictedId = last.next_action;
     if (predictedId && byId.has(predictedId)) {
       nextStageId = predictedId;
     }
@@ -404,6 +481,7 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
     nextStageId,
     nextStageLabel: nextStageId ? nodeLabel(nextStageId) : null,
     completedStageCount: stages.filter((stage) => stage.state === "completed").length,
+    executedStageCount: stages.filter((stage) => stage.visits > 0).length,
     failure: status === "failed" ? failure : null,
     refineCount: typeof counters?.refine_count === "number" ? counters.refine_count : null,
     quality: {

@@ -13,3 +13,6 @@
 - 后端负责请求日志、错误日志、数据库连接和过程数据写入。
 - 后续 LangSmith、OpenTelemetry 或 callback 入口放在本目录，不散落到 Node。
 - 日志不得包含 API key、base64 图片、reasoning 原文或完整供应商原始响应。
+- 私有 attempt/structured-author graph 必须通过禁 tracing 的包装入口调用；
+  Studio 注册入口还必须在启动时配置 `hide_inputs` / `hide_outputs`，且只返回
+  safe summary。
