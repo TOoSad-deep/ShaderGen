@@ -4,13 +4,15 @@ import type { MinRunProgressEvent } from "./api/shader";
 import {
   buildRunViewModel,
   DIRECT_NODES,
+  formatMetric,
   isTerminalRunStatus,
   mergeProgressEvents,
   nodeLabel,
+  stopReasonLabel,
 } from "./runStages";
 
 describe("Direct progress stages", () => {
-  it("contains the coordinator, attempt lifecycle, and all 16 graph nodes", () => {
+  it("contains the coordinator, attempt lifecycle, and all 20 graph nodes", () => {
     expect(DIRECT_NODES.map((node) => node.id)).toEqual([
       "engine_rollout",
       "direct_glsl",
@@ -25,6 +27,10 @@ describe("Direct progress stages", () => {
       "attest_candidate",
       "evaluate_candidate",
       "select_candidate",
+      "decide_uniform_optimization",
+      "propose_uniform_candidate",
+      "apply_uniform_candidate",
+      "record_uniform_outcome",
       "decide_refinement",
       "author_refinement",
       "apply_refinement",
@@ -32,6 +38,161 @@ describe("Direct progress stages", () => {
       "finalize_attempt",
     ]);
     expect(nodeLabel("render_program")).toBe("执行渲染");
+  });
+
+  it("projects uniform tuning budget and safe summary without guessing missing values", () => {
+    const view = buildRunViewModel({
+      events: [],
+      snapshot: {
+        uniform_optimization: {
+          schema_version: "uniform_optimization_summary_v2",
+          evaluated_count: 3,
+          accepted_count: 1,
+          draw_count: 3,
+          draw_budget: 4,
+          initial_mae: 0.11,
+          final_mae: 0.09,
+          mae_delta: 0.02,
+          initial_loss: 0.31,
+          final_loss: 0.298,
+          loss_delta: 0.012,
+          stop_reason: "local_optimum",
+        },
+      },
+      status: "succeeded",
+      nowSeconds: 10,
+      mountedAtSeconds: 0,
+    });
+
+    expect(view.budgets.find((budget) => budget.id === "uniform")).toEqual({
+      id: "uniform",
+      label: "参数搜索 draw",
+      used: 3,
+      budget: 4,
+    });
+    expect(view.uniformOptimization).toEqual({
+      evaluatedCount: 3,
+      acceptedCount: 1,
+      maeDelta: 0.02,
+      lossDelta: 0.012,
+      stopReason: "local_optimum",
+      stopReasonLabel: "参数搜索达到局部最优",
+      candidateOutcome: null,
+    });
+  });
+
+  it("keeps negative uniform deltas visible and drops non-finite summary values", () => {
+    const view = buildRunViewModel({
+      events: [],
+      snapshot: {
+        uniform_optimization: {
+          mae_delta: -0.0025,
+          loss_delta: Number.NaN,
+        },
+      },
+      status: "running",
+      nowSeconds: 10,
+      mountedAtSeconds: 0,
+    });
+
+    expect(view.uniformOptimization?.maeDelta).toBe(-0.0025);
+    expect(view.uniformOptimization?.lossDelta).toBeNull();
+    expect(formatMetric(view.uniformOptimization?.maeDelta)).toBe("-0.0025");
+  });
+
+  it("labels exhausted candidate failures without exposing private diagnostics", () => {
+    expect(stopReasonLabel("candidate_failures_exhausted")).toBe(
+      "参数候选失败次数耗尽",
+    );
+    expect(stopReasonLabel("global_compile_budget_exhausted")).toBe(
+      "全局编译预算用尽",
+    );
+  });
+
+  it("uses the top-level terminal reason and safe uniform candidate outcome", () => {
+    const view = buildRunViewModel({
+      events: [],
+      snapshot: {
+        reason_code: "uniform_candidate_accepted",
+        uniform_optimization: {
+          draw_count: 2,
+          draw_budget: 4,
+          evaluated_count: 2,
+          accepted_count: 1,
+          candidate_outcome: "accepted",
+        },
+      },
+      status: "succeeded",
+      stopReason: "target_reached",
+      nowSeconds: 10,
+      mountedAtSeconds: 0,
+    });
+
+    expect(view.stopReasonLabel).toBe("达到质量目标");
+    expect(view.reasonCode).toBe("uniform_candidate_accepted");
+    expect(view.uniformOptimization?.candidateOutcome).toBe("accepted");
+  });
+
+  it("keeps the latest candidate outcome when the following decision overwrites snapshot", () => {
+    const view = buildRunViewModel({
+      events: [
+        {
+          seq: 12,
+          node: "record_uniform_outcome",
+          status: "completed",
+          uniform_optimization: {
+            draw_count: 2,
+            draw_budget: 4,
+            evaluated_count: 2,
+            accepted_count: 1,
+            candidate_outcome: "accepted",
+          },
+        },
+        {
+          seq: 13,
+          node: "decide_uniform_optimization",
+          status: "completed",
+          uniform_optimization: {
+            draw_count: 2,
+            draw_budget: 4,
+            evaluated_count: 2,
+            accepted_count: 1,
+          },
+        },
+      ],
+      snapshot: {
+        uniform_optimization: {
+          draw_count: 2,
+          draw_budget: 4,
+          evaluated_count: 2,
+          accepted_count: 1,
+        },
+      },
+      status: "running",
+      nowSeconds: 10,
+      mountedAtSeconds: 0,
+    });
+
+    expect(view.uniformOptimization?.candidateOutcome).toBe("accepted");
+  });
+
+  it("requires both MAE and loss before reporting the target reached", () => {
+    const view = buildRunViewModel({
+      events: [],
+      snapshot: {
+        best: {
+          mae: 0.05,
+          loss: 0.03,
+          target_mae: 0.04,
+          target_loss: 0.06,
+        },
+      },
+      status: "succeeded",
+      nowSeconds: 10,
+      mountedAtSeconds: 0,
+    });
+
+    expect(view.quality.targetReached).toBe(false);
   });
 
   it("deduplicates progress events and recognizes terminal states", () => {

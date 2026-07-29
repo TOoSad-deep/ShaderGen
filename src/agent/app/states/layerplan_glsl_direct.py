@@ -5,7 +5,8 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Literal, TypedDict
+from inspect import signature
+from typing import Any, Literal, TypedDict, cast
 
 import numpy as np
 
@@ -14,10 +15,13 @@ from agent.app.contracts.layerplan_glsl_direct import (
     AttemptLedger,
     DirectAttemptResult,
     DirectCandidate,
+    DirectOptimizationPolicy,
     DirectPreparedRenderer,
     DirectRenderer,
     LayerPlanGlslDirectConfig,
     PlanLedger,
+    RefineFeedback,
+    RefinementStopReason,
 )
 from agent.app.contracts.llm import LLMGateway
 from shaderforge.layered_spec import LayeredShaderSpecV1, LayerPatchV1
@@ -28,6 +32,12 @@ from shaderforge.program_spec import (
     TrustedReceiptVerifier,
 )
 from shaderforge.rendering import PreparedRenderResult
+from shaderforge.uniform_optimization import (
+    CoordinateMove,
+    CoordinatePatternSession,
+    UniformOptimizationSummaryV2,
+    UniformPatchV1,
+)
 
 NodeRoute = Literal[
     "author_initial",
@@ -39,13 +49,25 @@ NodeRoute = Literal[
     "attest_candidate",
     "evaluate_candidate",
     "decide_refinement",
+    "decide_uniform_optimization",
+    "propose_uniform_candidate",
+    "apply_uniform_candidate",
+    "record_uniform_outcome",
     "author_refinement",
     "apply_refinement",
     "release_resources",
 ]
 
 NodeProgressStatus = Literal["running", "completed", "failed"]
-NodeProgressCallback = Callable[[str, NodeProgressStatus, float | None], None]
+NodeProgressUpdate = dict[str, Any]
+NodeProgressLifecycleCallback = Callable[[str, NodeProgressStatus, float | None], None]
+NodeProgressIncrementCallback = Callable[
+    [str, NodeProgressStatus, float | None, NodeProgressUpdate], None
+]
+# Legacy lifecycle consumers receive three arguments.  Extended consumers can
+# receive a fourth, explicitly projected mapping; this remains observability,
+# never graph input.
+NodeProgressCallback = NodeProgressLifecycleCallback | NodeProgressIncrementCallback
 DIRECT_GRAPH_NODE_NAMES = (
     "prepare_reference",
     "author_layer_plan",
@@ -58,6 +80,10 @@ DIRECT_GRAPH_NODE_NAMES = (
     "attest_candidate",
     "evaluate_candidate",
     "select_candidate",
+    "decide_uniform_optimization",
+    "propose_uniform_candidate",
+    "apply_uniform_candidate",
+    "record_uniform_outcome",
     "decide_refinement",
     "author_refinement",
     "apply_refinement",
@@ -74,6 +100,9 @@ class DirectGraphContext:
     renderer: DirectRenderer
     config: LayerPlanGlslDirectConfig
     receipt_issuer: TrustedReceiptVerifier
+    optimization_policy: DirectOptimizationPolicy = field(
+        default_factory=DirectOptimizationPolicy
+    )
     clock: Callable[[], float] = time.perf_counter
     program_cache: dict[tuple[object, ...], DirectPreparedRenderer] = field(
         default_factory=dict
@@ -85,13 +114,34 @@ class DirectGraphContext:
         node_name: str,
         status: NodeProgressStatus,
         duration_ms: float | None = None,
+        update: NodeProgressUpdate | None = None,
     ) -> None:
-        """Publish a safe lifecycle event without affecting graph execution."""
+        """Publish a lifecycle event and optional safe projection, best-effort."""
         callback = self.node_progress_callback
         if callback is None:
             return
         try:
-            callback(node_name, status, duration_ms)
+            supports_update = False
+            if update is not None:
+                try:
+                    signature(callback).bind(node_name, status, duration_ms, update)
+                    supports_update = True
+                except (TypeError, ValueError):
+                    # Existing consumers only implement the lifecycle signature.
+                    pass
+            if supports_update:
+                cast(NodeProgressIncrementCallback, callback)(
+                    node_name,
+                    status,
+                    duration_ms,
+                    cast(NodeProgressUpdate, update),
+                )
+            else:
+                cast(NodeProgressLifecycleCallback, callback)(
+                    node_name,
+                    status,
+                    duration_ms,
+                )
         except Exception:
             # Progress delivery is optional observability, never graph control flow.
             pass
@@ -137,7 +187,7 @@ class LayerPlanGlslDirectState(TypedDict, total=False):
     direct_ledger: AttemptLedger
     events: list[dict[str, Any]]
     layer_plan: LayerPlanV1 | None
-    candidate_role: Literal["initial", "refine"]
+    candidate_role: Literal["initial", "refine", "uniform_optimize"]
     candidate_sequence: int
     candidate_layered_spec: LayeredShaderSpecV1 | None
     candidate_compiled_spec: ShaderProgramSpecV1 | None
@@ -154,6 +204,36 @@ class LayerPlanGlslDirectState(TypedDict, total=False):
     refinement_count: int
     refinement_blocked: bool
     should_refine: bool
+    optimization_policy: DirectOptimizationPolicy
+    consecutive_non_improving: int
+    previous_refine_feedback: RefineFeedback | None
+    attempted_patch_fingerprints: tuple[str, ...]
+    duplicate_patch_detected: bool
+    duplicate_patch_count: int
+    refinement_stop_reason: RefinementStopReason | None
+    candidate_selected: bool
+    candidate_loss_delta: float | None
+    candidate_mae_delta: float | None
+    candidate_material_improvement: bool
+    should_uniform_optimize: bool
+    uniform_release_requested: bool
+    uniform_search_session: CoordinatePatternSession | None
+    uniform_pending_move: CoordinateMove | None
+    uniform_candidate_patch: UniformPatchV1 | None
+    uniform_optimized_source_sha256s: tuple[str, ...]
+    uniform_search_source_sha256: str | None
+    uniform_search_base_spec_sha256: str | None
+    uniform_search_selected_spec_sha256: str | None
+    uniform_search_initial_loss: float | None
+    uniform_search_initial_mae: float | None
+    uniform_search_selected_loss: float | None
+    uniform_search_selected_mae: float | None
+    uniform_search_initial_draw_count: int | None
+    uniform_search_trace_start_index: int | None
+    uniform_tuning_stop_reason: str | None
+    uniform_candidate_failed: bool
+    uniform_optimization_summary: UniformOptimizationSummaryV2 | None
+    uniform_optimization_trace: list[dict[str, Any]]
     failure_code: str | None
     completed_nodes: tuple[str, ...]
     result: DirectAttemptResult
@@ -168,6 +248,7 @@ __all__ = [
     "LayerPlanGlslDirectOutput",
     "LayerPlanGlslDirectState",
     "NodeProgressCallback",
+    "NodeProgressUpdate",
     "NodeProgressStatus",
     "NodeRoute",
 ]

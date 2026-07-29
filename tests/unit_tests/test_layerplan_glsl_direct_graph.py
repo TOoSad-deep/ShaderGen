@@ -4,19 +4,32 @@ from __future__ import annotations
 
 import asyncio
 import threading
+from decimal import Decimal
+from hashlib import sha256
 from time import perf_counter
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 from langsmith import get_tracing_context
 
+from agent.app.contracts.layerplan_glsl_direct import AttemptLedger
 from agent.app.graphs import layerplan_glsl_direct as direct_graph
 from agent.app.graphs.layerplan_glsl_direct import (
     DirectGraphContext,
     build_layerplan_glsl_direct_graph,
     run_layerplan_glsl_direct_graph,
 )
+from agent.app.nodes.layered_direct import uniform_optimization_nodes
+from agent.app.nodes.layered_direct.progress_projection import (
+    public_uniform_progress_update,
+)
+from agent.app.nodes.layered_direct.uniform_optimization_nodes import (
+    _select_target_components,
+)
 from agent.app.services.layerplan_glsl_direct import LayerPlanGlslDirectConfig
+from shaderforge.program_spec import NormalizedRegion, canonical_json
+from shaderforge.uniform_optimization import FlatTunableComponent
 from tests.direct_fakes import (
     TEST_ISSUER,
     FakePrepared,
@@ -38,6 +51,10 @@ PRODUCT_NODES = {
     "attest_candidate",
     "evaluate_candidate",
     "select_candidate",
+    "decide_uniform_optimization",
+    "propose_uniform_candidate",
+    "apply_uniform_candidate",
+    "record_uniform_outcome",
     "decide_refinement",
     "author_refinement",
     "apply_refinement",
@@ -52,6 +69,7 @@ def _context(
     gateway: _LayeredFakeGateway | None = None,
     refine_budget: int = 0,
     draw_budget: int | None = None,
+    uniform_tuning_draw_budget: int = 0,
 ) -> DirectGraphContext:
     return DirectGraphContext(
         gateway=gateway or _LayeredFakeGateway(),
@@ -63,6 +81,7 @@ def _context(
             compile_budget=1,
             draw_budget=draw_budget if draw_budget is not None else 1 + refine_budget,
             refine_budget=refine_budget,
+            uniform_tuning_draw_budget=uniform_tuning_draw_budget,
         ),
         receipt_issuer=TEST_ISSUER,
     )
@@ -71,7 +90,103 @@ def _context(
 def test_graph_exposes_one_node_per_product_step() -> None:
     topology = build_layerplan_glsl_direct_graph().get_graph()
     assert set(topology.nodes) == PRODUCT_NODES | {"__start__", "__end__"}
-    assert len(topology.edges) == 34
+    assert len(topology.edges) == 49
+
+
+def test_uniform_target_layer_does_not_let_full_canvas_background_win() -> None:
+    component = lambda layer_id: FlatTunableComponent(  # noqa: E731
+        layer_id=layer_id,
+        path=f"u_{layer_id}",
+        component_index=0,
+        minimum=Decimal("0"),
+        maximum=Decimal("1"),
+        step=Decimal("0.1"),
+        base_value=Decimal("0.5"),
+    )
+    state = {
+        "layer_plan": SimpleNamespace(
+            layers=(
+                SimpleNamespace(
+                    layer_id="bg",
+                    role="background",
+                    confidence=1.0,
+                    region=NormalizedRegion(0.0, 0.0, 1.0, 1.0),
+                ),
+                SimpleNamespace(
+                    layer_id="subject",
+                    role="subject",
+                    confidence=0.9,
+                    region=NormalizedRegion(0.2, 0.2, 0.4, 0.4),
+                ),
+            )
+        ),
+        "current_best": SimpleNamespace(
+            residual_summary={
+                "dominant_metric_component": "edge_loss",
+                "worst_tiles": [
+                    {
+                        "uv_bbox": {
+                            "x": 0.25,
+                            "y": 0.25,
+                            "width": 0.25,
+                            "height": 0.25,
+                        }
+                    }
+                ],
+            }
+        ),
+    }
+
+    selected = _select_target_components(
+        state,  # type: ignore[arg-type]
+        (component("bg"), component("subject")),
+    )
+
+    assert {item.layer_id for item in selected} == {"subject"}
+
+
+def test_uniform_candidate_deduplicates_source_and_binding_not_provenance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    existing = SimpleNamespace(
+        spec=SimpleNamespace(
+            source_sha256="source" * 11,
+            binding_sha256="binding" * 9,
+            spec_sha256="old-provenance-specific-spec",
+        )
+    )
+    derived_program = SimpleNamespace(
+        source_sha256=existing.spec.source_sha256,
+        binding_sha256=existing.spec.binding_sha256,
+        spec_sha256="new-provenance-specific-spec",
+    )
+    monkeypatch.setattr(
+        uniform_optimization_nodes,
+        "apply_uniform_patch",
+        lambda _layered, _program, _patch: SimpleNamespace(
+            program_spec=derived_program,
+            layered_spec=SimpleNamespace(),
+        ),
+    )
+    state = {
+        "current_best": SimpleNamespace(
+            layered_spec=SimpleNamespace(), spec=SimpleNamespace()
+        ),
+        "uniform_candidate_patch": object(),
+        "next_sequence": 7,
+        "direct_ledger": AttemptLedger(),
+        "candidates": [existing],
+        "events": [],
+    }
+
+    update = uniform_optimization_nodes.apply_uniform_candidate(
+        state,  # type: ignore[arg-type]
+        None,  # type: ignore[arg-type]
+    )
+
+    assert update["uniform_candidate_failed"] is True
+    assert update["events"][-1]["error_code"] == "duplicate_uniform_candidate"
+    assert update["direct_ledger"].uniform_tuning_duplicate_count == 1
 
 
 @pytest.mark.anyio
@@ -96,10 +211,167 @@ async def test_happy_path_runs_each_candidate_step_as_a_node() -> None:
         "attest_candidate",
         "evaluate_candidate",
         "select_candidate",
-        "decide_refinement",
+        "decide_uniform_optimization",
         "release_resources",
         "finalize_attempt",
     )
+
+
+@pytest.mark.anyio
+async def test_uniform_search_reuses_program_and_attests_each_binding() -> None:
+    context = _context(
+        gateway=_LayeredFakeGateway(initial_gains=(0.6,)),
+        draw_budget=3,
+        uniform_tuning_draw_budget=2,
+    )
+
+    output = await run_layerplan_glsl_direct_graph(
+        reference_image=reference_png(),
+        content_type="image/png",
+        instruction="match",
+        context=context,
+    )
+
+    result = output["result"]
+    assert result.status == "ok"
+    assert result.current_best is not None
+    assert result.current_best.role == "uniform_optimize"
+    assert result.current_best.spec.uniform_values["u_gain"] == pytest.approx(0.59)
+    assert result.current_best.spec.derivation_provenance is not None
+    assert result.current_best.spec.validation_attestation is not None
+    assert result.direct_ledger.compile_count == 1
+    assert result.direct_ledger.draw_count == 3
+    assert result.direct_ledger.cache_hits == 2
+    assert result.direct_ledger.uniform_tuning_draw_count == 2
+    assert result.direct_ledger.uniform_tuning_evaluated_count == 2
+    assert result.direct_ledger.uniform_tuning_accepted_count == 1
+    assert result.uniform_optimization_summary is not None
+    assert result.uniform_optimization_summary.evaluated_count == 2
+    assert result.uniform_optimization_summary.accepted_count == 1
+    assert len(result.uniform_optimization_trace) == 2
+    assert (
+        result.uniform_optimization_summary.private_trace_sha256
+        == sha256(
+            canonical_json(list(result.uniform_optimization_trace)).encode("utf-8")
+        ).hexdigest()
+    )
+    assert "path" not in canonical_json(list(result.uniform_optimization_trace))
+    assert context.renderer.prepare_calls
+    assert len(context.renderer.draw_calls) == 3
+    assert "propose_uniform_candidate" in output["completed_nodes"]
+    assert "record_uniform_outcome" in output["completed_nodes"]
+
+
+@pytest.mark.anyio
+async def test_uniform_progress_projection_is_incremental_and_redacted() -> None:
+    progress: list[tuple[str, str, dict[str, object] | None]] = []
+    context = _context(
+        gateway=_LayeredFakeGateway(initial_gains=(0.6,)),
+        draw_budget=3,
+        uniform_tuning_draw_budget=2,
+    )
+
+    def capture(
+        node_name: str,
+        status: str,
+        _duration_ms: float | None,
+        update: dict[str, object] | None = None,
+    ) -> None:
+        progress.append((node_name, status, update))
+
+    context.node_progress_callback = capture
+    await run_layerplan_glsl_direct_graph(
+        reference_image=reference_png(),
+        content_type="image/png",
+        instruction="match",
+        context=context,
+    )
+
+    updates = [
+        update
+        for node_name, status, update in progress
+        if node_name in {"decide_uniform_optimization", "record_uniform_outcome"}
+        and status == "completed"
+        and update is not None
+    ]
+    assert updates
+    assert any(
+        update["uniform_optimization"]["candidate_outcome"] == "accepted"
+        for update in updates
+        if "candidate_outcome" in update["uniform_optimization"]
+    )
+    assert all(
+        set(update) <= {"reason_code", "refinement_stop_reason", "uniform_optimization"}
+        for update in updates
+    )
+    assert all(
+        set(update["uniform_optimization"])
+        <= {
+            "draw_count",
+            "draw_budget",
+            "evaluated_count",
+            "accepted_count",
+            "stop_reason",
+            "candidate_outcome",
+        }
+        for update in updates
+    )
+
+
+def test_uniform_progress_projection_allows_global_compile_budget_stop_reason() -> None:
+    update = public_uniform_progress_update(
+        "decide_uniform_optimization",
+        cast(
+            Any,
+            {
+                "direct_ledger": SimpleNamespace(
+                    uniform_tuning_draw_count=0,
+                    uniform_tuning_evaluated_count=0,
+                    uniform_tuning_accepted_count=0,
+                ),
+                "uniform_tuning_stop_reason": "global_compile_budget_exhausted",
+            },
+        ),
+        {},
+        cast(Any, SimpleNamespace(config=SimpleNamespace(uniform_tuning_draw_budget=2))),
+    )
+
+    assert update == {
+        "reason_code": "global_compile_budget_exhausted",
+        "refinement_stop_reason": None,
+        "uniform_optimization": {
+            "draw_count": 0,
+            "draw_budget": 2,
+            "evaluated_count": 0,
+            "accepted_count": 0,
+            "stop_reason": "global_compile_budget_exhausted",
+        },
+    }
+
+
+@pytest.mark.anyio
+async def test_legacy_three_argument_progress_callback_keeps_uniform_lifecycle() -> (
+    None
+):
+    progress: list[tuple[str, str]] = []
+    context = _context(
+        gateway=_LayeredFakeGateway(initial_gains=(0.6,)),
+        draw_budget=3,
+        uniform_tuning_draw_budget=2,
+    )
+    context.node_progress_callback = lambda node_name, status, _duration_ms: (
+        progress.append((node_name, status))
+    )
+
+    await run_layerplan_glsl_direct_graph(
+        reference_image=reference_png(),
+        content_type="image/png",
+        instruction="match",
+        context=context,
+    )
+
+    assert ("decide_uniform_optimization", "completed") in progress
+    assert ("record_uniform_outcome", "completed") in progress
 
 
 @pytest.mark.anyio
@@ -286,6 +558,7 @@ async def test_refinement_routes_back_through_candidate_nodes() -> None:
         "attest_candidate",
         "evaluate_candidate",
         "select_candidate",
+        "decide_uniform_optimization",
         "decide_refinement",
         "author_refinement",
         "apply_refinement",
@@ -297,7 +570,7 @@ async def test_refinement_routes_back_through_candidate_nodes() -> None:
         "attest_candidate",
         "evaluate_candidate",
         "select_candidate",
-        "decide_refinement",
+        "decide_uniform_optimization",
         "release_resources",
         "finalize_attempt",
     )
@@ -322,11 +595,11 @@ async def test_hard_draw_budget_stops_wasted_refinement_calls() -> None:
         context=context,
     )
 
-    assert [call["role"] for call in gateway.calls] == ["plan", "initial", "refine"]
+    assert [call["role"] for call in gateway.calls] == ["plan", "initial"]
     assert output["result"].direct_ledger.draw_count == 1
-    assert output["completed_nodes"][-4:] == (
-        "render_program",
-        "decide_refinement",
+    assert output["result"].refinement_stop_reason == "hard_resource_block"
+    assert output["completed_nodes"][-3:] == (
+        "decide_uniform_optimization",
         "release_resources",
         "finalize_attempt",
     )
@@ -356,6 +629,59 @@ async def test_two_successful_refinements_honor_the_default_budget() -> None:
     assert len(output["result"].candidates) == 3
     assert output["result"].current_best is output["result"].candidates[-1]
     assert output["result"].direct_ledger.draw_count == 3
+
+
+@pytest.mark.anyio
+async def test_repeated_worse_patch_stops_before_duplicate_draw() -> None:
+    gateway = _LayeredFakeGateway(
+        initial_gains=(0.6,),
+        refine_gains=(0.9,),
+    )
+    context = _context(gateway=gateway, refine_budget=2)
+
+    output = await run_layerplan_glsl_direct_graph(
+        reference_image=reference_png(),
+        content_type="image/png",
+        instruction="match",
+        context=context,
+    )
+
+    result = output["result"]
+    assert [call["role"] for call in gateway.calls] == [
+        "plan",
+        "initial",
+        "refine",
+        "refine",
+    ]
+    assert len(result.candidates) == 2
+    assert result.direct_ledger.draw_count == 2
+    assert result.duplicate_patch_count == 1
+    assert result.refinement_stop_reason == "duplicate_patch"
+    assert result.safety_failure_codes == ()
+
+
+@pytest.mark.anyio
+async def test_worse_refine_feedback_reaches_one_recovery_attempt() -> None:
+    gateway = _LayeredFakeGateway(
+        initial_gains=(0.6,),
+        refine_gains=(0.9, 0.8, 0.7),
+    )
+    context = _context(gateway=gateway, refine_budget=3)
+
+    output = await run_layerplan_glsl_direct_graph(
+        reference_image=reference_png(),
+        content_type="image/png",
+        instruction="match",
+        context=context,
+    )
+
+    refine_calls = [call for call in gateway.calls if call["role"] == "refine"]
+    assert len(refine_calls) == 2
+    recovery_payload = str(refine_calls[1]["messages"][1].content)
+    assert '"outcome":"not_improved"' in recovery_payload
+    assert '"loss_delta":' in recovery_payload
+    assert output["result"].refinement_stop_reason == "patience_exhausted"
+    assert output["result"].non_improving_count == 2
 
 
 @pytest.mark.anyio

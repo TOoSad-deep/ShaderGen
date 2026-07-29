@@ -10,13 +10,19 @@ import numpy as np
 from langgraph.runtime import Runtime
 
 from agent.app.contracts.layerplan_glsl_direct import (
+    MAX_REFINE_STATIC_VIOLATIONS,
+    REFINE_FEEDBACK_METRICS,
     RENDERER_DEFERRED_SAFETY_CODES,
     DirectCandidate,
+    RefineFeedback,
+    RefineStaticViolation,
+    candidate_excess_dominates,
     program_cache_key,
     safe_compile_diagnostics,
 )
 from agent.app.nodes.layered_direct.workflow_support import (
     candidate_failure_route,
+    refine_failure_update,
     reject_candidate,
     render_failure_route,
     trace,
@@ -68,6 +74,11 @@ def compile_candidate(
                 if state["candidate_role"] == "initial"
                 else state.get("failure_code")
             ),
+            **refine_failure_update(
+                state,
+                outcome="static_failed",
+                failure_codes=(exc.code,),
+            ),
             "completed_nodes": trace(state, "compile_candidate"),
         }
     return {
@@ -96,6 +107,7 @@ def validate_candidate(
         if item.code not in RENDERER_DEFERRED_SAFETY_CODES
     )
     if any(item.severity == "error" for item in blocking):
+        errors = tuple(item for item in blocking if item.severity == "error")
         ledger, events = reject_candidate(
             state,
             "static_validation_failed",
@@ -109,6 +121,15 @@ def validate_candidate(
                 "static_validation_failed"
                 if state["candidate_role"] == "initial"
                 else state.get("failure_code")
+            ),
+            **refine_failure_update(
+                state,
+                outcome="static_failed",
+                failure_codes=tuple(item.code for item in errors),
+                static_violations=tuple(
+                    RefineStaticViolation(code=item.code, line=item.line)
+                    for item in errors[:MAX_REFINE_STATIC_VIOLATIONS]
+                ),
             ),
             "completed_nodes": trace(state, "validate_candidate"),
         }
@@ -155,6 +176,11 @@ async def prepare_program(
                 else state.get("failure_code")
             ),
             "refinement_blocked": state["candidate_role"] == "refine",
+            **refine_failure_update(
+                state,
+                outcome="compile_failed",
+                failure_codes=("compile_budget_exhausted",),
+            ),
             "completed_nodes": trace(state, "prepare_program"),
         }
     ledger.compile_count += 1
@@ -175,6 +201,11 @@ async def prepare_program(
             ledger=ledger,
             diagnostics=safe_compile_diagnostics(exc.compile_result),
         )
+        static_errors = tuple(
+            item
+            for item in exc.compile_result.static_validation.violations
+            if item.severity == "error"
+        )
         return {
             "prepared_cache_key": None,
             "candidate_cache_hit": False,
@@ -184,6 +215,18 @@ async def prepare_program(
                 "compile_or_link_failed"
                 if state["candidate_role"] == "initial"
                 else state.get("failure_code")
+            ),
+            **refine_failure_update(
+                state,
+                outcome="compile_failed",
+                failure_codes=(
+                    "compile_or_link_failed",
+                    *tuple(item.code for item in static_errors),
+                ),
+                static_violations=tuple(
+                    RefineStaticViolation(code=item.code, line=item.line)
+                    for item in static_errors[:MAX_REFINE_STATIC_VIOLATIONS]
+                ),
             ),
             "completed_nodes": trace(state, "prepare_program"),
         }
@@ -206,6 +249,11 @@ async def prepare_program(
                 else state.get("failure_code")
             ),
             "refinement_blocked": state["candidate_role"] == "refine",
+            **refine_failure_update(
+                state,
+                outcome="compile_failed",
+                failure_codes=("renderer_unavailable",),
+            ),
             "completed_nodes": trace(state, "prepare_program"),
         }
     ledger.wall_clock_ms += (context.clock() - started) * 1000.0
@@ -247,9 +295,16 @@ async def render_program(
                 else state.get("failure_code")
             ),
             "refinement_blocked": state["candidate_role"] == "refine",
+            **refine_failure_update(
+                state,
+                outcome="draw_failed",
+                failure_codes=("draw_budget_exhausted",),
+            ),
             "completed_nodes": trace(state, "render_program"),
         }
     ledger.draw_count += 1
+    if state["candidate_role"] == "uniform_optimize":
+        ledger.uniform_tuning_draw_count += 1
     started = context.clock()
     try:
         draw = await prepared.render_uniforms(
@@ -275,6 +330,11 @@ async def render_program(
                 else state.get("failure_code")
             ),
             "refinement_blocked": state["candidate_role"] == "refine",
+            **refine_failure_update(
+                state,
+                outcome="draw_failed",
+                failure_codes=("renderer_unavailable",),
+            ),
             "completed_nodes": trace(state, "render_program"),
         }
     ledger.wall_clock_ms += (context.clock() - started) * 1000.0
@@ -293,6 +353,11 @@ async def render_program(
                 "draw_failed"
                 if state["candidate_role"] == "initial"
                 else state.get("failure_code")
+            ),
+            **refine_failure_update(
+                state,
+                outcome="draw_failed",
+                failure_codes=("draw_failed",),
             ),
             "completed_nodes": trace(state, "render_program"),
         }
@@ -344,6 +409,11 @@ def verify_receipt(
                 "static_validation_failed"
                 if state["candidate_role"] == "initial"
                 else state.get("failure_code")
+            ),
+            **refine_failure_update(
+                state,
+                outcome="receipt_failed",
+                failure_codes=(detail or "receipt_missing",),
             ),
             "completed_nodes": trace(state, "verify_receipt"),
         }
@@ -399,6 +469,11 @@ def attest_candidate(
                 "static_validation_failed"
                 if state["candidate_role"] == "initial"
                 else state.get("failure_code")
+            ),
+            **refine_failure_update(
+                state,
+                outcome="attestation_failed",
+                failure_codes=(detail or "attestation_mismatch",),
             ),
             "completed_nodes": trace(state, "attest_candidate"),
         }
@@ -471,6 +546,11 @@ def evaluate_candidate(
         residual_summary=residual,
         parent_layered_spec_sha256=state.get("candidate_parent_sha256"),
         patched_layer_id=state.get("candidate_patched_layer_id"),
+        provenance=(
+            "trusted_uniform_optimization"
+            if state["candidate_role"] == "uniform_optimize"
+            else "model_generated_layered_direct_glsl"
+        ),
     )
     return {
         "pending_candidate": candidate,
@@ -483,14 +563,61 @@ def select_candidate(
     state: LayerPlanGlslDirectState,
     runtime: Runtime[DirectGraphContext],
 ) -> dict[str, Any]:
-    """Apply the strict lower-loss ``current_best`` boundary."""
+    """Apply the target-relative dual-objective ``current_best`` boundary."""
     del runtime
     candidate = state["pending_candidate"]
     assert candidate is not None
     ledger = replace(state["direct_ledger"])
     candidates = [*state["candidates"], candidate]
     current_best = state.get("current_best")
-    if current_best is None or candidate.loss < current_best.loss:
+    policy = state["optimization_policy"]
+    candidate_selected = current_best is None or candidate_excess_dominates(
+        candidate_mae=candidate.mae,
+        candidate_loss=candidate.loss,
+        incumbent_mae=current_best.mae,
+        incumbent_loss=current_best.loss,
+        target_mae=policy.target_mae,
+        target_loss=policy.target_loss,
+    )
+    loss_delta: float | None = None
+    mae_delta: float | None = None
+    material_improvement = False
+    consecutive_non_improving = state["consecutive_non_improving"]
+    feedback = state.get("previous_refine_feedback")
+    if state["candidate_role"] != "initial" and current_best is not None:
+        loss_delta = current_best.loss - candidate.loss
+        mae_delta = current_best.mae - candidate.mae
+        material_improvement = candidate_selected and (
+            loss_delta >= policy.min_delta_loss
+            or mae_delta >= policy.min_delta_mae
+        )
+        if state["candidate_role"] == "refine":
+            if material_improvement:
+                consecutive_non_improving = 0
+                feedback = None
+            else:
+                consecutive_non_improving += 1
+                metric_deltas = {
+                    name: float(current_best.metrics[name])
+                    - float(candidate.metrics[name])
+                    for name in REFINE_FEEDBACK_METRICS
+                    if isinstance(current_best.metrics.get(name), (int, float))
+                    and not isinstance(current_best.metrics.get(name), bool)
+                    and isinstance(candidate.metrics.get(name), (int, float))
+                    and not isinstance(candidate.metrics.get(name), bool)
+                }
+                feedback = RefineFeedback(
+                    outcome=(
+                        "minor_improvement" if candidate_selected else "not_improved"
+                    ),
+                    target_layer_id=candidate.patched_layer_id,
+                    candidate_loss=candidate.loss,
+                    candidate_mae=candidate.mae,
+                    loss_delta=loss_delta,
+                    mae_delta=mae_delta,
+                    metric_deltas=metric_deltas,
+                )
+    if candidate_selected:
         current_best = candidate
         ledger.accepted_candidates += 1
     else:
@@ -499,6 +626,12 @@ def select_candidate(
         "candidates": candidates,
         "current_best": current_best,
         "direct_ledger": ledger,
+        "candidate_selected": candidate_selected,
+        "candidate_loss_delta": loss_delta,
+        "candidate_mae_delta": mae_delta,
+        "candidate_material_improvement": material_improvement,
+        "consecutive_non_improving": consecutive_non_improving,
+        "previous_refine_feedback": feedback,
         "failure_code": None,
         "completed_nodes": trace(state, "select_candidate"),
     }

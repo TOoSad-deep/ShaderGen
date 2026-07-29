@@ -248,6 +248,21 @@ async def execute_shader_generation(
                         target_mae=float(result.target_mae),
                         target_loss=float(result.target_loss),
                         target_reached=bool(result.target_reached),
+                        optimization_policy_fingerprint=str(
+                            getattr(result, "optimization_policy_fingerprint", "")
+                        ),
+                        refinement_stop_reason=getattr(
+                            result, "refinement_stop_reason", None
+                        ),
+                        non_improving_count=int(
+                            getattr(result, "non_improving_count", 0)
+                        ),
+                        duplicate_patch_count=int(
+                            getattr(result, "duplicate_patch_count", 0)
+                        ),
+                        uniform_optimization=getattr(
+                            result, "uniform_optimization", None
+                        ),
                         trace=trace,
                     ),
                 )

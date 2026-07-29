@@ -26,6 +26,7 @@ from agent.app.contracts.layerplan_glsl_direct import (
     DirectCandidate,
     DirectEngineIdentity,
     DirectLedger,
+    DirectOptimizationPolicy,
     DirectPlanLedger,
     DirectRenderer,
     LayerPlanGlslDirectConfig,
@@ -61,6 +62,7 @@ from shaderforge.program_spec import (
     process_receipt_verifier,
 )
 from shaderforge.rendering import PlaywrightWebGL1Renderer
+from shaderforge.uniform_optimization import UniformOptimizationConfig
 from shaderforge.validation import ProgramSpecSafetyLimits
 
 
@@ -115,6 +117,7 @@ def current_layered_direct_glsl_implementation_identity() -> dict[str, Any]:
             if name not in {"max_uniforms", "max_uniform_components"}
         },
         "renderer_deferred_safety_codes": sorted(RENDERER_DEFERRED_SAFETY_CODES),
+        "uniform_optimizer": UniformOptimizationConfig().to_dict(),
     }
     normalized = json.loads(canonical_json(body))
     if not isinstance(
@@ -152,6 +155,7 @@ class LayerPlanGlslDirectRunner:
         *,
         content_type: str = "image/png",
         instruction: str = "",
+        quality_preset: str = "balanced",
         node_progress_callback: NodeProgressCallback | None = None,
     ) -> DirectAttemptResult:
         """Execute one attempt through the guarded LangGraph entry point."""
@@ -168,6 +172,9 @@ class LayerPlanGlslDirectRunner:
                 gateway=self._gateway,
                 renderer=self._renderer,
                 config=self._config,
+                optimization_policy=DirectOptimizationPolicy.for_quality_preset(
+                    quality_preset
+                ),
                 clock=self._clock,
                 receipt_issuer=self._receipt_issuer,
                 node_progress_callback=node_progress_callback,
@@ -194,6 +201,7 @@ class OwnedLayerPlanGlslDirectRunner:
         *,
         content_type: str = "image/png",
         instruction: str = "",
+        quality_preset: str = "balanced",
         node_progress_callback: NodeProgressCallback | None = None,
     ) -> DirectAttemptResult:
         """Delegate one attempt to the injected runner."""
@@ -201,6 +209,7 @@ class OwnedLayerPlanGlslDirectRunner:
             reference_image,
             content_type=content_type,
             instruction=instruction,
+            quality_preset=quality_preset,
             node_progress_callback=node_progress_callback,
         )
 
@@ -227,6 +236,7 @@ __all__ = [
     "DirectCandidate",
     "DirectEngineIdentity",
     "DirectLedger",
+    "DirectOptimizationPolicy",
     "DirectPlanLedger",
     "LayerPlanGlslDirectConfig",
     "LayerPlanGlslDirectRunner",

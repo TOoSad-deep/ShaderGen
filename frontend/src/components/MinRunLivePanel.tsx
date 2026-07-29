@@ -25,6 +25,8 @@ interface MinRunLivePanelProps {
   status: string;
   /** 后端登记运行的 ISO 时刻；缺省时计时只能按本地观察口径展示。 */
   startedAt?: string | null;
+  /** 服务端终态原因；独立于节点事件，避免终态快照遗漏时失语。 */
+  stopReason?: string | null;
   /** 进度轮询中断等传输层问题提示；不代表服务端运行状态。 */
   progressNotice?: string | null;
 }
@@ -62,6 +64,7 @@ export function MinRunLivePanel({
   snapshot,
   status,
   startedAt = null,
+  stopReason = null,
   progressNotice = null,
 }: MinRunLivePanelProps) {
   const feedRef = useRef<HTMLOListElement | null>(null);
@@ -90,10 +93,11 @@ export function MinRunLivePanel({
         snapshot,
         status,
         startedAt,
+        stopReason,
         nowSeconds,
         mountedAtSeconds: mountedAt,
       }),
-    [events, snapshot, status, startedAt, nowSeconds, mountedAt],
+    [events, snapshot, status, startedAt, stopReason, nowSeconds, mountedAt],
   );
 
   return (
@@ -120,6 +124,11 @@ export function MinRunLivePanel({
         <p className="min-live-hint">预计下一节点：{vm.nextStageLabel}（未确认开始）</p>
       ) : null}
       {vm.statusHint ? <p className="min-live-hint">{vm.statusHint}</p> : null}
+      {vm.terminal && (vm.stopReasonLabel || vm.reasonCode) ? (
+        <p className="min-live-hint">
+          完成原因：{vm.stopReasonLabel ?? vm.reasonCode}
+        </p>
+      ) : null}
       {progressNotice ? (
         <p className="min-live-hint is-warning" role="alert">
           {progressNotice}
@@ -229,7 +238,27 @@ export function MinRunLivePanel({
               <span>目标 {formatMetric(vm.quality.targetMae)}</span>
             </div>
             {vm.quality.targetReached === true ? (
-              <p className="target-status is-reached">已达到目标损失</p>
+              <p className="target-status is-reached">已达到 MAE 与 loss 目标</p>
+            ) : null}
+            {vm.uniformOptimization ? (
+              <p className="min-live-hint" aria-label="参数优化摘要">
+                参数搜索：评估 {vm.uniformOptimization.evaluatedCount ?? "—"}，
+                接受 {vm.uniformOptimization.acceptedCount ?? "—"}，MAE 改善{" "}
+                {formatMetric(vm.uniformOptimization.maeDelta)}，loss 改善{" "}
+                {formatMetric(vm.uniformOptimization.lossDelta)}
+                {vm.uniformOptimization.stopReasonLabel
+                  ? `（${vm.uniformOptimization.stopReasonLabel}）`
+                  : ""}
+                {vm.uniformOptimization.candidateOutcome
+                  ? ` · 最近候选${
+                      vm.uniformOptimization.candidateOutcome === "accepted"
+                        ? "已接受"
+                        : vm.uniformOptimization.candidateOutcome === "rejected"
+                          ? "未改善"
+                          : "执行失败"
+                    }`
+                  : ""}
+              </p>
             ) : null}
           </div>
 

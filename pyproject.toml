@@ -66,6 +66,7 @@ packages = [
     "shaderforge.rendering",
     "shaderforge.validation",
     "shaderforge.store",
+    "shaderforge.uniform_optimization",
 ]
 [tool.setuptools.package-dir]
 "agent" = "src/agent"

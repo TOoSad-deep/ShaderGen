@@ -140,19 +140,30 @@ def summarize_spatial_residual(
         for column_index, column in enumerate(columns):
             index = np.ix_(row, column)
             tile_rgb_bias = np.mean(signed_rgb[index], axis=(0, 1))
+            x0 = float(column[0] / reference.shape[1])
+            x1 = float((column[-1] + 1) / reference.shape[1])
+            y0 = float(1.0 - (row[-1] + 1) / reference.shape[0])
+            y1 = float(1.0 - row[0] / reference.shape[0])
             tiles.append(
                 {
                     "row": row_index,
                     "column": column_index,
+                    "uv_bbox": {
+                        "x": x0,
+                        "y": y0,
+                        "width": x1 - x0,
+                        "height": y1 - y0,
+                    },
                     "mae": float(np.mean(absolute_delta[index])),
-                    "signed_luminance_bias": float(
-                        np.mean(signed_luminance[index])
-                    ),
+                    "signed_luminance_bias": float(np.mean(signed_luminance[index])),
                     "signed_rgb_bias": [float(value) for value in tile_rgb_bias],
                 }
             )
     tiles.sort(key=lambda item: (-float(item["mae"]), item["row"], item["column"]))
     return {
+        "residual_version": "spatial_residual_v2",
+        "coordinate_system": "webgl_uv_bottom_left",
+        "source_row_origin": "image_top",
         "tile_grid": MIN_SCENE_TILE_GRID,
         "worst_tile_count": MIN_SCENE_WORST_TILE_COUNT,
         "bias_convention": "rendered_minus_reference",
@@ -164,7 +175,9 @@ def dominant_metric_component(
     metric: MinSceneMetricBreakdown | Mapping[str, Any],
 ) -> str:
     """按有效权重后的 loss 贡献返回主导指标，平局使用固定指标顺序。."""
-    payload = metric.to_dict() if isinstance(metric, MinSceneMetricBreakdown) else metric
+    payload = (
+        metric.to_dict() if isinstance(metric, MinSceneMetricBreakdown) else metric
+    )
     weights_value = payload.get("effective_weights", MIN_SCENE_METRIC_WEIGHTS)
     weights = (
         weights_value

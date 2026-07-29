@@ -42,6 +42,7 @@ attempt 只有一个节点。
 uv run pytest tests/unit_tests
 uv run pytest tests/integration_tests/test_layerplan_glsl_direct_full_chain.py
 uv run pytest tests/integration_tests/test_layered_direct_real_renderer.py
+uv run pytest tests/integration_tests/test_layered_direct_uniform_real_renderer.py
 npm --prefix frontend run test
 npm --prefix frontend run build
 ```

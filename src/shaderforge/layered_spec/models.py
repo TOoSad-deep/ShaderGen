@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from shaderforge.program_spec import (
     AuthorIdentity,
@@ -12,6 +12,11 @@ from shaderforge.program_spec import (
     UniformDeclaration,
 )
 from shaderforge.program_spec.models import LayerRole
+
+if TYPE_CHECKING:
+    from shaderforge.uniform_optimization.models import (
+        UniformOptimizationProvenanceV1,
+    )
 
 LAYERED_SHADER_SPEC_V1_SCHEMA_VERSION = "layered_shader_spec_v1"
 LAYER_PATCH_V1_SCHEMA_VERSION = "layer_patch_v1"
@@ -93,10 +98,11 @@ class LayeredShaderSpecV1:
     layers: tuple[LayerProgram, ...]
     author_identity: AuthorIdentity
     layered_spec_sha256: str
+    derivation_provenance: UniformOptimizationProvenanceV1 | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """返回包含可信身份与哈希的可持久化字典。."""
-        return {
+        payload = {
             "schema_version": self.schema_version,
             "plan_sha256": self.plan_sha256,
             "canvas": self.canvas.to_dict(),
@@ -104,6 +110,9 @@ class LayeredShaderSpecV1:
             "author_identity": self.author_identity.to_dict(),
             "layered_spec_sha256": self.layered_spec_sha256,
         }
+        if self.derivation_provenance is not None:
+            payload["derivation_provenance"] = self.derivation_provenance.to_dict()
+        return payload
 
 
 @dataclass(frozen=True)

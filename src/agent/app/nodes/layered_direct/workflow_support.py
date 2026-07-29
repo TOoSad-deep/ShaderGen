@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import replace
 from typing import Any
 
-from agent.app.contracts.layerplan_glsl_direct import AttemptLedger
+from agent.app.contracts.layerplan_glsl_direct import (
+    AttemptLedger,
+    RefineFeedback,
+    RefineFeedbackOutcome,
+    RefineStaticViolation,
+)
 from agent.app.states.layerplan_glsl_direct import LayerPlanGlslDirectState, NodeRoute
 
 
@@ -24,6 +29,8 @@ def candidate_failure_route(
     """Route a failed candidate according to its initial/refine role."""
     if state.get("candidate_compiled_spec") is not None:
         return success_route
+    if state.get("candidate_role") == "uniform_optimize":
+        return "record_uniform_outcome"
     if state.get("candidate_role") == "refine":
         return "decide_refinement"
     return "release_resources"
@@ -37,6 +44,8 @@ def render_failure_route(
     """Route a render-stage failure according to its candidate role."""
     if state.get(success_key) is not None:
         return success_route
+    if state.get("candidate_role") == "uniform_optimize":
+        return "record_uniform_outcome"
     if state.get("candidate_role") == "refine":
         return "decide_refinement"
     return "release_resources"
@@ -73,9 +82,42 @@ def reject_candidate(
     return next_ledger, events
 
 
+def refine_failure_update(
+    state: LayerPlanGlslDirectState,
+    *,
+    outcome: RefineFeedbackOutcome,
+    failure_codes: tuple[str, ...],
+    target_layer_id: str | None = None,
+    static_violations: tuple[RefineStaticViolation, ...] = (),
+    inherit_candidate_target: bool = True,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Build the safe convergence update for one non-material Refine failure."""
+    if not force and state.get("candidate_role") != "refine":
+        return {}
+    return {
+        "consecutive_non_improving": state["consecutive_non_improving"] + 1,
+        "previous_refine_feedback": RefineFeedback(
+            outcome=outcome,
+            target_layer_id=(
+                state.get("candidate_patched_layer_id")
+                if inherit_candidate_target and target_layer_id is None
+                else target_layer_id
+            ),
+            failure_codes=failure_codes,
+            static_violations=static_violations,
+        ),
+        "candidate_selected": False,
+        "candidate_loss_delta": None,
+        "candidate_mae_delta": None,
+        "candidate_material_improvement": False,
+    }
+
+
 __all__ = [
     "candidate_failure_route",
     "reject_candidate",
+    "refine_failure_update",
     "render_failure_route",
     "trace",
 ]

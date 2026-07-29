@@ -60,6 +60,7 @@ def compute_layered_spec_sha256(
     canvas: Any,
     layers: tuple[LayerProgram, ...],
     author_identity: Any,
+    derivation_provenance: Any | None = None,
 ) -> str:
     """计算有序 Layer、画布、计划与可信作者身份的整体哈希。."""
     canonical = {
@@ -75,6 +76,8 @@ def compute_layered_spec_sha256(
         ],
         "author_identity": author_identity.to_dict(),
     }
+    if derivation_provenance is not None:
+        canonical["derivation_provenance"] = derivation_provenance.to_dict()
     return sha256_hex_text(canonical_json(canonical))
 
 
@@ -86,4 +89,5 @@ def recompute_layered_spec_sha256(spec: LayeredShaderSpecV1) -> str:
         canvas=spec.canvas,
         layers=spec.layers,
         author_identity=spec.author_identity,
+        derivation_provenance=spec.derivation_provenance,
     )

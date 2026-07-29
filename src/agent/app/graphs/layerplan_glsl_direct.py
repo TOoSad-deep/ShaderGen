@@ -6,10 +6,14 @@ Flow::
       -> author_initial -> compile_candidate -> validate_candidate
       -> prepare_program -> render_program -> verify_receipt
       -> attest_candidate -> evaluate_candidate -> select_candidate
-      -> decide_refinement
-           | refine -> author_refinement -> apply_refinement
-           |           -> compile_candidate
-           ` done/initial failure -> release_resources
+      -> decide_uniform_optimization
+           | tune -> propose_uniform_candidate -> apply_uniform_candidate
+           |         -> compile_candidate ... -> select_candidate
+           |         -> record_uniform_outcome -> decide_uniform_optimization
+           ` local optimum -> decide_refinement
+                    | refine -> author_refinement -> apply_refinement
+                    |           -> compile_candidate
+                    ` done/hard block -> release_resources
       -> finalize_attempt -> END
 """
 
@@ -47,6 +51,19 @@ from agent.app.nodes.layered_direct.lifecycle_nodes import (
     finalize_attempt,
     release_resources,
     route_refinement,
+)
+from agent.app.nodes.layered_direct.progress_projection import (
+    public_uniform_progress_update,
+)
+from agent.app.nodes.layered_direct.uniform_optimization_nodes import (
+    apply_uniform_candidate,
+    decide_uniform_optimization,
+    propose_uniform_candidate,
+    record_uniform_outcome,
+    route_after_candidate_selection,
+    route_after_uniform_apply,
+    route_uniform_decision,
+    route_uniform_proposal,
 )
 from agent.app.nodes.layered_direct.workflow_author_nodes import (
     apply_refinement,
@@ -101,10 +118,17 @@ def _with_safe_progress(node_name: str, node: GraphNode) -> ObservedGraphNode:
                 (perf_counter() - started_at) * 1000,
             )
             raise
+        progress_update = public_uniform_progress_update(
+            node_name,
+            state,
+            result,
+            runtime.context,
+        )
         runtime.context.publish_node_progress(
             node_name,
             "completed",
             (perf_counter() - started_at) * 1000,
+            progress_update,
         )
         return result
 
@@ -123,6 +147,10 @@ _NODE_IMPLEMENTATIONS: dict[str, GraphNode] = {
     "attest_candidate": attest_candidate,
     "evaluate_candidate": evaluate_candidate,
     "select_candidate": select_candidate,
+    "decide_uniform_optimization": decide_uniform_optimization,
+    "propose_uniform_candidate": propose_uniform_candidate,
+    "apply_uniform_candidate": apply_uniform_candidate,
+    "record_uniform_outcome": record_uniform_outcome,
     "decide_refinement": decide_refinement,
     "author_refinement": author_refinement,
     "apply_refinement": apply_refinement,
@@ -178,6 +206,7 @@ def build_layerplan_glsl_direct_graph() -> CompiledStateGraph[
         {
             "validate_candidate": "validate_candidate",
             "decide_refinement": "decide_refinement",
+            "record_uniform_outcome": "record_uniform_outcome",
             "release_resources": "release_resources",
         },
     )
@@ -187,6 +216,7 @@ def build_layerplan_glsl_direct_graph() -> CompiledStateGraph[
         {
             "prepare_program": "prepare_program",
             "decide_refinement": "decide_refinement",
+            "record_uniform_outcome": "record_uniform_outcome",
             "release_resources": "release_resources",
         },
     )
@@ -196,6 +226,7 @@ def build_layerplan_glsl_direct_graph() -> CompiledStateGraph[
         {
             "render_program": "render_program",
             "decide_refinement": "decide_refinement",
+            "record_uniform_outcome": "record_uniform_outcome",
             "release_resources": "release_resources",
         },
     )
@@ -205,6 +236,7 @@ def build_layerplan_glsl_direct_graph() -> CompiledStateGraph[
         {
             "verify_receipt": "verify_receipt",
             "decide_refinement": "decide_refinement",
+            "record_uniform_outcome": "record_uniform_outcome",
             "release_resources": "release_resources",
         },
     )
@@ -214,6 +246,7 @@ def build_layerplan_glsl_direct_graph() -> CompiledStateGraph[
         {
             "attest_candidate": "attest_candidate",
             "decide_refinement": "decide_refinement",
+            "record_uniform_outcome": "record_uniform_outcome",
             "release_resources": "release_resources",
         },
     )
@@ -223,11 +256,45 @@ def build_layerplan_glsl_direct_graph() -> CompiledStateGraph[
         {
             "evaluate_candidate": "evaluate_candidate",
             "decide_refinement": "decide_refinement",
+            "record_uniform_outcome": "record_uniform_outcome",
             "release_resources": "release_resources",
         },
     )
     builder.add_edge("evaluate_candidate", "select_candidate")
-    builder.add_edge("select_candidate", "decide_refinement")
+    builder.add_conditional_edges(
+        "select_candidate",
+        route_after_candidate_selection,
+        {
+            "record_uniform_outcome": "record_uniform_outcome",
+            "decide_uniform_optimization": "decide_uniform_optimization",
+        },
+    )
+    builder.add_conditional_edges(
+        "decide_uniform_optimization",
+        route_uniform_decision,
+        {
+            "propose_uniform_candidate": "propose_uniform_candidate",
+            "decide_refinement": "decide_refinement",
+            "release_resources": "release_resources",
+        },
+    )
+    builder.add_conditional_edges(
+        "propose_uniform_candidate",
+        route_uniform_proposal,
+        {
+            "apply_uniform_candidate": "apply_uniform_candidate",
+            "decide_refinement": "decide_refinement",
+        },
+    )
+    builder.add_conditional_edges(
+        "apply_uniform_candidate",
+        route_after_uniform_apply,
+        {
+            "compile_candidate": "compile_candidate",
+            "record_uniform_outcome": "record_uniform_outcome",
+        },
+    )
+    builder.add_edge("record_uniform_outcome", "decide_uniform_optimization")
     builder.add_conditional_edges(
         "decide_refinement",
         route_refinement,

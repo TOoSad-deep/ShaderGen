@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from hashlib import sha256
 from typing import Any
 
 import numpy as np
@@ -12,6 +13,7 @@ from PIL import Image
 from agent.app.contracts.layerplan_glsl_direct import (
     TERMINAL_REFINEMENT_FAILURE_CODES,
     AttemptLedger,
+    DirectCandidate,
     PlanLedger,
     accumulate_token_usage,
     border_background,
@@ -25,13 +27,31 @@ from agent.app.nodes.layered_direct.authors import (
     run_refine_layered_glsl_author,
 )
 from agent.app.nodes.layered_direct.layer_plan_author import run_visual_analysis_author
-from agent.app.nodes.layered_direct.workflow_support import trace
+from agent.app.nodes.layered_direct.workflow_support import (
+    refine_failure_update,
+    trace,
+)
 from agent.app.states.layerplan_glsl_direct import (
     DirectGraphContext,
     LayerPlanGlslDirectState,
     NodeRoute,
 )
 from shaderforge.layered_spec import LayeredSpecError, apply_layer_patch
+from shaderforge.program_spec import canonical_json
+from shaderforge.uniform_optimization import UniformOptimizationSummaryV2
+
+
+def _uniform_summary_for_refine(
+    current_best: DirectCandidate,
+    summary: UniformOptimizationSummaryV2 | None,
+) -> UniformOptimizationSummaryV2 | None:
+    """Expose only an optimizer summary bound to the exact incumbent Spec."""
+    if (
+        summary is None
+        or summary.selected_spec_sha256 != current_best.spec.spec_sha256
+    ):
+        return None
+    return summary
 
 
 def prepare_reference(
@@ -66,6 +86,36 @@ def prepare_reference(
         "current_best": None,
         "refinement_count": 0,
         "refinement_blocked": False,
+        "optimization_policy": runtime.context.optimization_policy,
+        "consecutive_non_improving": 0,
+        "previous_refine_feedback": None,
+        "attempted_patch_fingerprints": (),
+        "duplicate_patch_detected": False,
+        "duplicate_patch_count": 0,
+        "refinement_stop_reason": None,
+        "candidate_selected": False,
+        "candidate_loss_delta": None,
+        "candidate_mae_delta": None,
+        "candidate_material_improvement": False,
+        "should_uniform_optimize": False,
+        "uniform_release_requested": False,
+        "uniform_search_session": None,
+        "uniform_pending_move": None,
+        "uniform_candidate_patch": None,
+        "uniform_optimized_source_sha256s": (),
+        "uniform_search_source_sha256": None,
+        "uniform_search_base_spec_sha256": None,
+        "uniform_search_selected_spec_sha256": None,
+        "uniform_search_initial_loss": None,
+        "uniform_search_initial_mae": None,
+        "uniform_search_selected_loss": None,
+        "uniform_search_selected_mae": None,
+        "uniform_search_initial_draw_count": None,
+        "uniform_search_trace_start_index": None,
+        "uniform_tuning_stop_reason": None,
+        "uniform_candidate_failed": False,
+        "uniform_optimization_summary": None,
+        "uniform_optimization_trace": [],
         "failure_code": None,
         "completed_nodes": trace(state, "prepare_reference"),
     }
@@ -215,6 +265,10 @@ async def author_refinement(
     current_best = state["current_best"]
     layer_plan = state["layer_plan"]
     assert current_best is not None and layer_plan is not None
+    uniform_summary = _uniform_summary_for_refine(
+        current_best,
+        state.get("uniform_optimization_summary"),
+    )
     sequence = state["next_sequence"]
     started = context.clock()
     refine = await run_refine_layered_glsl_author(
@@ -232,6 +286,10 @@ async def author_refinement(
             residual_summary=dict(current_best.residual_summary),
         ),
         layer_plan=layer_plan,
+        refinement_index=state["refinement_count"] + 1,
+        remaining_refine_budget=(config.refine_budget - state["refinement_count"]),
+        previous_refine_feedback=state.get("previous_refine_feedback"),
+        uniform_optimization_summary=uniform_summary,
         remaining_calls=config.direct_author_llm_budget - ledger.llm_call_count,
     )
     ledger.wall_clock_ms += (context.clock() - started) * 1000.0
@@ -257,7 +315,7 @@ async def author_refinement(
                 "call_count": refine.call_count,
             },
         ]
-    return {
+    update: dict[str, Any] = {
         "candidate_role": "refine",
         "candidate_sequence": sequence,
         "candidate_layered_spec": None,
@@ -285,6 +343,20 @@ async def author_refinement(
         ),
         "completed_nodes": trace(state, "author_refinement"),
     }
+    if refine.patch is None or refine.author_identity is None:
+        update.update(
+            refine_failure_update(
+                state,
+                outcome="author_failed",
+                failure_codes=(normalize_author_failure(refine.error_code),),
+                target_layer_id=(
+                    refine.patch.target_layer_id if refine.patch is not None else None
+                ),
+                inherit_candidate_target=False,
+                force=True,
+            )
+        )
+    return update
 
 
 def route_after_refinement_author(state: LayerPlanGlslDirectState) -> NodeRoute:
@@ -305,6 +377,61 @@ def apply_refinement(
     author_identity = state["refine_author_identity"]
     assert current_best is not None
     assert patch is not None and author_identity is not None
+    fingerprint = sha256(
+        canonical_json(
+            {
+                "base_layered_spec_sha256": patch.base_layered_spec_sha256,
+                "target_layer_id": patch.target_layer_id,
+                "replacement": patch.replacement.semantic_dict(),
+            }
+        ).encode("utf-8")
+    ).hexdigest()
+    previous_layer = next(
+        (
+            layer
+            for layer in current_best.layered_spec.layers
+            if layer.layer_id == patch.target_layer_id
+        ),
+        None,
+    )
+    duplicate = (
+        fingerprint in state["attempted_patch_fingerprints"]
+        if state["optimization_policy"].detect_duplicate_patch
+        else False
+    )
+    no_op = (
+        previous_layer is not None
+        and previous_layer.semantic_dict() == patch.replacement.semantic_dict()
+    )
+    attempted = (*state["attempted_patch_fingerprints"], fingerprint)
+    if duplicate or no_op:
+        ledger = replace(state["direct_ledger"])
+        ledger.rejected_candidates += 1
+        error_code = "duplicate_patch" if duplicate else "no_op_patch"
+        events = [
+            *state["events"],
+            {
+                "sequence": state["candidate_sequence"],
+                "kind": "refine",
+                "ok": False,
+                "error_code": error_code,
+            },
+        ]
+        return {
+            "candidate_layered_spec": None,
+            "attempted_patch_fingerprints": attempted,
+            "duplicate_patch_detected": True,
+            "duplicate_patch_count": state["duplicate_patch_count"] + 1,
+            "direct_ledger": ledger,
+            "events": events,
+            "previous_refine_feedback": refine_failure_update(
+                state,
+                outcome="patch_invalid",
+                failure_codes=(error_code,),
+                target_layer_id=patch.target_layer_id,
+            )["previous_refine_feedback"],
+            "completed_nodes": trace(state, "apply_refinement"),
+        }
     try:
         refined = apply_layer_patch(
             current_best.layered_spec,
@@ -326,12 +453,20 @@ def apply_refinement(
         ]
         return {
             "candidate_layered_spec": None,
+            "attempted_patch_fingerprints": attempted,
             "direct_ledger": ledger,
             "events": events,
+            **refine_failure_update(
+                state,
+                outcome="patch_invalid",
+                failure_codes=(exc.code,),
+                target_layer_id=patch.target_layer_id,
+            ),
             "completed_nodes": trace(state, "apply_refinement"),
         }
     return {
         "candidate_layered_spec": refined,
+        "attempted_patch_fingerprints": attempted,
         "completed_nodes": trace(state, "apply_refinement"),
     }
 

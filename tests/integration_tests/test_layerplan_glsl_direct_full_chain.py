@@ -157,7 +157,7 @@ async def test_runtime_progress_publishes_selected_render(tmp_path: Path) -> Non
         "attest_candidate",
         "evaluate_candidate",
         "select_candidate",
-        "decide_refinement",
+        "decide_uniform_optimization",
         "release_resources",
         "finalize_attempt",
     }.issubset({event["node"] for event in node_events})

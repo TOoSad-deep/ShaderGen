@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
@@ -30,6 +30,7 @@ class StudioDirectInput(TypedDict):
     reference_image_base64: str
     content_type: str
     instruction: str
+    quality_preset: NotRequired[str]
 
 
 class StudioDirectOutput(TypedDict):
@@ -70,6 +71,7 @@ async def run_owned_attempt(state: StudioDirectState) -> StudioDirectOutput:
             reference_image,
             content_type=state["content_type"],
             instruction=state["instruction"],
+            quality_preset=state.get("quality_preset", "balanced"),
         )
         return {
             "safe_summary": result.to_safe_summary(),

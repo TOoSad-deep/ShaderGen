@@ -73,7 +73,7 @@ def _spec_semantic_dict(spec: ShaderProgramSpecV1) -> dict[str, Any]:
     任一字段（reference/plan/instruction/model/prompt/sampling/role/
     parent/content_type/input_context）后重算结果与存储的 spec_sha256 失配。
     """
-    return {
+    canonical = {
         "schema_version": spec.schema_version,
         "renderer_contract_id": spec.renderer_contract_id,
         "source_sha256": compute_source_sha256(spec.fragment_source),
@@ -87,6 +87,9 @@ def _spec_semantic_dict(spec: ShaderProgramSpecV1) -> dict[str, Any]:
         "canvas": spec.canvas.to_dict(),
         "author_identity": spec.author_identity.to_dict(),
     }
+    if spec.derivation_provenance is not None:
+        canonical["derivation_provenance"] = spec.derivation_provenance.to_dict()
+    return canonical
 
 
 def compute_spec_sha256(
@@ -98,6 +101,7 @@ def compute_spec_sha256(
     tunable_manifest: tuple[TunableParameter, ...],
     canvas: Any,
     author_identity: Any,
+    derivation_provenance: Any | None = None,
 ) -> str:
     """返回整体语义与身份字段的内容哈希，只排除 validation_attestation.
 
@@ -118,6 +122,8 @@ def compute_spec_sha256(
         "canvas": canvas.to_dict(),
         "author_identity": author_identity.to_dict(),
     }
+    if derivation_provenance is not None:
+        canonical["derivation_provenance"] = derivation_provenance.to_dict()
     return sha256_hex_text(canonical_json(canonical))
 
 

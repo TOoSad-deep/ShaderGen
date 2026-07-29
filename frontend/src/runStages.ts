@@ -7,6 +7,7 @@ import type {
   MinRunProgressEvent,
   MinRunProgressSnapshot,
   ShaderApiFailure,
+  UniformOptimizationSummary,
 } from "./api/shader";
 import { RUNTIME_TIMEOUTS } from "./runtimeTimeouts";
 
@@ -51,6 +52,26 @@ export const DIRECT_NODES: ReadonlyArray<DirectNodeDefinition> = [
   { id: "attest_candidate", label: "签发候选证明", group: "execution" },
   { id: "evaluate_candidate", label: "评估候选质量", group: "evaluation" },
   { id: "select_candidate", label: "更新当前最佳", group: "evaluation" },
+  {
+    id: "decide_uniform_optimization",
+    label: "决定是否优化参数",
+    group: "evaluation",
+  },
+  {
+    id: "propose_uniform_candidate",
+    label: "提出参数候选",
+    group: "refinement",
+  },
+  {
+    id: "apply_uniform_candidate",
+    label: "应用参数候选",
+    group: "refinement",
+  },
+  {
+    id: "record_uniform_outcome",
+    label: "记录参数优化结果",
+    group: "evaluation",
+  },
   { id: "decide_refinement", label: "决定是否修订", group: "evaluation" },
   { id: "author_refinement", label: "生成修订方案", group: "refinement" },
   { id: "apply_refinement", label: "应用修订", group: "refinement" },
@@ -82,6 +103,20 @@ const STOP_REASON_LABELS: Record<string, string> = {
   render_failed: "渲染失败",
   no_valid_render: "无有效渲染",
   bounded_mvp_complete: "有界流程完成",
+  target_reached: "达到质量目标",
+  refine_budget_exhausted: "模型修订预算用尽",
+  patience_exhausted: "连续改善不足",
+  duplicate_patch: "检测到重复修订",
+  hard_resource_block: "资源预算阻断",
+  no_tunables: "没有可调参数",
+  no_feasible_components: "没有可行参数分量",
+  local_optimum: "参数搜索达到局部最优",
+  dimension_cap_reached_local_optimum: "参数维度封顶并达到局部最优",
+  candidate_failures_exhausted: "参数候选失败次数耗尽",
+  uniform_tuning_budget_exhausted: "参数搜索预算用尽",
+  global_draw_budget_exhausted: "全局渲染预算用尽",
+  global_compile_budget_exhausted: "全局编译预算用尽",
+  renderer_unavailable: "渲染器不可用",
 };
 
 export function stopReasonLabel(reason: string | null | undefined): string | null {
@@ -198,6 +233,16 @@ export interface RunQualityView {
   targetReached: boolean | null;
 }
 
+export interface UniformOptimizationView {
+  evaluatedCount: number | null;
+  acceptedCount: number | null;
+  maeDelta: number | null;
+  lossDelta: number | null;
+  stopReason: string | null;
+  stopReasonLabel: string | null;
+  candidateOutcome: "accepted" | "rejected" | "failed" | null;
+}
+
 export interface RunViewModel {
   status: RunStatus;
   rawStatus: string;
@@ -215,6 +260,10 @@ export interface RunViewModel {
   refineCount: number | null;
   quality: RunQualityView;
   budgets: BudgetView[];
+  uniformOptimization: UniformOptimizationView | null;
+  stopReason: string | null;
+  stopReasonLabel: string | null;
+  reasonCode: string | null;
   /** 实时帧刷新序号（render_seq），不是 current_best 版本号。 */
   renderSeq: number | null;
   eventCount: number;
@@ -229,6 +278,7 @@ export interface BuildRunViewModelInput {
   status: string;
   /** 后端登记运行的 ISO 时刻；假 API 或旧响应可能缺省。 */
   startedAt?: string | null;
+  stopReason?: string | null;
   /** 调用方当前时钟（秒）。 */
   nowSeconds: number;
   /** 面板挂载时钟（秒），仅在缺少 startedAt 时兜底观察计时。 */
@@ -458,8 +508,56 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
   const best = snapshot?.best ?? null;
   const bestLoss = typeof best?.loss === "number" ? best.loss : null;
   const bestMae = typeof best?.mae === "number" ? best.mae : null;
-  const targetLoss = typeof budgets?.target_loss === "number" ? budgets.target_loss : null;
-  const targetMae = typeof budgets?.target_mae === "number" ? budgets.target_mae : null;
+  const targetLoss =
+    typeof best?.target_loss === "number"
+      ? best.target_loss
+      : typeof budgets?.target_loss === "number"
+        ? budgets.target_loss
+        : null;
+  const targetMae =
+    typeof best?.target_mae === "number"
+      ? best.target_mae
+      : typeof budgets?.target_mae === "number"
+        ? budgets.target_mae
+        : null;
+  const uniform = snapshot?.uniform_optimization ?? null;
+  const finiteUniformNumber = (
+    key: keyof UniformOptimizationSummary,
+  ): number | null => {
+    const value = uniform?.[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  };
+  const uniformStopReason =
+    typeof uniform?.stop_reason === "string" && uniform.stop_reason
+      ? uniform.stop_reason
+      : null;
+  const snapshotCandidateOutcome = uniform?.candidate_outcome;
+  const eventCandidateOutcome = events
+    .slice()
+    .reverse()
+    .map((event) => event.uniform_optimization?.candidate_outcome)
+    .find(
+      (outcome): outcome is "accepted" | "rejected" | "failed" =>
+        outcome === "accepted" || outcome === "rejected" || outcome === "failed",
+    );
+  // `record_uniform_outcome` is followed by another decide event, whose
+  // snapshot has the current counters but no candidate outcome. Keep the last
+  // explicit outcome from the ordered event log in that normal case.
+  const uniformCandidateOutcome =
+    snapshotCandidateOutcome === "accepted" ||
+    snapshotCandidateOutcome === "rejected" ||
+    snapshotCandidateOutcome === "failed"
+      ? snapshotCandidateOutcome
+      : eventCandidateOutcome ?? null;
+  const terminalStopReason =
+    input.stopReason ??
+    snapshot?.stop_reason ??
+    snapshot?.refinement_stop_reason ??
+    last?.stop_reason ??
+    last?.refinement_stop_reason ??
+    null;
+  const reasonCode =
+    snapshot?.reason_code ?? last?.reason_code ?? terminalStopReason ?? null;
 
   let statusHint: string | null = null;
   if (status === "pending") {
@@ -490,7 +588,12 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
       targetLoss,
       targetMae,
       targetReached:
-        bestLoss !== null && targetLoss !== null ? bestLoss <= targetLoss : null,
+        bestLoss !== null &&
+        targetLoss !== null &&
+        bestMae !== null &&
+        targetMae !== null
+          ? bestLoss <= targetLoss && bestMae <= targetMae
+          : null,
     },
     budgets: [
       {
@@ -511,7 +614,27 @@ export function buildRunViewModel(input: BuildRunViewModelInput): RunViewModel {
         used: typeof counters?.refine_count === "number" ? counters.refine_count : null,
         budget: typeof budgets?.refine_budget === "number" ? budgets.refine_budget : null,
       },
+      {
+        id: "uniform",
+        label: "参数搜索 draw",
+        used: finiteUniformNumber("draw_count"),
+        budget: finiteUniformNumber("draw_budget"),
+      },
     ],
+    uniformOptimization: uniform
+      ? {
+          evaluatedCount: finiteUniformNumber("evaluated_count"),
+          acceptedCount: finiteUniformNumber("accepted_count"),
+          maeDelta: finiteUniformNumber("mae_delta"),
+          lossDelta: finiteUniformNumber("loss_delta"),
+          stopReason: uniformStopReason,
+          stopReasonLabel: stopReasonLabel(uniformStopReason),
+          candidateOutcome: uniformCandidateOutcome,
+        }
+      : null,
+    stopReason: terminalStopReason,
+    stopReasonLabel: stopReasonLabel(terminalStopReason),
+    reasonCode,
     renderSeq:
       typeof snapshot?.render_seq === "number" && snapshot.render_seq > 0
         ? snapshot.render_seq

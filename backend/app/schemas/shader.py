@@ -46,6 +46,13 @@ class ShaderMinPipelineSummary(BaseModel):
     target_mae: float
     target_loss: float
     target_reached: bool
+    # Agent-owned per-run policy identity and safe optimization outcome.  These
+    # fields deliberately exclude prompts, source, uniform values and diagnostics.
+    optimization_policy_fingerprint: str = ""
+    refinement_stop_reason: str | None = None
+    non_improving_count: int = Field(default=0, ge=0)
+    duplicate_patch_count: int = Field(default=0, ge=0)
+    uniform_optimization: dict[str, Any] | None = None
     trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -104,6 +111,14 @@ class MinRunProgressEvent(BaseModel):
     trace: list[dict[str, Any]] = Field(default_factory=list)
     next_action: str | None = None
     stop_reason: str | None = None
+    # Safe decision/result increment.  Backend only fills these from its
+    # explicit projection, never from the Agent graph state or diagnostics.
+    reason_code: str | None = None
+    optimization_policy_fingerprint: str | None = None
+    refinement_stop_reason: str | None = None
+    non_improving_count: int | None = Field(default=None, ge=0)
+    duplicate_patch_count: int | None = Field(default=None, ge=0)
+    uniform_optimization: dict[str, Any] | None = None
 
 
 class MinRunProgressSnapshot(BaseModel):
@@ -116,6 +131,13 @@ class MinRunProgressSnapshot(BaseModel):
     best: dict[str, float] = Field(default_factory=dict)
     current_node: str | None = None
     render_seq: int = 0
+    stop_reason: str | None = None
+    reason_code: str | None = None
+    optimization_policy_fingerprint: str | None = None
+    refinement_stop_reason: str | None = None
+    non_improving_count: int | None = Field(default=None, ge=0)
+    duplicate_patch_count: int | None = Field(default=None, ge=0)
+    uniform_optimization: dict[str, Any] | None = None
 
 
 class MinRunProgressResponse(BaseModel):
@@ -126,6 +148,7 @@ class MinRunProgressResponse(BaseModel):
     generation_mode: str | None = None
     quality_preset: str | None = None
     started_at: str | None = None
+    stop_reason: str | None = None
     latest_seq: int = 0
     events: list[MinRunProgressEvent] = Field(default_factory=list)
     snapshot: MinRunProgressSnapshot = Field(default_factory=MinRunProgressSnapshot)

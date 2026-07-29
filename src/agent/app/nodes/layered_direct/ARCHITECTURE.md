@@ -7,12 +7,21 @@
   hash。
 - Refine 接收参考图、current render、整图指标和 current best，只输出一个
   `LayerPatchV1`；Patch 绑定父 Layered Spec、目标 Layer 和旧 Layer hash。
+- Refine 还接收上一轮安全反馈；Graph 以逐运行 optimization policy 执行
+  MAE/loss 双阈值早停、相对 target excess 双目标支配、Patch/no-op 去重，
+  并用 MAE/loss 任一 material delta 驱动 feedback-aware patience。失败反馈
+  只包含稳定错误码、目标 Layer 与指标 delta。
 
 工作流 node 按职责拆分为：
 
 - `workflow_author_nodes.py`：reference、LayerPlan、Initial、Refine 和 Patch；
 - `candidate_nodes.py`：compile、validate、prepare、draw、receipt、
   attestation、evaluate 和 incumbent selection；
+- `uniform_optimization_nodes.py`：目标 Layer 分配、确定性参数候选、
+  trusted uniform Patch、session outcome 与搜索/Refine 路由；
+- `progress_projection.py`：把参数搜索进度投影为严格白名单的公开事件，
+  不泄露 uniform 路径、取值、Patch 或私有 graph state，并区分全局
+  compile budget 与 draw budget 耗尽；
 - `lifecycle_nodes.py`：Refine 路由、资源释放和结果冻结；
 - `workflow_support.py`：稳定的 trace、失败记录和候选路由辅助。
 

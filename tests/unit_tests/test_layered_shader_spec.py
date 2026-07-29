@@ -137,6 +137,17 @@ def _model_output() -> dict:
     }
 
 
+def test_model_cannot_supply_uniform_derivation_provenance() -> None:
+    plan = _plan()
+    payload = _model_output()
+    payload["derivation_provenance"] = {"algorithm_version": "forged"}
+
+    with pytest.raises(LayeredSpecError) as exc_info:
+        build_layered_shader_spec(payload, plan, _initial_identity(plan))
+
+    assert exc_info.value.code == "unknown_field"
+
+
 def _spec():
     plan = _plan()
     return build_layered_shader_spec(_model_output(), plan, _initial_identity(plan))

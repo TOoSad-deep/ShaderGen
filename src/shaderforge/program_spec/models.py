@@ -11,7 +11,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
-from typing import Any, Literal, Mapping
+from typing import TYPE_CHECKING, Any, Literal, Mapping
+
+if TYPE_CHECKING:
+    from shaderforge.uniform_optimization.models import (
+        UniformOptimizationProvenanceV1,
+    )
 
 LAYER_PLAN_V1_SCHEMA_VERSION = "layer_plan_v1"
 SHADER_PROGRAM_SPEC_V1_SCHEMA_VERSION = "shader_program_spec_v1"
@@ -333,6 +338,7 @@ class ShaderProgramSpecV1:
     binding_sha256: str
     spec_sha256: str
     author_identity: AuthorIdentity
+    derivation_provenance: UniformOptimizationProvenanceV1 | None = None
     validation_attestation: ValidationAttestation | None = None
 
     def with_attestation(
