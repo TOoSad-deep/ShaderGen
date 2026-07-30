@@ -1,0 +1,115 @@
+version: direct_quality_presets_v1
+
+# Direct 质量档位会在 Agent 进程启动时加载。
+# 修改数值后，需要重启 Backend 以及独立运行的 Agent/LangGraph 进程。
+#
+# optimization_policy 参数说明（四个档位通用）：
+# - target_mae:
+#   全图平均绝对误差目标，越小越严格。MAE 和 Loss 必须同时达到目标才会早停。
+# - target_loss:
+#   综合目标损失，包含前景、背景、几何遮罩、边缘和最差区域等指标。
+# - min_delta_mae / min_delta_loss:
+#   判断一轮修订是否产生“实质改善”的最小变化量；任一指标达到对应变化量，
+#   就会重置连续改善不足计数。调小会接受更微弱的改善，调大则更严格。
+# - refinement_patience:
+#   允许连续改善不足后的恢复机会数。判断条件为“连续计数 > patience”，
+#   因此值为 2 时，会在第 3 次连续改善不足后停止。
+# - detect_duplicate_patch:
+#   是否检测重复或无变化的 Layer Patch；启用后可避免浪费模型和渲染预算。
+#
+# budgets 参数说明（均为单个 Direct attempt 内的硬上限）：
+# - direct_author_llm_budget:
+#   Initial、Refine 及其结构化输出修复所能使用的 Direct 作者模型调用总次数。
+# - compile_budget:
+#   WebGL shader compile/link 总次数上限。
+# - draw_budget:
+#   真实 WebGL draw 总次数上限，包含结构候选、uniform 参数搜索，以及
+#   Refine 前可选的 role alpha mask 诊断 draw。
+# - refine_budget:
+#   Initial 之后允许执行的结构性 Refine 轮数；Initial 本身不计入。
+# - plan_llm_budget:
+#   LayerPlan 生成及其结构化输出修复所能使用的模型调用总次数。
+# - uniform_tuning_draw_budget:
+#   确定性 uniform 参数搜索最多可消耗的 draw 次数。
+# - uniform_tuning_active_component_cap:
+#   单次参数搜索最多纳入的可调 uniform 标量分量数。
+# - uniform_tuning_max_passes:
+#   uniform 坐标搜索最多遍历全部可调分量的轮数。
+#
+# 修改预算时必须保持以下容量关系：
+# - direct_author_llm_budget and compile_budget >= 1 + refine_budget
+# - draw_budget >= 1 + refine_budget + uniform_tuning_draw_budget
+#   超出这一最低容量的余量自动成为 role alpha mask draw budget；每轮
+#   Refine 最多使用两次余量，没有余量时安全跳过 mask。
+presets:
+  fast:
+    optimization_policy:
+      target_mae: 0.08
+      target_loss: 0.10
+      min_delta_mae: 0.001
+      min_delta_loss: 0.001
+      refinement_patience: 1
+      detect_duplicate_patch: true
+    budgets:
+      direct_author_llm_budget: 8
+      compile_budget: 8
+      draw_budget: 11
+      refine_budget: 2
+      plan_llm_budget: 2
+      uniform_tuning_draw_budget: 4
+      uniform_tuning_active_component_cap: 8
+      uniform_tuning_max_passes: 1
+
+  balanced:
+    optimization_policy:
+      target_mae: 0.06
+      target_loss: 0.08
+      min_delta_mae: 0.001
+      min_delta_loss: 0.001
+      refinement_patience: 1
+      detect_duplicate_patch: true
+    budgets:
+      direct_author_llm_budget: 8
+      compile_budget: 8
+      draw_budget: 11
+      refine_budget: 2
+      plan_llm_budget: 2
+      uniform_tuning_draw_budget: 4
+      uniform_tuning_active_component_cap: 8
+      uniform_tuning_max_passes: 1
+
+  high:
+    optimization_policy:
+      target_mae: 0.04
+      target_loss: 0.06
+      min_delta_mae: 0.001
+      min_delta_loss: 0.001
+      refinement_patience: 1
+      detect_duplicate_patch: true
+    budgets:
+      direct_author_llm_budget: 8
+      compile_budget: 8
+      draw_budget: 11
+      refine_budget: 2
+      plan_llm_budget: 2
+      uniform_tuning_draw_budget: 4
+      uniform_tuning_active_component_cap: 8
+      uniform_tuning_max_passes: 1
+
+  manual:
+    optimization_policy:
+      target_mae: 0.03
+      target_loss: 0.05
+      min_delta_mae: 0.001
+      min_delta_loss: 0.001
+      refinement_patience: 5
+      detect_duplicate_patch: true
+    budgets:
+      direct_author_llm_budget: 20
+      compile_budget: 15
+      draw_budget: 39
+      refine_budget: 10
+      plan_llm_budget: 2
+      uniform_tuning_draw_budget: 8
+      uniform_tuning_active_component_cap: 8
+      uniform_tuning_max_passes: 1

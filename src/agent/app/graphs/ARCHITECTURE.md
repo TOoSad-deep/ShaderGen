@@ -65,6 +65,33 @@ global budget failures remain terminal. A failure-bearing pass that cannot
 produce material progress ends as `candidate_failures_exhausted`, not as a
 false `local_optimum`.
 
+Initial/Refine Author may also return an optional `optimization_focus` sidecar.
+The adapter strips it before trusted Layered/Patch assembly, so it never enters
+Shader semantics, hashes or provenance. After the authored candidate has passed
+the real compile/proof path, `evaluate_candidate` validates the focus against
+that exact Layered/Program pair. A valid focus freezes every component outside
+its target-layer whitelist; an invalid focus is dropped and uniform selection
+falls back to the existing deterministic LayerPlan/residual heuristic. Uniform
+derivations inherit the accepted incumbent focus, while rejected Refine
+candidates cannot replace it.
+
+Focused ROI metrics reuse the candidate's existing beauty render and therefore
+add no draw. The ROI comes from the target LayerPlan region, its intersection
+with the worst residual tile, or the full canvas, all in bottom-left WebGL UV.
+Local MAE, geometry, edge and outside-ROI facts are available to later Refine,
+and uniform-derived candidates reuse the incumbent's resolved ROI so comparisons
+within one numeric session stay spatially stable. `select_candidate` still uses
+only the global target-relative MAE/loss boundary.
+
+Before a Refine call, `author_refinement` may reuse the incumbent's prepared
+program for up to two budgeted diagnostic draws. The trusted compiler packs the
+independent alpha union for subject/highlight/detail and
+shadow/glow/background into fixed RGB channels; the evaluation domain splits
+them into grayscale PNG masks. Only roles present in the canonical LayerPlan
+are sent to Refine. These masks are private prompt inputs whose role and content
+hash are bound into the Author input identity; a missing or failed diagnostic
+degrades to no mask and never blocks refinement or changes candidate selection.
+
 `release_resources` makes normal cleanup observable. The invocation wrapper also
 uses `finally` so unexpected node exceptions still close prepared programs.
 

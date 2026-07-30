@@ -143,8 +143,12 @@ class FakePrepared:
         *,
         capture_png: bool = False,
         receipt_spec_sha256: str | None = None,
+        diagnostic_mode: float = 0.0,
     ) -> PreparedRenderResult:
+        if diagnostic_mode != 0.0 and receipt_spec_sha256 is not None:
+            raise ValueError("diagnostic draws cannot issue execution receipts")
         self._renderer.draw_calls.append(dict(uniform_values))
+        self._renderer.diagnostic_modes.append(float(diagnostic_mode))
         if self._renderer.fail_draw:
             return PreparedRenderResult(
                 success=False,
@@ -158,12 +162,18 @@ class FakePrepared:
             )
         gain = float(uniform_values.get("u_gain", 0.5))
         gray = round(gain * 255)
-        rgb = bytes([gray, gray, gray]) * (self._width * self._height)
+        pixel = (
+            (255, 128, 64)
+            if diagnostic_mode == 1.0
+            else (32, 16, 8)
+            if diagnostic_mode == 2.0
+            else (gray, gray, gray)
+        )
+        rgb = bytes(pixel) * (self._width * self._height)
         png = _solid_png(gray) if capture_png else None
-        assert receipt_spec_sha256 is not None
         receipt = (
             None
-            if self._renderer.receipt_mode == "missing"
+            if self._renderer.receipt_mode == "missing" or receipt_spec_sha256 is None
             else _TEST_SIGNER.issue_after_draw(
                 source_sha256=sha256(self._fragment_source.encode()).hexdigest(),
                 spec_sha256=receipt_spec_sha256,
@@ -203,6 +213,7 @@ class FakeRenderer:
         self.receipt_mode = receipt_mode
         self.prepare_calls: list[dict[str, Any]] = []
         self.draw_calls: list[dict[str, Any]] = []
+        self.diagnostic_modes: list[float] = []
         self.close_count = 0
 
     async def prepare(

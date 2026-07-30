@@ -8,9 +8,14 @@ import pytest
 
 from agent.app.contracts.layered_direct_glsl import (
     LayeredDirectAuthorParseError,
+    assemble_layer_patch,
+    assemble_layered_shader_spec,
+    layer_patch_json_schema,
     layered_shader_spec_json_schema,
+    parse_layer_patch_semantics,
     parse_layered_shader_spec_semantics,
 )
+from agent.app.nodes.layered_direct.authors import run_initial_layered_glsl_author
 from shaderforge.layered_spec import (
     LayeredSpecError,
     apply_layer_patch,
@@ -27,6 +32,7 @@ from shaderforge.program_spec import (
     sha256_hex_text,
 )
 from shaderforge.validation import validate_program_spec_safety
+from tests.direct_fakes import FakeGateway
 
 REFERENCE_SHA256 = sha256_hex_text("layered-reference")
 INSTRUCTION_SHA256 = sha256_hex_text("layered-instruction")
@@ -245,6 +251,107 @@ def test_initial_schema_binds_canvas_and_planned_layer_identity() -> None:
     ]
 
 
+def _optimization_focus() -> dict:
+    return {
+        "target_layer_id": "subject-main",
+        "objective": "edge",
+        "active_components": [{"path": "u_subject_radius", "component_indices": [0]}],
+        "region_policy": "worst_residual_intersection",
+    }
+
+
+def test_optimization_focus_is_optional_nonsemantic_sidecar() -> None:
+    plan = _plan()
+    payload = _model_output()
+    payload["optimization_focus"] = _optimization_focus()
+
+    parsed = parse_layered_shader_spec_semantics(json.dumps(payload), layer_plan=plan)
+    without_focus = parse_layered_shader_spec_semantics(
+        json.dumps(_model_output()), layer_plan=plan
+    )
+
+    assert parsed.optimization_focus_payload == _optimization_focus()
+    assert "optimization_focus" not in parsed.semantics
+    assert parsed.semantics == without_focus.semantics
+    assert (
+        assemble_layered_shader_spec(
+            parsed.semantics, layer_plan=plan, author_identity=_initial_identity(plan)
+        ).layered_spec_sha256
+        == assemble_layered_shader_spec(
+            without_focus.semantics,
+            layer_plan=plan,
+            author_identity=_initial_identity(plan),
+        ).layered_spec_sha256
+    )
+
+    schema = layered_shader_spec_json_schema()
+    patch_schema = layer_patch_json_schema()
+    assert "optimization_focus" in schema["properties"]
+    assert "optimization_focus" in patch_schema["properties"]
+    assert "optimization_focus" not in schema["required"]
+    assert "optimization_focus" not in patch_schema["required"]
+
+
+@pytest.mark.anyio
+async def test_initial_author_returns_optimization_focus_payload() -> None:
+    plan = _plan()
+    payload = _model_output()
+    payload["optimization_focus"] = _optimization_focus()
+
+    result = await run_initial_layered_glsl_author(
+        gateway=FakeGateway(initial_responses=[json.dumps(payload)]),
+        reference_image=b"layered-reference",
+        layer_plan=plan,
+        canvas_width=128,
+        canvas_height=128,
+        remaining_calls=1,
+    )
+
+    assert result.layered_spec is not None
+    assert result.optimization_focus_payload == _optimization_focus()
+
+
+@pytest.mark.parametrize(
+    "invalid_focus",
+    [
+        {},
+        {**_optimization_focus(), "unexpected": True},
+        {**_optimization_focus(), "objective": "lighting"},
+        {**_optimization_focus(), "active_components": []},
+        {
+            **_optimization_focus(),
+            "active_components": [
+                {"path": "u_subject_radius", "component_indices": [-1]}
+            ],
+        },
+    ],
+)
+def test_malformed_optimization_focus_is_safely_discarded(
+    invalid_focus: dict,
+) -> None:
+    plan = _plan()
+    initial = _model_output()
+    initial["optimization_focus"] = invalid_focus
+    parsed_initial = parse_layered_shader_spec_semantics(
+        json.dumps(initial), layer_plan=plan
+    )
+    assert parsed_initial.optimization_focus_payload is None
+    assert assemble_layered_shader_spec(
+        parsed_initial.semantics,
+        layer_plan=plan,
+        author_identity=_initial_identity(plan),
+    )
+
+    spec = _spec()
+    patch = _patch_output(spec)
+    patch["optimization_focus"] = invalid_focus
+    parsed_patch = parse_layer_patch_semantics(json.dumps(patch))
+    assert parsed_patch.optimization_focus_payload is None
+    assert (
+        assemble_layer_patch(parsed_patch.semantics).target_layer_id == "subject-main"
+    )
+
+
 def test_initial_parser_preserves_safe_domain_error_category() -> None:
     output = _model_output()
     output["layers"] = list(reversed(output["layers"]))
@@ -330,6 +437,42 @@ def test_compiler_is_deterministic_and_passes_program_spec_safety() -> None:
     assert "gl_FragColor = vec4(opaque_rgb, 1.0);" in first.fragment_source
     safety = validate_program_spec_safety(first)
     assert safety.valid, safety.violations
+
+
+def test_compiler_emits_nonsemantic_role_mask_diagnostics() -> None:
+    compiled = compile_layered_shader(_spec())
+
+    assert "uniform float u_sg_role_mask_mode;" in compiled.fragment_source
+    assert "u_sg_role_mask_mode" not in {item.name for item in compiled.uniform_schema}
+    assert "u_sg_role_mask_mode" not in compiled.uniform_values
+    for role in ("subject", "highlight", "detail", "shadow", "glow", "background"):
+        variable = f"sg_role_mask_{role}"
+        assert f"float {variable} = 0.0;" in compiled.fragment_source
+    assert (
+        "gl_FragColor = vec4(sg_role_mask_subject, sg_role_mask_highlight, "
+        "sg_role_mask_detail, 1.0);" in compiled.fragment_source
+    )
+    assert (
+        "gl_FragColor = vec4(sg_role_mask_shadow, sg_role_mask_glow, "
+        "sg_role_mask_background, 1.0);" in compiled.fragment_source
+    )
+    assert "if (u_sg_role_mask_mode == 1.0)" in compiled.fragment_source
+    assert "if (u_sg_role_mask_mode == 2.0)" in compiled.fragment_source
+    assert (
+        "vec3 opaque_rgb = accum.rgb + vec3(1.0) * (1.0 - accum.a);"
+        in compiled.fragment_source
+    )
+
+
+def test_layered_parser_rejects_internal_role_mask_uniform_reference() -> None:
+    plan = _plan()
+    output = _model_output()
+    output["layers"][0]["glsl_body"] = "return vec4(vec3(u_sg_role_mask_mode), 1.0);"
+
+    with pytest.raises(LayeredSpecError) as exc_info:
+        build_layered_shader_spec(output, plan, _initial_identity(plan))
+
+    assert exc_info.value.code == "forbidden_internal_uniform_reference"
 
 
 def test_compiler_repairs_constant_reversed_smoothstep_without_changing_layer() -> None:

@@ -16,6 +16,11 @@
   修复，其余非法源码继续拒绝。安全校验、真实执行和 attestation 仍由既有
   链路负责；当前产品不以 uniform 数量或总分量预拒绝 Layered 候选，而由
   当前真实 Renderer 的 prepare/link/draw 判定容量。
+- Compiler 还会注入不属于 `ShaderProgramSpecV1` binding 的内部
+  `u_sg_role_mask_mode`：默认 `0` 严格走 beauty 合成；`1` 在 RGB 分别输出
+  subject/highlight/detail 的逐像素 alpha union，`2` 依次输出
+  shadow/glow/background，均仅供可信诊断渲染使用。模型 Layer 正文与 bindings
+  都不得引用该标识符。
 - uniform-only 派生保留原模型 `AuthorIdentity`，以独立
   `UniformOptimizationProvenanceV1` 绑定父 Layered/Program、算法配置和
   move；provenance 非空时进入 Layered hash，未优化旧 Spec 的 hash 语义不变。

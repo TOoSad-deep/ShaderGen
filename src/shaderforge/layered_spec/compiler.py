@@ -23,7 +23,16 @@ from shaderforge.program_spec import (
 )
 from shaderforge.validation import repair_constant_reversed_smoothsteps
 
-LAYERED_COMPILER_VERSION = "layered_to_program_spec_v1_2"
+LAYERED_COMPILER_VERSION = "layered_to_program_spec_v1_3"
+_ROLE_MASK_MODE_UNIFORM = "u_sg_role_mask_mode"
+_ROLE_MASK_VARIABLES = {
+    "subject": "sg_role_mask_subject",
+    "highlight": "sg_role_mask_highlight",
+    "detail": "sg_role_mask_detail",
+    "shadow": "sg_role_mask_shadow",
+    "glow": "sg_role_mask_glow",
+    "background": "sg_role_mask_background",
+}
 
 
 def _function_name(index: int, layer_id: str) -> str:
@@ -38,6 +47,7 @@ def _emit_source(layers: tuple[LayerProgram, ...]) -> str:
         "uniform sampler2D u_image;",
         "uniform vec2 u_resolution;",
         "uniform float u_time;",
+        f"uniform float {_ROLE_MASK_MODE_UNIFORM};",
     ]
     uniforms = sorted(
         (declaration for layer in layers for declaration in layer.uniform_schema),
@@ -57,6 +67,7 @@ def _emit_source(layers: tuple[LayerProgram, ...]) -> str:
         "void main() {",
         "    vec4 accum = vec4(0.0);",
         "    vec4 layer;",
+        *(f"    float {variable} = 0.0;" for variable in _ROLE_MASK_VARIABLES.values()),
     ]
     # LayerPlan 的 z_index 决定从后到前；同 z_index 以 canonical tuple 顺序消歧。
     for index, layer in sorted(
@@ -64,8 +75,23 @@ def _emit_source(layers: tuple[LayerProgram, ...]) -> str:
     ):
         main.append(f"    layer = {_function_name(index, layer.layer_id)}(v_uv);")
         main.append("    accum = layer + accum * (1.0 - layer.a);")
+        role_mask_variable = _ROLE_MASK_VARIABLES[layer.role]
+        main.append(
+            f"    {role_mask_variable} = layer.a + {role_mask_variable} "
+            "* (1.0 - layer.a);"
+        )
     main.extend(
         [
+            f"    if ({_ROLE_MASK_MODE_UNIFORM} == 1.0) {{",
+            "        gl_FragColor = vec4(sg_role_mask_subject, "
+            "sg_role_mask_highlight, sg_role_mask_detail, 1.0);",
+            "        return;",
+            "    }",
+            f"    if ({_ROLE_MASK_MODE_UNIFORM} == 2.0) {{",
+            "        gl_FragColor = vec4(sg_role_mask_shadow, sg_role_mask_glow, "
+            "sg_role_mask_background, 1.0);",
+            "        return;",
+            "    }",
             "    vec3 opaque_rgb = accum.rgb + vec3(1.0) * (1.0 - accum.a);",
             "    gl_FragColor = vec4(opaque_rgb, 1.0);",
             "}",

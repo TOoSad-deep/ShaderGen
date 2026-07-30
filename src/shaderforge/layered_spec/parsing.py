@@ -58,6 +58,8 @@ _FORBIDDEN_BODY_TOKEN = re.compile(
     r"(?m)^\s*#|\b(?:precision|varying|attribute|uniform)\b"
     r"|\bvoid\s+main\s*\(|\bgl_FragColor\b"
 )
+_INTERNAL_ROLE_MASK_MODE_UNIFORM = "u_sg_role_mask_mode"
+_INTERNAL_BODY_TOKEN = re.compile(r"\bu_sg_role_mask_mode\b")
 _NESTED_FUNCTION_TOKEN = re.compile(
     r"\b(?:void|bool|int|float|vec[234]|mat[234])\s+[A-Za-z_]\w*\s*\("
 )
@@ -199,6 +201,11 @@ def _parse_layer(
             "forbidden_glsl_body_declaration",
             "glsl_body 不得包含预处理、全局声明、main 或 gl_FragColor。",
         )
+    if _INTERNAL_BODY_TOKEN.search(cleaned_body):
+        raise LayeredSpecError(
+            "forbidden_internal_uniform_reference",
+            "glsl_body 不得引用 Renderer 内部 diagnostic uniform。",
+        )
     if _NESTED_FUNCTION_TOKEN.search(cleaned_body):
         raise LayeredSpecError(
             "forbidden_layer_helper",
@@ -215,6 +222,13 @@ def _parse_layer(
     parsed_canvas, schema, values, tunables = _parse_bindings(
         data, canvas=canvas, author_identity=author_identity
     )
+    if any(
+        declaration.name == _INTERNAL_ROLE_MASK_MODE_UNIFORM for declaration in schema
+    ):
+        raise LayeredSpecError(
+            "reserved_uniform",
+            "u_sg_role_mask_mode 由 Layered Compiler 保留。",
+        )
     layer_hash = compute_layer_sha256(
         layer_id=layer_id,
         role=role,

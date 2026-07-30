@@ -36,6 +36,7 @@ from shaderforge.rendering import PreparedRenderResult
 from shaderforge.uniform_optimization import (
     CoordinateMove,
     CoordinatePatternSession,
+    UniformOptimizationFocusV1,
     UniformOptimizationSummaryV2,
     UniformPatchV1,
 )
@@ -204,6 +205,7 @@ class LayerPlanGlslDirectState(TypedDict, total=False):
     candidate_attested_spec: ShaderProgramSpecV1 | None
     candidate_parent_sha256: str | None
     candidate_patched_layer_id: str | None
+    candidate_optimization_focus: UniformOptimizationFocusV1 | None
     prepared_cache_key: tuple[object, ...] | None
     candidate_cache_hit: bool
     draw_result: PreparedRenderResult | None

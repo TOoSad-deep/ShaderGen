@@ -20,6 +20,7 @@ from agent.app.contracts.layerplan_glsl_direct import (
     decode_reference,
     derive_canvas,
     normalize_author_failure,
+    program_cache_key,
 )
 from agent.app.nodes.layered_direct.authors import (
     ValidatedLayeredIncumbent,
@@ -36,9 +37,31 @@ from agent.app.states.layerplan_glsl_direct import (
     LayerPlanGlslDirectState,
     NodeRoute,
 )
+from shaderforge.evaluation import ROLE_ALPHA_MASK_PASSES, decode_role_alpha_masks
 from shaderforge.layered_spec import LayeredSpecError, apply_layer_patch
 from shaderforge.program_spec import canonical_json
-from shaderforge.uniform_optimization import UniformOptimizationSummaryV2
+from shaderforge.program_spec.models import LayerRole
+from shaderforge.rendering import RendererUnavailableError
+from shaderforge.uniform_optimization import (
+    UniformOptimizationFocusV1,
+    UniformOptimizationSummaryV2,
+)
+
+_FOCUS_SCHEMA_VERSION = "uniform_optimization_focus_v1"
+
+
+def _optimization_focus_from_payload(
+    payload: Any,
+) -> UniformOptimizationFocusV1 | None:
+    """Promote a syntactically safe model sidecar into a trusted value object."""
+    if payload is None:
+        return None
+    try:
+        return UniformOptimizationFocusV1.from_dict(
+            {"schema_version": _FOCUS_SCHEMA_VERSION, **dict(payload)}
+        )
+    except (TypeError, ValueError):
+        return None
 
 
 def _uniform_summary_for_refine(
@@ -46,12 +69,102 @@ def _uniform_summary_for_refine(
     summary: UniformOptimizationSummaryV2 | None,
 ) -> UniformOptimizationSummaryV2 | None:
     """Expose only an optimizer summary bound to the exact incumbent Spec."""
-    if (
-        summary is None
-        or summary.selected_spec_sha256 != current_best.spec.spec_sha256
-    ):
+    if summary is None or summary.selected_spec_sha256 != current_best.spec.spec_sha256:
         return None
     return summary
+
+
+async def _render_role_alpha_masks(
+    state: LayerPlanGlslDirectState,
+    context: DirectGraphContext,
+    current_best: DirectCandidate,
+    ledger: AttemptLedger,
+) -> tuple[dict[LayerRole, bytes], AttemptLedger, list[dict[str, Any]]]:
+    """Best-effort packed role-mask draws from the incumbent prepared program."""
+    updated_ledger = replace(ledger)
+    events = list(state["events"])
+    prepared = context.program_cache.get(program_cache_key(current_best.spec))
+    layer_plan = state.get("layer_plan")
+    if prepared is None or layer_plan is None:
+        return {}, updated_ledger, events
+    planned_roles = {layer.role for layer in layer_plan.layers}
+    remaining = min(
+        2,
+        context.config.role_mask_draw_budget - updated_ledger.role_mask_draw_count,
+        context.config.draw_budget - updated_ledger.draw_count,
+    )
+    if remaining <= 0:
+        return {}, updated_ledger, events
+
+    masks: dict[LayerRole, bytes] = {}
+    for diagnostic_mode, roles in ROLE_ALPHA_MASK_PASSES.items():
+        if remaining <= 0:
+            break
+        if not planned_roles.intersection(roles):
+            continue
+        updated_ledger.draw_count += 1
+        updated_ledger.role_mask_draw_count += 1
+        remaining -= 1
+        started = context.clock()
+        try:
+            draw = await prepared.render_uniforms(
+                dict(current_best.spec.uniform_values),
+                capture_png=False,
+                diagnostic_mode=float(diagnostic_mode),
+            )
+            if not draw.success or draw.rgb_bytes is None:
+                raise ValueError("role mask diagnostic draw failed")
+            decoded = decode_role_alpha_masks(
+                draw.rgb_bytes,
+                draw.width,
+                draw.height,
+                roles,
+            )
+        except RendererUnavailableError as exc:
+            updated_ledger.wall_clock_ms += (context.clock() - started) * 1000.0
+            # A renderer worker reset invalidates every prepared handle, not only
+            # the mask program that observed the failure. Clear the graph cache so
+            # a same-source Refine must prepare a fresh program.
+            await context.release_programs()
+            events.append(
+                {
+                    "sequence": current_best.sequence,
+                    "kind": "role_alpha_mask",
+                    "ok": True,
+                    "available": False,
+                    "diagnostic_mode": diagnostic_mode,
+                    "error_type": type(exc).__name__,
+                }
+            )
+            break
+        except (ValueError, OSError) as exc:
+            updated_ledger.wall_clock_ms += (context.clock() - started) * 1000.0
+            events.append(
+                {
+                    "sequence": current_best.sequence,
+                    "kind": "role_alpha_mask",
+                    "ok": True,
+                    "available": False,
+                    "diagnostic_mode": diagnostic_mode,
+                    "error_type": type(exc).__name__,
+                }
+            )
+            continue
+        updated_ledger.wall_clock_ms += (context.clock() - started) * 1000.0
+        selected = {
+            role: mask for role, mask in decoded.items() if role in planned_roles
+        }
+        masks.update({role: mask.png_bytes for role, mask in selected.items()})
+        events.append(
+            {
+                "sequence": current_best.sequence,
+                "kind": "role_alpha_mask",
+                "ok": True,
+                "diagnostic_mode": diagnostic_mode,
+                "masks": [mask.to_dict() for mask in selected.values()],
+            }
+        )
+    return masks, updated_ledger, events
 
 
 def prepare_reference(
@@ -84,6 +197,7 @@ def prepare_reference(
         "events": [],
         "candidates": [],
         "current_best": None,
+        "candidate_optimization_focus": None,
         "refinement_count": 0,
         "refinement_blocked": False,
         "optimization_policy": runtime.context.optimization_policy,
@@ -232,6 +346,9 @@ async def author_initial(
         "candidate_attested_spec": None,
         "candidate_parent_sha256": None,
         "candidate_patched_layer_id": None,
+        "candidate_optimization_focus": _optimization_focus_from_payload(
+            initial.optimization_focus_payload
+        ),
         "pending_candidate": None,
         "prepared_cache_key": None,
         "candidate_cache_hit": False,
@@ -269,6 +386,12 @@ async def author_refinement(
         current_best,
         state.get("uniform_optimization_summary"),
     )
+    role_alpha_masks, ledger, events = await _render_role_alpha_masks(
+        state,
+        context,
+        current_best,
+        ledger,
+    )
     sequence = state["next_sequence"]
     started = context.clock()
     refine = await run_refine_layered_glsl_author(
@@ -284,6 +407,9 @@ async def author_refinement(
             loss=current_best.loss,
             metrics=dict(current_best.metrics),
             residual_summary=dict(current_best.residual_summary),
+            optimization_focus=current_best.optimization_focus,
+            focused_region_metrics=current_best.focused_region_metrics,
+            role_alpha_masks=role_alpha_masks,
         ),
         layer_plan=layer_plan,
         refinement_index=state["refinement_count"] + 1,
@@ -300,7 +426,6 @@ async def author_refinement(
         call_count=refine.call_count,
     )
     ledger.repair_count += 1 if refine.repaired else 0
-    events = state["events"]
     if refine.patch is None or refine.author_identity is None:
         ledger.rejected_candidates += 1
         events = [
@@ -324,6 +449,9 @@ async def author_refinement(
         "candidate_parent_sha256": current_best.layered_spec.layered_spec_sha256,
         "candidate_patched_layer_id": (
             refine.patch.target_layer_id if refine.patch is not None else None
+        ),
+        "candidate_optimization_focus": _optimization_focus_from_payload(
+            refine.optimization_focus_payload
         ),
         "prepared_cache_key": None,
         "candidate_cache_hit": False,

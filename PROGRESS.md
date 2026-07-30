@@ -20,6 +20,15 @@
 - `tunable_manifest` 已驱动受预算约束的确定性 uniform-only 参数搜索；
   搜索候选沿用完整的真实 WebGL1 验证、证明和评估闭环，候选级非硬失败
   只淘汰当前 probe 并继续有界搜索。
+- Initial/Refine 可附带不进入 Shader/Patch hash 的 `optimization_focus`；
+  可信层按真实 Layered/Program pair 校验目标层与参数分量白名单，无效建议
+  安全回退到既有自动选层。局部 ROI 指标复用同一次 beauty render，不增加
+  draw，且全局 MAE/loss 仍是唯一 `current_best` 接受边界。
+- Layered compiler 已为 Beauty program 注入可信、默认关闭的 role alpha
+  诊断模式；Refine 前可复用 incumbent 的 prepared program，以最多两次
+  有界 draw 输出 subject/highlight/detail 与 shadow/glow/background 的独立
+  alpha mask。Mask 只作为私有多模态 shape/coverage 反馈并绑定输入身份，
+  不进入模型 Shader/Patch 语义、公开 metrics 或 `current_best` 接受边界。
 - 当前公开 Artifact 只有 final-render、metrics、manifest。
 - 成功的私有 Direct attempt 按顺序保留高层 Initial/Refine 渲染图；参数
   搜索试参图不进入该历史，未来只允许保留调优前与最终最优边界快照。

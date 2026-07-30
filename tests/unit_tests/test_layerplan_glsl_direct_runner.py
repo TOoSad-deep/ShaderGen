@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import FrozenInstanceError
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
+from agent.app.config.direct_quality_presets import DIRECT_QUALITY_PRESETS
 from agent.app.nodes.layered_direct.authors import (
     ValidatedLayeredIncumbent,
     _refine_context_sha256,
@@ -22,6 +23,7 @@ from agent.app.services.layerplan_glsl_direct import (
     LayerPlanGlslDirectRunner,
     current_layered_direct_glsl_implementation_identity,
 )
+from shaderforge.rendering import PreparedRenderResult, RendererUnavailableError
 from shaderforge.uniform_optimization import UniformOptimizationSummaryV2
 from tests.direct_fakes import (
     CANVAS,
@@ -31,6 +33,9 @@ from tests.direct_fakes import (
 )
 from tests.direct_fakes import (
     FakeGateway as _FakeGateway,
+)
+from tests.direct_fakes import (
+    FakePrepared as _FakePrepared,
 )
 from tests.direct_fakes import (
     FakeRenderer as _FakeRenderer,
@@ -178,23 +183,21 @@ def test_direct_config_requires_trusted_implementation_identity() -> None:
 
 
 @pytest.mark.parametrize(
-    ("preset", "targets", "refinement_patience"),
-    [
-        ("fast", (0.08, 0.10), 1),
-        ("balanced", (0.06, 0.08), 1),
-        ("high", (0.04, 0.06), 1),
-        ("manual", (0.03, 0.05), 2),
-    ],
+    "preset",
+    ["fast", "balanced", "high", "manual"],
 )
 def test_optimization_policy_owns_quality_target_mapping(
     preset: str,
-    targets: tuple[float, float],
-    refinement_patience: int,
 ) -> None:
+    expected = DIRECT_QUALITY_PRESETS.for_quality_preset(preset).optimization_policy
     policy = DirectOptimizationPolicy.for_quality_preset(preset)
 
-    assert (policy.target_mae, policy.target_loss) == targets
-    assert policy.refinement_patience == refinement_patience
+    assert policy.target_mae == expected.target_mae
+    assert policy.target_loss == expected.target_loss
+    assert policy.min_delta_mae == expected.min_delta_mae
+    assert policy.min_delta_loss == expected.min_delta_loss
+    assert policy.refinement_patience == expected.refinement_patience
+    assert policy.detect_duplicate_patch == expected.detect_duplicate_patch
     assert len(policy.fingerprint()) == 64
     assert (
         policy.fingerprint()
@@ -202,24 +205,33 @@ def test_optimization_policy_owns_quality_target_mapping(
     )
 
 
-def test_direct_config_owns_manual_deep_search_budget_mapping() -> None:
+def test_direct_config_owns_quality_preset_budget_mapping() -> None:
     baseline = LayerPlanGlslDirectConfig(
         implementation_identity_sha256=IMPLEMENTATION_SHA256
     )
 
-    for preset in ("fast", "balanced", "high"):
-        assert baseline.for_quality_preset(preset) is baseline
-
-    manual = baseline.for_quality_preset("manual")
-    assert manual.direct_author_llm_budget == 12
-    assert manual.compile_budget == 10
-    assert manual.draw_budget == 16
-    assert manual.refine_budget == 5
-    assert manual.plan_llm_budget == baseline.plan_llm_budget
-    assert (
-        manual.uniform_tuning_draw_budget == baseline.uniform_tuning_draw_budget
-    )
-    assert manual.fingerprint() != baseline.fingerprint()
+    for preset in ("fast", "balanced", "high", "manual"):
+        expected = DIRECT_QUALITY_PRESETS.for_quality_preset(preset).budgets
+        resolved = baseline.for_quality_preset(preset)
+        assert resolved is not baseline
+        assert resolved.direct_author_llm_budget == expected.direct_author_llm_budget
+        assert resolved.compile_budget == expected.compile_budget
+        assert resolved.draw_budget == expected.draw_budget
+        assert resolved.refine_budget == expected.refine_budget
+        assert resolved.plan_llm_budget == expected.plan_llm_budget
+        assert (
+            resolved.uniform_tuning_draw_budget == expected.uniform_tuning_draw_budget
+        )
+        assert (
+            resolved.uniform_tuning_active_component_cap
+            == expected.uniform_tuning_active_component_cap
+        )
+        assert resolved.uniform_tuning_max_passes == expected.uniform_tuning_max_passes
+        assert resolved.canvas_width == baseline.canvas_width
+        assert resolved.canvas_height == baseline.canvas_height
+        assert resolved.implementation_identity_sha256 == (
+            baseline.implementation_identity_sha256
+        )
 
 
 @pytest.mark.anyio
@@ -247,18 +259,29 @@ async def test_runner_applies_manual_deep_search_profile(
             implementation_identity_sha256=IMPLEMENTATION_SHA256
         ),
         receipt_issuer=_TEST_ISSUER,
+        resolve_quality_preset_budgets=True,
     )
 
     result = await runner.run(_reference_png(), quality_preset="manual")
 
     assert result is expected_result
     context = captured["context"]
-    assert context.config.refine_budget == 5
-    assert context.config.direct_author_llm_budget == 12
-    assert context.config.compile_budget == 10
-    assert context.config.draw_budget == 16
-    assert context.config.uniform_tuning_draw_budget == 4
-    assert context.optimization_policy.refinement_patience == 2
+    expected = DIRECT_QUALITY_PRESETS.for_quality_preset("manual")
+    assert context.config.refine_budget == expected.budgets.refine_budget
+    assert (
+        context.config.direct_author_llm_budget
+        == expected.budgets.direct_author_llm_budget
+    )
+    assert context.config.compile_budget == expected.budgets.compile_budget
+    assert context.config.draw_budget == expected.budgets.draw_budget
+    assert (
+        context.config.uniform_tuning_draw_budget
+        == expected.budgets.uniform_tuning_draw_budget
+    )
+    assert (
+        context.optimization_policy.refinement_patience
+        == expected.optimization_policy.refinement_patience
+    )
 
 
 @pytest.mark.parametrize(
@@ -373,6 +396,115 @@ async def test_refine_prompt_and_identity_bind_safe_uniform_summary() -> None:
         previous_refine_feedback=None,
         uniform_optimization_summary=summary,
     )
+
+
+@pytest.mark.anyio
+async def test_refine_role_alpha_masks_are_ordered_png_diagnostics_and_bind_identity() -> (
+    None
+):
+    reference = _reference_png()
+    initial = await _run(_LayeredFakeGateway(), _FakeRenderer())
+    current_best = initial.current_best
+    layer_plan = initial.layer_plan
+    assert current_best is not None and layer_plan is not None
+    masks = {
+        "shadow": _reference_png(32),
+        "background": _reference_png(64),
+        "highlight": _reference_png(192),
+    }
+    incumbent = ValidatedLayeredIncumbent(
+        layered_spec=current_best.layered_spec,
+        compiled_program_spec=current_best.spec,
+        mae=current_best.mae,
+        loss=current_best.loss,
+        metrics=current_best.metrics,
+        residual_summary=current_best.residual_summary,
+        role_alpha_masks=masks,
+    )
+    gateway = _LayeredFakeGateway(refine_gains=(0.4,))
+
+    refined = await run_refine_layered_glsl_author(
+        gateway=gateway,
+        reference_image=reference,
+        current_render=current_best.png_bytes,
+        incumbent=incumbent,
+        layer_plan=layer_plan,
+        refinement_index=1,
+        remaining_refine_budget=1,
+        previous_refine_feedback=None,
+        uniform_optimization_summary=None,
+        remaining_calls=1,
+    )
+
+    parts = gateway.calls[0]["messages"][1].content
+    labels = [
+        part["text"]
+        for part in parts
+        if isinstance(part, dict)
+        and part.get("type") == "text"
+        and str(part.get("text", "")).startswith("role_alpha_mask_")
+    ]
+    assert labels == [
+        "role_alpha_mask_background：",
+        "role_alpha_mask_highlight：",
+        "role_alpha_mask_shadow：",
+    ]
+    label_positions = [parts.index({"type": "text", "text": label}) for label in labels]
+    assert all(
+        parts[position + 1]["image_url"]["url"].startswith("data:image/png;base64,")
+        for position in label_positions
+    )
+    assert refined.author_identity is not None
+    changed = ValidatedLayeredIncumbent(
+        layered_spec=current_best.layered_spec,
+        compiled_program_spec=current_best.spec,
+        mae=current_best.mae,
+        loss=current_best.loss,
+        metrics=current_best.metrics,
+        residual_summary=current_best.residual_summary,
+        role_alpha_masks={**masks, "shadow": _reference_png(33)},
+    )
+    assert refined.author_identity.input_context_sha256 != _refine_context_sha256(
+        content_type="image/png",
+        current_render=current_best.png_bytes,
+        current_render_content_type="image/png",
+        incumbent=changed,
+        plan=layer_plan,
+        refinement_index=1,
+        remaining_refine_budget=1,
+        previous_refine_feedback=None,
+        uniform_optimization_summary=None,
+    )
+
+
+@pytest.mark.parametrize(
+    "role_alpha_masks",
+    [
+        {"unknown": _reference_png()},
+        {"background": b""},
+        {"background": b"not-a-png"},
+        {
+            "background": _reference_png(),
+            "subject": _reference_png(),
+            "highlight": _reference_png(),
+            "shadow": _reference_png(),
+            "glow": _reference_png(),
+            "detail": _reference_png(),
+            "unknown": _reference_png(),
+        },
+    ],
+)
+def test_refine_role_alpha_masks_reject_invalid_mappings(
+    role_alpha_masks: dict[str, bytes],
+) -> None:
+    with pytest.raises(ValueError, match="role_alpha_masks"):
+        ValidatedLayeredIncumbent(
+            layered_spec=None,  # type: ignore[arg-type]
+            compiled_program_spec=None,  # type: ignore[arg-type]
+            mae=0.0,
+            loss=0.0,
+            role_alpha_masks=role_alpha_masks,  # type: ignore[arg-type]
+        )
 
 
 @pytest.mark.anyio
@@ -507,8 +639,15 @@ async def test_worse_refine_keeps_incumbent_and_closes_program() -> None:
     assert result.direct_ledger.accepted_candidates == 1
     assert result.direct_ledger.rejected_candidates == 1
     assert result.direct_ledger.compile_count == 1
-    assert result.direct_ledger.draw_count == 2
+    assert result.direct_ledger.draw_count == 3
+    assert result.direct_ledger.role_mask_draw_count == 1
     assert result.direct_ledger.cache_hits == 1
+    assert renderer.diagnostic_modes == [0.0, 2.0, 0.0]
+    refine_call = next(call for call in gateway.calls if call["role"] == "refine")
+    assert any(
+        isinstance(part, dict) and part.get("text") == "role_alpha_mask_background："
+        for part in refine_call["messages"][1].content
+    )
     assert renderer.close_count == 1
 
 
@@ -534,6 +673,72 @@ async def test_better_single_layer_refine_replaces_incumbent() -> None:
     assert result.current_best.patched_layer_id == "bg"
     assert result.current_best.spec.uniform_values["u_gain"] == 0.5
     assert result.direct_ledger.accepted_candidates == 2
+
+
+@pytest.mark.anyio
+async def test_mask_worker_reset_evicts_cache_before_same_source_refine() -> None:
+    class MaskResetPrepared(_FakePrepared):
+        async def render_uniforms(
+            self,
+            uniform_values: Any,
+            *,
+            capture_png: bool = False,
+            receipt_spec_sha256: str | None = None,
+            diagnostic_mode: float = 0.0,
+        ) -> PreparedRenderResult:
+            renderer = cast(MaskResetRenderer, self._renderer)
+            if diagnostic_mode != 0.0 and not renderer.mask_failed:
+                renderer.mask_failed = True
+                renderer.diagnostic_modes.append(float(diagnostic_mode))
+                raise RendererUnavailableError("test-only mask worker reset")
+            return await super().render_uniforms(
+                uniform_values,
+                capture_png=capture_png,
+                receipt_spec_sha256=receipt_spec_sha256,
+                diagnostic_mode=diagnostic_mode,
+            )
+
+    class MaskResetRenderer(_FakeRenderer):
+        def __init__(self) -> None:
+            super().__init__()
+            self.mask_failed = False
+
+        async def prepare(
+            self,
+            fragment_source: str,
+            width: int,
+            height: int,
+            uniform_schema: Any,
+        ) -> MaskResetPrepared:
+            self.prepare_calls.append(
+                {
+                    "fragment_source": fragment_source,
+                    "width": width,
+                    "height": height,
+                }
+            )
+            return MaskResetPrepared(self, fragment_source, width, height)
+
+    renderer = MaskResetRenderer()
+    result = await _run(
+        _LayeredFakeGateway(initial_gains=(0.9,), refine_gains=(0.5,)),
+        renderer,
+        LayerPlanGlslDirectConfig(
+            implementation_identity_sha256=IMPLEMENTATION_SHA256,
+            refine_budget=1,
+            uniform_tuning_draw_budget=0,
+        ),
+    )
+
+    assert result.status == "ok"
+    assert result.current_best is not None
+    assert result.current_best.role == "refine"
+    assert result.direct_ledger.compile_count == 2
+    assert result.direct_ledger.cache_hits == 0
+    assert result.direct_ledger.role_mask_draw_count == 1
+    assert renderer.diagnostic_modes == [0.0, 2.0, 0.0]
+    assert len(renderer.prepare_calls) == 2
+    assert renderer.close_count == 2
 
 
 @pytest.mark.anyio

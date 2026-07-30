@@ -9,7 +9,9 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from shaderforge.layered_spec import (
@@ -32,6 +34,13 @@ _PATCH_MAX_CHARS = 50_000
 _FORBIDDEN_TRUSTED_MARKERS = ("attestation", "author_identity")
 _UNIFORM_TYPES = ["float", "vec2", "vec3", "vec4"]
 _UNIFORM_NAME_REGEX = r"^u_[A-Za-z0-9_]+$"
+_LAYER_ID_REGEX = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+_OPTIMIZATION_OBJECTIVES = ("geometry", "color", "edge", "effect")
+_REGION_POLICIES = (
+    "layer_region",
+    "worst_residual_intersection",
+    "full_canvas",
+)
 
 
 class LayeredDirectAuthorParseError(ValueError):
@@ -41,6 +50,14 @@ class LayeredDirectAuthorParseError(ValueError):
         """保存稳定机器错误码."""
         self.code = code
         super().__init__(code)
+
+
+@dataclass(frozen=True)
+class ParsedAuthorOutput:
+    """Validated Author semantics and optional, non-semantic focus advice."""
+
+    semantics: dict[str, Any]
+    optimization_focus_payload: Mapping[str, Any] | None = None
 
 
 def _components_schema() -> dict[str, object]:
@@ -124,6 +141,45 @@ def _layer_schema() -> dict[str, object]:
     }
 
 
+def _optimization_focus_schema() -> dict[str, object]:
+    """Return the JSON Schema for advisory local optimization focus."""
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "target_layer_id",
+            "objective",
+            "active_components",
+            "region_policy",
+        ],
+        "properties": {
+            "target_layer_id": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$",
+            },
+            "objective": {"enum": list(_OPTIMIZATION_OBJECTIVES)},
+            "active_components": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["path", "component_indices"],
+                    "properties": {
+                        "path": {"type": "string", "minLength": 1},
+                        "component_indices": {
+                            "type": "array",
+                            "minItems": 1,
+                            "items": {"type": "integer", "minimum": 0},
+                        },
+                    },
+                },
+            },
+            "region_policy": {"enum": list(_REGION_POLICIES)},
+        },
+    }
+
+
 def _planned_layer_schema(layer: Any) -> dict[str, object]:
     schema = _layer_schema()
     properties = schema["properties"]
@@ -181,6 +237,7 @@ def layered_shader_spec_json_schema(
                 "properties": canvas_properties,
             },
             "layers": layers_schema,
+            "optimization_focus": _optimization_focus_schema(),
         },
     }
 
@@ -203,6 +260,7 @@ def layer_patch_json_schema() -> dict[str, object]:
             "target_layer_id": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"},
             "expected_layer_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
             "replacement": _layer_schema(),
+            "optimization_focus": _optimization_focus_schema(),
         },
     }
 
@@ -276,15 +334,73 @@ def _assert_no_untrusted_patch_fields(value: Any, *, at_root: bool = True) -> No
             _assert_no_untrusted_patch_fields(item, at_root=False)
 
 
+def _valid_non_negative_index(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+
+def _extract_optimization_focus(
+    payload: dict[str, Any],
+) -> Mapping[str, Any] | None:
+    """Strip and normalize focus advice; malformed input becomes None."""
+    candidate = payload.pop("optimization_focus", None)
+    if not isinstance(candidate, Mapping) or set(candidate) != {
+        "target_layer_id",
+        "objective",
+        "active_components",
+        "region_policy",
+    }:
+        return None
+
+    target_layer_id = candidate.get("target_layer_id")
+    objective = candidate.get("objective")
+    active_components = candidate.get("active_components")
+    region_policy = candidate.get("region_policy")
+    if (
+        not isinstance(target_layer_id, str)
+        or _LAYER_ID_REGEX.fullmatch(target_layer_id) is None
+        or objective not in _OPTIMIZATION_OBJECTIVES
+        or region_policy not in _REGION_POLICIES
+        or not isinstance(active_components, list)
+        or not active_components
+    ):
+        return None
+
+    normalized_components: list[dict[str, Any]] = []
+    for component in active_components:
+        if not isinstance(component, Mapping) or set(component) != {
+            "path",
+            "component_indices",
+        }:
+            return None
+        path = component.get("path")
+        indices = component.get("component_indices")
+        if (
+            not isinstance(path, str)
+            or not path
+            or not isinstance(indices, list)
+            or not indices
+            or not all(_valid_non_negative_index(index) for index in indices)
+        ):
+            return None
+        normalized_components.append({"path": path, "component_indices": list(indices)})
+    return {
+        "target_layer_id": target_layer_id,
+        "objective": objective,
+        "active_components": normalized_components,
+        "region_policy": region_policy,
+    }
+
+
 def parse_layered_shader_spec_semantics(
     text: str, *, layer_plan: LayerPlanV1
-) -> dict[str, Any]:
+) -> ParsedAuthorOutput:
     """解析 Initial JSON，并以 probe identity 验证领域语义."""
     payload = _load_object(
         text,
         max_chars=_INITIAL_MAX_CHARS,
         error_code="invalid_layered_shader_spec_json",
     )
+    optimization_focus_payload = _extract_optimization_focus(payload)
     _assert_no_untrusted_initial_fields(payload)
     probe_identity = build_author_identity(
         reference_sha256=layer_plan.reference_sha256,
@@ -305,20 +421,21 @@ def parse_layered_shader_spec_semantics(
         raise LayeredDirectAuthorParseError(
             f"invalid_layered_shader_spec_{exc.code}"
         ) from exc
-    return payload
+    return ParsedAuthorOutput(payload, optimization_focus_payload)
 
 
-def parse_layer_patch_semantics(text: str) -> dict[str, Any]:
+def parse_layer_patch_semantics(text: str) -> ParsedAuthorOutput:
     """解析 Refine JSON；base/expected hash 留给 Patch 应用时可信验证."""
     payload = _load_object(
         text, max_chars=_PATCH_MAX_CHARS, error_code="invalid_layer_patch_json"
     )
+    optimization_focus_payload = _extract_optimization_focus(payload)
     _assert_no_untrusted_patch_fields(payload)
     try:
         build_layer_patch(payload)
     except LayeredSpecError as exc:
         raise LayeredDirectAuthorParseError(f"invalid_layer_patch_{exc.code}") from exc
-    return payload
+    return ParsedAuthorOutput(payload, optimization_focus_payload)
 
 
 def assemble_layered_shader_spec(
@@ -342,6 +459,7 @@ __all__ = [
     "LayerPatchV1",
     "LayeredDirectAuthorParseError",
     "LayeredShaderSpecV1",
+    "ParsedAuthorOutput",
     "assemble_layer_patch",
     "assemble_layered_shader_spec",
     "layer_patch_json_schema",

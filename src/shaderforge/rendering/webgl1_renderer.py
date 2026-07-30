@@ -43,7 +43,9 @@ PREPARED_RENDERER_PATH = "prepared_uniforms_v1"
 PNG_DATA_URL_PREFIX = "data:image/png;base64,"
 _UNIFORM_NAME_PATTERN = re.compile(r"^u_[A-Za-z0-9_]+$")
 _UNIFORM_TYPES = frozenset({"float", "vec2", "vec3", "vec4"})
-_RESERVED_UNIFORMS = frozenset({"u_image", "u_resolution", "u_time"})
+_RESERVED_UNIFORMS = frozenset(
+    {"u_image", "u_resolution", "u_time", "u_sg_role_mask_mode"}
+)
 
 VERTEX_SHADER = """
 attribute vec2 a_position;
@@ -224,6 +226,7 @@ void main() {
       if (resolution !== null) gl.uniform2f(resolution, payload.width, payload.height);
       const time = gl.getUniformLocation(program, "u_time");
       if (time !== null) gl.uniform1f(time, 0.0);
+      const roleMaskMode = gl.getUniformLocation(program, "u_sg_role_mask_mode");
       const preparedId = String(nextPreparedId++);
       preparedPrograms.set(preparedId, {
         canvas,
@@ -233,6 +236,7 @@ void main() {
         fragmentShader: fragment.shader,
         buffer,
         uniformLocations,
+        roleMaskMode,
         uniformSchema: payload.uniformSchema,
         width: payload.width,
         height: payload.height,
@@ -266,7 +270,7 @@ void main() {
     if (!prepared) {
       return {success: false, drawError: "prepared program unavailable", rgb: null, dataUrl: null};
     }
-    const {canvas, gl, program, uniformLocations, uniformSchema, width, height} = prepared;
+    const {canvas, gl, program, uniformLocations, roleMaskMode, uniformSchema, width, height} = prepared;
     gl.useProgram(program);
     for (const [name, type] of Object.entries(uniformSchema)) {
       const value = payload.uniformValues[name];
@@ -276,6 +280,7 @@ void main() {
       if (type === "vec3") gl.uniform3f(location, value[0], value[1], value[2]);
       if (type === "vec4") gl.uniform4f(location, value[0], value[1], value[2], value[3]);
     }
+    if (roleMaskMode !== null) gl.uniform1f(roleMaskMode, payload.diagnosticMode);
     gl.viewport(0, 0, width, height);
     gl.clearColor(1.0, 1.0, 1.0, 1.0);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -416,6 +421,8 @@ void main() {
           if (resolution !== null) gl.uniform2f(resolution, payload.width, payload.height);
           const time = gl.getUniformLocation(program, "u_time");
           if (time !== null) gl.uniform1f(time, 0.0);
+          const roleMaskMode = gl.getUniformLocation(program, "u_sg_role_mask_mode");
+          if (roleMaskMode !== null) gl.uniform1f(roleMaskMode, 0.0);
 
           gl.viewport(0, 0, payload.width, payload.height);
           gl.clearColor(1.0, 1.0, 1.0, 1.0);
@@ -530,9 +537,7 @@ class PlaywrightWebGL1Renderer:
         *,
         contract: RenderContract = WEBGL1_STATIC_NO_TEXTURE_V1,
         replay_on_worker_failure: int = 1,
-        prepare_timeout_ms: float = (
-            RUNTIME_TIMEOUTS.renderer.prepare_seconds * 1000
-        ),
+        prepare_timeout_ms: float = (RUNTIME_TIMEOUTS.renderer.prepare_seconds * 1000),
         draw_timeout_ms: float = RUNTIME_TIMEOUTS.renderer.draw_seconds * 1000,
     ) -> None:
         """配置渲染契约、worker 失败重放次数与 prepare/draw 有界超时."""
@@ -978,18 +983,30 @@ class PreparedWebGL1Renderer:
         *,
         capture_png: bool = False,
         receipt_spec_sha256: str | None = None,
+        diagnostic_mode: float = 0.0,
     ) -> PreparedRenderResult:
         """上传完整 typed uniform 值集并绘制；默认只返回原始 RGB.
 
         成功 draw 后由可信 issuer 就地签发 ``ExecutionReceipt``（绑定源码
         哈希、RGB/PNG 像素哈希与 renderer/GL 运行身份）；``receipt_spec_sha256``
         是调用方声明的 Spec 绑定，match 阶段会与 Spec 重算核对。draw 超过
-        有界超时即重置 worker 并抛 ``RendererUnavailableError``。
+        有界超时即重置 worker 并抛 ``RendererUnavailableError``。非零
+        ``diagnostic_mode`` 与回执请求互斥，避免 mask 像素被证明为 Beauty
+        Render。
         """
         if self._closed:
             raise RendererUnavailableError("prepared renderer 已关闭。")
         if not isinstance(capture_png, bool):
             raise ValueError("capture_png 必须是 bool。")
+        if (
+            isinstance(diagnostic_mode, bool)
+            or not isinstance(diagnostic_mode, (int, float))
+            or not math.isfinite(diagnostic_mode)
+            or float(diagnostic_mode) not in {0.0, 1.0, 2.0}
+        ):
+            raise ValueError("diagnostic_mode 必须是 0.0、1.0 或 2.0。")
+        if float(diagnostic_mode) != 0.0 and receipt_spec_sha256 is not None:
+            raise ValueError("诊断绘制不得签发 Beauty Render execution receipt。")
         if not isinstance(uniform_values, Mapping):
             raise ValueError("uniform_values 必须是 mapping。")
         values = _validate_uniform_values(self.uniform_schema, uniform_values)
@@ -1006,6 +1023,7 @@ class PreparedWebGL1Renderer:
                         "preparedId": self._prepared_id,
                         "uniformValues": values,
                         "capturePng": capture_png,
+                        "diagnosticMode": float(diagnostic_mode),
                     },
                 ),
                 timeout=self._owner.draw_timeout_ms / 1000.0,

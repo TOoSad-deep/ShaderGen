@@ -9,6 +9,8 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    "agent/app/config/direct_quality_presets.py",
+    "agent/app/config/direct_quality_presets.yaml",
     "agent/app/contracts/layer_plan.py",
     "agent/app/contracts/layerplan_glsl_direct.py",
     "agent/app/graphs/layerplan_glsl_direct.py",

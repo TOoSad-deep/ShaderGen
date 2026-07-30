@@ -27,6 +27,7 @@ from shaderforge.uniform_optimization import (
     record_coordinate_failure,
     record_coordinate_outcome,
     start_coordinate_pattern_session,
+    validate_uniform_optimization_focus,
 )
 
 _GEOMETRY_METRICS = frozenset({"geometry_mask_loss", "edge_loss"})
@@ -90,6 +91,15 @@ def _select_target_components(
     best = state.get("current_best")
     if plan is None or best is None or not components:
         return ()
+    focus = getattr(best, "optimization_focus", None)
+    if focus is not None:
+        validation = validate_uniform_optimization_focus(
+            focus,
+            best.layered_spec,
+            best.spec,
+        )
+        if validation.is_valid:
+            return validation.components
     feasible = {component.layer_id for component in components}
     planned = [
         (index, layer)
@@ -231,7 +241,10 @@ def decide_uniform_optimization(
                 state, source_sha256
             ),
         }
-    if state.get("refinement_blocked", False) or ledger.draw_count >= config.draw_budget:
+    if (
+        state.get("refinement_blocked", False)
+        or ledger.draw_count >= config.draw_budget
+    ):
         previous_reason = state.get("uniform_tuning_stop_reason")
         blocked_reason = (
             previous_reason
@@ -248,9 +261,7 @@ def decide_uniform_optimization(
             "uniform_release_requested": True,
             "uniform_tuning_stop_reason": blocked_reason,
             "refinement_stop_reason": "hard_resource_block",
-            "uniform_optimization_summary": _summary(
-                state, stop_reason=blocked_reason
-            ),
+            "uniform_optimization_summary": _summary(state, stop_reason=blocked_reason),
             "uniform_optimized_source_sha256s": _completed_sources(
                 state, source_sha256
             ),
@@ -517,6 +528,7 @@ def apply_uniform_candidate(
         "candidate_attested_spec": None,
         "candidate_parent_sha256": best.layered_spec.layered_spec_sha256,
         "candidate_patched_layer_id": patch.target_layer_id,
+        "candidate_optimization_focus": getattr(best, "optimization_focus", None),
         "pending_candidate": None,
         "prepared_cache_key": None,
         "candidate_cache_hit": False,

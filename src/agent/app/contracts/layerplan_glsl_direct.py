@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass, field, replace
 from hashlib import sha256
 from io import BytesIO
 from math import isfinite
@@ -13,12 +13,28 @@ from typing import Any, Literal, Protocol
 import numpy as np
 from PIL import Image, UnidentifiedImageError
 
+from agent.app.config.direct_quality_presets import DIRECT_QUALITY_PRESETS
 from agent.app.contracts.layer_plan import LayerPlanV1
-from shaderforge.evaluation import MIN_SCENE_METRIC_VERSION
+from shaderforge.evaluation import MIN_SCENE_METRIC_VERSION, FocusedRegionMetricsV1
 from shaderforge.layered_spec import LayeredShaderSpecV1
 from shaderforge.program_spec import ShaderProgramSpecV1, canonical_json
 from shaderforge.rendering import CompileResult, PreparedRenderResult
-from shaderforge.uniform_optimization import UniformOptimizationSummaryV2
+from shaderforge.uniform_optimization import (
+    UniformOptimizationFocusV1,
+    UniformOptimizationSummaryV2,
+)
+
+QUALITY_TARGETS: Mapping[str, tuple[float, float]] = {
+    name: (
+        preset.optimization_policy.target_mae,
+        preset.optimization_policy.target_loss,
+    )
+    for name, preset in DIRECT_QUALITY_PRESETS.presets.items()
+}
+_DEFAULT_OPTIMIZATION_POLICY = DIRECT_QUALITY_PRESETS.for_quality_preset(
+    "balanced"
+).optimization_policy
+_DEFAULT_ATTEMPT_BUDGETS = DIRECT_QUALITY_PRESETS.for_quality_preset("balanced").budgets
 
 DIRECT_ATTEMPT_RESULT_SCHEMA_VERSION = "direct_glsl_attempt_result_v2"
 DIRECT_ENGINE_ID = "direct_glsl_layerplan_v1"
@@ -27,7 +43,7 @@ DIRECT_HIGH_LEVEL_CANDIDATE_PROVENANCE = "model_generated_layered_direct_glsl"
 DIRECT_UNIFORM_CANDIDATE_PROVENANCE = "trusted_uniform_optimization"
 LAYERED_AUTHORING_REPRESENTATION = "layered_shader_spec_v1"
 LAYERED_IMPLEMENTATION_IDENTITY_SCHEMA_VERSION = "direct_layered_glsl_implementation_v2"
-LAYERED_PARSER_POLICY_VERSION = "direct_layered_author_parser_v2"
+LAYERED_PARSER_POLICY_VERSION = "direct_layered_author_parser_v3"
 RENDERER_DEFERRED_SAFETY_CODES = frozenset(
     {
         "too_many_uniforms",
@@ -66,26 +82,6 @@ TERMINAL_REFINEMENT_FAILURE_CODES = frozenset(
         "renderer_unavailable",
     }
 )
-QUALITY_TARGETS: Mapping[str, tuple[float, float]] = {
-    "fast": (0.08, 0.10),
-    "balanced": (0.06, 0.08),
-    "high": (0.04, 0.06),
-    "manual": (0.03, 0.05),
-}
-QUALITY_REFINEMENT_PATIENCE: Mapping[str, int] = {
-    "fast": 1,
-    "balanced": 1,
-    "high": 1,
-    "manual": 2,
-}
-QUALITY_BUDGET_OVERRIDES: Mapping[str, Mapping[str, int]] = {
-    "manual": {
-        "direct_author_llm_budget": 12,
-        "compile_budget": 10,
-        "draw_budget": 16,
-        "refine_budget": 5,
-    }
-}
 DIRECT_OPTIMIZATION_POLICY_SCHEMA_VERSION = "direct_optimization_policy_v2"
 REFINE_FEEDBACK_METRICS = frozenset(
     {
@@ -95,6 +91,10 @@ REFINE_FEEDBACK_METRICS = frozenset(
         "geometry_mask_loss",
         "edge_loss",
         "worst_tile_mae",
+        "focused_roi_mae",
+        "focused_roi_geometry_mask_loss",
+        "focused_roi_edge_loss",
+        "focused_outside_roi_mae",
     }
 )
 MAX_REFINE_STATIC_VIOLATIONS = 16
@@ -128,8 +128,9 @@ class DirectPreparedRenderer(Protocol):
         *,
         capture_png: bool = False,
         receipt_spec_sha256: str | None = None,
+        diagnostic_mode: float = 0.0,
     ) -> PreparedRenderResult:
-        """Draw one uniform binding and optionally capture a PNG."""
+        """Draw one uniform binding; diagnostic draws cannot issue receipts."""
         ...
 
     async def close(self) -> None:
@@ -180,6 +181,7 @@ class AttemptLedger:
     uniform_tuning_duplicate_count: int = 0
     uniform_tuning_session_count: int = 0
     uniform_tuning_active_component_count: int = 0
+    role_mask_draw_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -187,21 +189,23 @@ class DirectOptimizationPolicy:
     """Per-run quality targets and bounded Refine convergence controls."""
 
     quality_preset: Literal["fast", "balanced", "high", "manual"] = "balanced"
-    target_mae: float = 0.06
-    target_loss: float = 0.08
-    min_delta_loss: float = 0.001
-    min_delta_mae: float = 0.001
-    refinement_patience: int = 1
-    detect_duplicate_patch: bool = True
+    target_mae: float = _DEFAULT_OPTIMIZATION_POLICY.target_mae
+    target_loss: float = _DEFAULT_OPTIMIZATION_POLICY.target_loss
+    min_delta_loss: float = _DEFAULT_OPTIMIZATION_POLICY.min_delta_loss
+    min_delta_mae: float = _DEFAULT_OPTIMIZATION_POLICY.min_delta_mae
+    refinement_patience: int = _DEFAULT_OPTIMIZATION_POLICY.refinement_patience
+    detect_duplicate_patch: bool = _DEFAULT_OPTIMIZATION_POLICY.detect_duplicate_patch
     schema_version: str = DIRECT_OPTIMIZATION_POLICY_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
         """Fail closed on incoherent or non-finite optimization controls."""
         if self.schema_version != DIRECT_OPTIMIZATION_POLICY_SCHEMA_VERSION:
             raise ValueError("optimization policy schema_version is unsupported")
-        if self.quality_preset not in QUALITY_TARGETS:
-            raise ValueError("quality_preset is unsupported")
-        expected_targets = QUALITY_TARGETS[self.quality_preset]
+        preset = DIRECT_QUALITY_PRESETS.for_quality_preset(self.quality_preset)
+        expected_targets = (
+            preset.optimization_policy.target_mae,
+            preset.optimization_policy.target_loss,
+        )
         if (self.target_mae, self.target_loss) != expected_targets:
             raise ValueError("quality targets must match the selected preset")
         for name in (
@@ -230,15 +234,16 @@ class DirectOptimizationPolicy:
         quality_preset: Literal["fast", "balanced", "high", "manual"] | str,
     ) -> DirectOptimizationPolicy:
         """Resolve the single canonical preset-to-target mapping."""
-        try:
-            target_mae, target_loss = QUALITY_TARGETS[quality_preset]
-        except KeyError as exc:
-            raise ValueError("quality_preset is unsupported") from exc
+        preset = DIRECT_QUALITY_PRESETS.for_quality_preset(quality_preset)
+        policy = preset.optimization_policy
         return cls(
             quality_preset=quality_preset,  # type: ignore[arg-type]
-            target_mae=target_mae,
-            target_loss=target_loss,
-            refinement_patience=QUALITY_REFINEMENT_PATIENCE[quality_preset],
+            target_mae=policy.target_mae,
+            target_loss=policy.target_loss,
+            min_delta_mae=policy.min_delta_mae,
+            min_delta_loss=policy.min_delta_loss,
+            refinement_patience=policy.refinement_patience,
+            detect_duplicate_patch=policy.detect_duplicate_patch,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -383,25 +388,34 @@ class LayerPlanGlslDirectConfig:
     """Frozen budgets and implementation identity for one direct attempt."""
 
     implementation_identity_sha256: str
-    direct_author_llm_budget: int = 8
-    compile_budget: int = 8
-    draw_budget: int = 8
-    refine_budget: int = 2
-    plan_llm_budget: int = 2
-    uniform_tuning_draw_budget: int = 4
-    uniform_tuning_active_component_cap: int = 8
-    uniform_tuning_max_passes: int = 1
+    direct_author_llm_budget: int = _DEFAULT_ATTEMPT_BUDGETS.direct_author_llm_budget
+    compile_budget: int = _DEFAULT_ATTEMPT_BUDGETS.compile_budget
+    draw_budget: int = _DEFAULT_ATTEMPT_BUDGETS.draw_budget
+    refine_budget: int = _DEFAULT_ATTEMPT_BUDGETS.refine_budget
+    plan_llm_budget: int = _DEFAULT_ATTEMPT_BUDGETS.plan_llm_budget
+    uniform_tuning_draw_budget: int = (
+        _DEFAULT_ATTEMPT_BUDGETS.uniform_tuning_draw_budget
+    )
+    uniform_tuning_active_component_cap: int = (
+        _DEFAULT_ATTEMPT_BUDGETS.uniform_tuning_active_component_cap
+    )
+    uniform_tuning_max_passes: int = _DEFAULT_ATTEMPT_BUDGETS.uniform_tuning_max_passes
     canvas_width: int | None = None
     canvas_height: int | None = None
 
     def for_quality_preset(self, quality_preset: str) -> LayerPlanGlslDirectConfig:
         """Resolve attempt budgets owned by one quality preset."""
-        if quality_preset not in QUALITY_TARGETS:
-            raise ValueError("quality_preset is unsupported")
-        overrides = QUALITY_BUDGET_OVERRIDES.get(quality_preset)
-        if not overrides:
-            return self
-        return replace(self, **overrides)
+        preset = DIRECT_QUALITY_PRESETS.for_quality_preset(quality_preset)
+        return replace(self, **asdict(preset.budgets))
+
+    @property
+    def role_mask_draw_budget(self) -> int:
+        """Return draw capacity reserved beyond candidates and uniform search."""
+        structural_draws = 1 + self.refine_budget
+        return max(
+            0,
+            self.draw_budget - structural_draws - self.uniform_tuning_draw_budget,
+        )
 
     def __post_init__(self) -> None:
         """Fail closed on invalid attempt budgets, canvas or identity."""
@@ -507,6 +521,7 @@ class DirectLedger:
     uniform_tuning_duplicate_count: int
     uniform_tuning_session_count: int
     uniform_tuning_active_component_count: int
+    role_mask_draw_count: int
 
     @classmethod
     def from_mutable(cls, ledger: AttemptLedger) -> DirectLedger:
@@ -529,6 +544,7 @@ class DirectLedger:
             uniform_tuning_active_component_count=(
                 ledger.uniform_tuning_active_component_count
             ),
+            role_mask_draw_count=ledger.role_mask_draw_count,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -551,6 +567,7 @@ class DirectLedger:
             "uniform_tuning_active_component_count": (
                 self.uniform_tuning_active_component_count
             ),
+            "role_mask_draw_count": self.role_mask_draw_count,
         }
 
 
@@ -592,6 +609,8 @@ class DirectCandidate:
     parent_layered_spec_sha256: str | None
     patched_layer_id: str | None
     provenance: str = DIRECT_HIGH_LEVEL_CANDIDATE_PROVENANCE
+    optimization_focus: UniformOptimizationFocusV1 | None = None
+    focused_region_metrics: FocusedRegionMetricsV1 | None = None
 
 
 @dataclass(frozen=True)

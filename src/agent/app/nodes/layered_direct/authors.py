@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from hashlib import sha256
+from types import MappingProxyType
 from typing import Any
 
 from langchain_core.messages import SystemMessage
@@ -16,6 +17,7 @@ from langchain_core.messages import SystemMessage
 from agent.app.contracts.layered_direct_glsl import (
     LayeredShaderSpecV1,
     LayerPatchV1,
+    ParsedAuthorOutput,
     assemble_layer_patch,
     assemble_layered_shader_spec,
     layer_patch_json_schema,
@@ -35,6 +37,7 @@ from agent.app.nodes.layered_direct.structured_author import (
     invoke_structured_author,
 )
 from agent.app.prompts.prompt_loader import load_prompt_definition
+from shaderforge.evaluation import FocusedRegionMetricsV1
 from shaderforge.layered_spec import LayeredSpecError
 from shaderforge.program_spec import (
     AuthorIdentity,
@@ -44,7 +47,11 @@ from shaderforge.program_spec import (
     canonical_json,
     sha256_hex_text,
 )
-from shaderforge.uniform_optimization import UniformOptimizationSummaryV2
+from shaderforge.program_spec.models import LayerRole
+from shaderforge.uniform_optimization import (
+    UniformOptimizationFocusV1,
+    UniformOptimizationSummaryV2,
+)
 
 DIRECT_LAYERED_INITIAL_PROMPT = load_prompt_definition("direct_layered_initial_v1")
 DIRECT_LAYERED_REFINE_PROMPT = load_prompt_definition("direct_layered_refine_v1")
@@ -53,7 +60,16 @@ DEFAULT_LAYERED_INITIAL_MAX_OUTPUT_TOKENS = 8192
 DEFAULT_LAYER_PATCH_MAX_OUTPUT_TOKENS = 4096
 AUTHOR_IDENTITY_UNAVAILABLE = "author_identity_unavailable"
 _INPUT_CONTEXT_VERSION = "direct_layered_author_input_context_v1"
-_REFINE_INPUT_CONTEXT_VERSION = "direct_layered_author_refine_input_context_v2"
+_REFINE_INPUT_CONTEXT_VERSION = "direct_layered_author_refine_input_context_v4"
+_CANONICAL_LAYER_ROLES: tuple[LayerRole, ...] = (
+    "background",
+    "subject",
+    "highlight",
+    "shadow",
+    "glow",
+    "detail",
+)
+_PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 @dataclass(frozen=True)
@@ -64,8 +80,30 @@ class ValidatedLayeredIncumbent:
     compiled_program_spec: ShaderProgramSpecV1
     mae: float
     loss: float
-    metrics: Mapping[str, float] = field(default_factory=dict)
+    metrics: Mapping[str, Any] = field(default_factory=dict)
     residual_summary: Mapping[str, Any] = field(default_factory=dict)
+    optimization_focus: UniformOptimizationFocusV1 | None = None
+    focused_region_metrics: FocusedRegionMetricsV1 | None = None
+    role_alpha_masks: Mapping[LayerRole, bytes] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Freeze a small, canonical set of trusted role-alpha diagnostics."""
+        masks = self.role_alpha_masks
+        if not isinstance(masks, Mapping) or len(masks) > len(_CANONICAL_LAYER_ROLES):
+            raise ValueError(
+                "role_alpha_masks must contain at most six canonical roles"
+            )
+        normalized: dict[LayerRole, bytes] = {}
+        for role in _CANONICAL_LAYER_ROLES:
+            if role not in masks:
+                continue
+            image = masks[role]
+            if not isinstance(image, bytes) or not image.startswith(_PNG_SIGNATURE):
+                raise ValueError("role_alpha_masks values must be non-empty PNG bytes")
+            normalized[role] = image
+        if len(normalized) != len(masks):
+            raise ValueError("role_alpha_masks keys must be canonical layer roles")
+        object.__setattr__(self, "role_alpha_masks", MappingProxyType(normalized))
 
 
 @dataclass(frozen=True)
@@ -79,6 +117,7 @@ class InitialLayeredAuthorResult:
     repaired: bool = False
     latency_ms: int = 0
     total_tokens: int | None = None
+    optimization_focus_payload: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -95,6 +134,7 @@ class RefineLayeredAuthorResult:
     repaired: bool = False
     latency_ms: int = 0
     total_tokens: int | None = None
+    optimization_focus_payload: Mapping[str, Any] | None = None
 
 
 def _effective_identity(
@@ -174,6 +214,20 @@ def _refine_context_sha256(
                     if uniform_optimization_summary is not None
                     else None
                 ),
+                "optimization_focus": (
+                    incumbent.optimization_focus.to_dict()
+                    if incumbent.optimization_focus is not None
+                    else None
+                ),
+                "focused_region_metrics": (
+                    incumbent.focused_region_metrics.to_dict()
+                    if incumbent.focused_region_metrics is not None
+                    else None
+                ),
+                "role_alpha_masks": [
+                    {"role": role, "sha256": sha256(image).hexdigest()}
+                    for role, image in incumbent.role_alpha_masks.items()
+                ],
             }
         )
     )
@@ -261,9 +315,11 @@ async def run_initial_layered_glsl_author(
         repair_hints_builder=lambda _error: repair_hints,
     )
     layered_spec: LayeredShaderSpecV1 | None = None
+    optimization_focus_payload: Mapping[str, Any] | None = None
     error_code = result.error_code
     identity = _effective_identity(result)
-    if isinstance(result.value, dict):
+    if isinstance(result.value, ParsedAuthorOutput):
+        optimization_focus_payload = result.value.optimization_focus_payload
         if identity is None:
             error_code = AUTHOR_IDENTITY_UNAVAILABLE
         else:
@@ -282,7 +338,9 @@ async def run_initial_layered_glsl_author(
                     repair_context_sha256=result.repair_context_sha256,
                 )
                 layered_spec = assemble_layered_shader_spec(
-                    result.value, layer_plan=layer_plan, author_identity=author_identity
+                    result.value.semantics,
+                    layer_plan=layer_plan,
+                    author_identity=author_identity,
                 )
             except LayeredSpecError:
                 error_code = "author_output_invalid"
@@ -296,6 +354,7 @@ async def run_initial_layered_glsl_author(
         result.repaired,
         result.latency_ms,
         result.total_tokens,
+        optimization_focus_payload,
     )
 
 
@@ -342,6 +401,16 @@ async def run_refine_layered_glsl_author(
                     if uniform_optimization_summary is not None
                     else None
                 ),
+                "optimization_focus": (
+                    incumbent.optimization_focus.to_dict()
+                    if incumbent.optimization_focus is not None
+                    else None
+                ),
+                "focused_region_metrics": (
+                    incumbent.focused_region_metrics.to_dict()
+                    if incumbent.focused_region_metrics is not None
+                    else None
+                ),
             },
         ),
         text_part("expected_json_schema", schema),
@@ -349,6 +418,13 @@ async def run_refine_layered_glsl_author(
         *labeled_image_parts(
             "current_render", current_render, current_render_content_type
         ),
+        *[
+            part
+            for role, image in incumbent.role_alpha_masks.items()
+            for part in labeled_image_parts(
+                f"role_alpha_mask_{role}", image, "image/png"
+            )
+        ],
     ]
     result = await invoke_structured_author(
         gateway=gateway,
@@ -365,14 +441,16 @@ async def run_refine_layered_glsl_author(
     )
     patch: LayerPatchV1 | None = None
     author_identity: AuthorIdentity | None = None
+    optimization_focus_payload: Mapping[str, Any] | None = None
     error_code = result.error_code
     identity = _effective_identity(result)
-    if isinstance(result.value, dict):
+    if isinstance(result.value, ParsedAuthorOutput):
+        optimization_focus_payload = result.value.optimization_focus_payload
         if identity is None:
             error_code = AUTHOR_IDENTITY_UNAVAILABLE
         else:
             try:
-                patch = assemble_layer_patch(result.value)
+                patch = assemble_layer_patch(result.value.semantics)
                 author_identity = _author_identity(
                     identity=identity,
                     reference_image=reference_image,
@@ -416,6 +494,7 @@ async def run_refine_layered_glsl_author(
         result.repaired,
         result.latency_ms,
         result.total_tokens,
+        optimization_focus_payload,
     )
 
 

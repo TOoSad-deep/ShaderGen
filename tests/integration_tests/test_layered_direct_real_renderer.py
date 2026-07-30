@@ -113,6 +113,10 @@ async def test_layered_spec_compiles_and_draws_on_real_webgl1() -> None:
             capture_png=True,
             receipt_spec_sha256=spec.spec_sha256,
         )
+        mask_result = await prepared.render_uniforms(
+            dict(spec.uniform_values),
+            diagnostic_mode=2.0,
+        )
         await prepared.close()
 
     assert result.success, result.draw_error
@@ -121,6 +125,10 @@ async def test_layered_spec_compiles_and_draws_on_real_webgl1() -> None:
     assert len(result.rgb_bytes) == CANVAS * CANVAS * 3
     assert result.image_bytes is not None
     assert result.execution_receipt is not None
+    assert mask_result.success, mask_result.draw_error
+    assert mask_result.rgb_bytes is not None
+    assert mask_result.rgb_bytes[:3] == bytes((0, 0, 255))
+    assert mask_result.execution_receipt is None
 
 
 @pytest.mark.anyio

@@ -143,6 +143,7 @@ class LayerPlanGlslDirectRunner:
         config: LayerPlanGlslDirectConfig,
         clock: Callable[[], float] = time.perf_counter,
         receipt_issuer: TrustedReceiptVerifier | None = None,
+        resolve_quality_preset_budgets: bool = False,
     ) -> None:
         """Inject attempt-local gateway, renderer, budgets and trust root."""
         self._config = config
@@ -150,6 +151,7 @@ class LayerPlanGlslDirectRunner:
         self._renderer = renderer
         self._clock = clock
         self._receipt_issuer = receipt_issuer or process_receipt_verifier()
+        self._resolve_quality_preset_budgets = resolve_quality_preset_budgets
 
     async def run(
         self,
@@ -166,6 +168,11 @@ class LayerPlanGlslDirectRunner:
             run_layerplan_glsl_direct_graph,
         )
 
+        config = (
+            self._config.for_quality_preset(quality_preset)
+            if self._resolve_quality_preset_budgets
+            else self._config
+        )
         output = await run_layerplan_glsl_direct_graph(
             reference_image=reference_image,
             content_type=content_type,
@@ -173,7 +180,7 @@ class LayerPlanGlslDirectRunner:
             context=DirectGraphContext(
                 gateway=self._gateway,
                 renderer=self._renderer,
-                config=self._config.for_quality_preset(quality_preset),
+                config=config,
                 optimization_policy=DirectOptimizationPolicy.for_quality_preset(
                     quality_preset
                 ),
@@ -195,6 +202,7 @@ class OwnedLayerPlanGlslDirectRunner:
             gateway=LangChainLLMGateway(),
             renderer=self._renderer,
             config=config,
+            resolve_quality_preset_budgets=True,
         )
 
     async def run(

@@ -36,6 +36,7 @@ from agent.app.states.layerplan_glsl_direct import (
 )
 from shaderforge.evaluation import (
     dominant_metric_component,
+    evaluate_focused_region,
     evaluate_min_scene,
     summarize_spatial_residual,
 )
@@ -47,6 +48,7 @@ from shaderforge.program_spec import (
     issue_attestation,
 )
 from shaderforge.rendering import RendererUnavailableError, ShaderPreparationError
+from shaderforge.uniform_optimization import validate_uniform_optimization_focus
 from shaderforge.validation import validate_program_spec_safety
 
 
@@ -494,6 +496,63 @@ def route_after_attestation(state: LayerPlanGlslDirectState) -> NodeRoute:
     )
 
 
+def _focused_uv_bbox(
+    state: LayerPlanGlslDirectState,
+    *,
+    target_layer_id: str,
+    region_policy: str,
+    residual: dict[str, Any],
+) -> dict[str, float] | None:
+    """Resolve one trusted focus policy into bottom-left WebGL UV coordinates."""
+    if region_policy == "full_canvas":
+        return {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0}
+    plan = state.get("layer_plan")
+    layer = (
+        next(
+            (item for item in plan.layers if item.layer_id == target_layer_id),
+            None,
+        )
+        if plan is not None
+        else None
+    )
+    if layer is None:
+        return None
+    layer_bbox = {
+        "x": float(layer.region.x),
+        "y": float(layer.region.y),
+        "width": float(layer.region.width),
+        "height": float(layer.region.height),
+    }
+    if region_policy != "worst_residual_intersection":
+        return layer_bbox
+    worst_tiles = residual.get("worst_tiles")
+    tile_bbox = (
+        worst_tiles[0].get("uv_bbox")
+        if isinstance(worst_tiles, list)
+        and worst_tiles
+        and isinstance(worst_tiles[0], dict)
+        else None
+    )
+    if not isinstance(tile_bbox, dict):
+        return layer_bbox
+    try:
+        x0 = max(layer_bbox["x"], float(tile_bbox["x"]))
+        y0 = max(layer_bbox["y"], float(tile_bbox["y"]))
+        x1 = min(
+            layer_bbox["x"] + layer_bbox["width"],
+            float(tile_bbox["x"]) + float(tile_bbox["width"]),
+        )
+        y1 = min(
+            layer_bbox["y"] + layer_bbox["height"],
+            float(tile_bbox["y"]) + float(tile_bbox["height"]),
+        )
+    except (KeyError, TypeError, ValueError):
+        return layer_bbox
+    if x1 <= x0 or y1 <= y0:
+        return layer_bbox
+    return {"x": x0, "y": y0, "width": x1 - x0, "height": y1 - y0}
+
+
 def evaluate_candidate(
     state: LayerPlanGlslDirectState,
     runtime: Runtime[DirectGraphContext],
@@ -520,6 +579,62 @@ def evaluate_candidate(
     assert validation_attestation is not None
     residual = summarize_spatial_residual(state["target_rgb"], rendered)
     residual["dominant_metric_component"] = dominant_metric_component(metric)
+    metrics = metric.to_dict()
+    focus = state.get("candidate_optimization_focus")
+    focused_region_metrics = None
+    focus_status = "absent"
+    if focus is not None:
+        validation = validate_uniform_optimization_focus(
+            focus,
+            layered_spec,
+            attested,
+        )
+        if validation.is_valid:
+            focus_status = "valid"
+            incumbent = state.get("current_best")
+            inherited_metrics = (
+                incumbent.focused_region_metrics
+                if state["candidate_role"] == "uniform_optimize"
+                and incumbent is not None
+                and incumbent.optimization_focus == focus
+                else None
+            )
+            uv_bbox = (
+                inherited_metrics.uv_bbox.to_dict()
+                if inherited_metrics is not None
+                else _focused_uv_bbox(
+                    state,
+                    target_layer_id=focus.target_layer_id,
+                    region_policy=focus.region_policy,
+                    residual=residual,
+                )
+            )
+            if uv_bbox is not None:
+                try:
+                    focused_region_metrics = evaluate_focused_region(
+                        state["target_rgb"],
+                        rendered,
+                        uv_bbox,
+                        background=state["background"],
+                    )
+                except ValueError:
+                    focus_status = "valid_roi_unavailable"
+        else:
+            focus = None
+            focus_status = validation.error_code or "invalid_focus"
+    if focused_region_metrics is not None:
+        focused_payload = focused_region_metrics.to_dict()
+        metrics["focused_region_metrics"] = focused_payload
+        metrics.update(
+            {
+                "focused_roi_mae": focused_region_metrics.roi_mae,
+                "focused_roi_geometry_mask_loss": (
+                    focused_region_metrics.roi_geometry_mask_loss
+                ),
+                "focused_roi_edge_loss": focused_region_metrics.roi_edge_loss,
+                "focused_outside_roi_mae": (focused_region_metrics.outside_roi_mae),
+            }
+        )
     events = [
         *state["events"],
         {
@@ -533,6 +648,7 @@ def evaluate_candidate(
             "mae": metric.global_mae,
             "validator_version": validation_attestation.validator_version,
             "cache_hit": state["candidate_cache_hit"],
+            "optimization_focus_status": focus_status,
         },
     ]
     candidate = DirectCandidate(
@@ -544,7 +660,7 @@ def evaluate_candidate(
         png_bytes=draw.image_bytes,
         mae=metric.global_mae,
         loss=metric.total_loss,
-        metrics=metric.to_dict(),
+        metrics=metrics,
         residual_summary=residual,
         parent_layered_spec_sha256=state.get("candidate_parent_sha256"),
         patched_layer_id=state.get("candidate_patched_layer_id"),
@@ -553,6 +669,8 @@ def evaluate_candidate(
             if state["candidate_role"] == "uniform_optimize"
             else DIRECT_HIGH_LEVEL_CANDIDATE_PROVENANCE
         ),
+        optimization_focus=focus,
+        focused_region_metrics=focused_region_metrics,
     )
     return {
         "pending_candidate": candidate,
@@ -590,8 +708,7 @@ def select_candidate(
         loss_delta = current_best.loss - candidate.loss
         mae_delta = current_best.mae - candidate.mae
         material_improvement = candidate_selected and (
-            loss_delta >= policy.min_delta_loss
-            or mae_delta >= policy.min_delta_mae
+            loss_delta >= policy.min_delta_loss or mae_delta >= policy.min_delta_mae
         )
         if state["candidate_role"] == "refine":
             if material_improvement:
@@ -599,10 +716,26 @@ def select_candidate(
                 feedback = None
             else:
                 consecutive_non_improving += 1
+                incumbent_focus = getattr(current_best, "optimization_focus", None)
+                candidate_focus = getattr(candidate, "optimization_focus", None)
+                incumbent_focused = getattr(
+                    current_best, "focused_region_metrics", None
+                )
+                candidate_focused = getattr(candidate, "focused_region_metrics", None)
+                focused_metrics_comparable = (
+                    incumbent_focus is not None
+                    and incumbent_focus == candidate_focus
+                    and incumbent_focused is not None
+                    and candidate_focused is not None
+                    and incumbent_focused.uv_bbox == candidate_focused.uv_bbox
+                    and incumbent_focused.dilation_radius
+                    == candidate_focused.dilation_radius
+                )
                 metric_deltas = {
                     name: float(current_best.metrics[name])
                     - float(candidate.metrics[name])
                     for name in REFINE_FEEDBACK_METRICS
+                    if (not name.startswith("focused_") or focused_metrics_comparable)
                     if isinstance(current_best.metrics.get(name), (int, float))
                     and not isinstance(current_best.metrics.get(name), bool)
                     and isinstance(candidate.metrics.get(name), (int, float))

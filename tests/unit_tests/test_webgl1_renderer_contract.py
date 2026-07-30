@@ -15,6 +15,7 @@ from shaderforge.rendering import (
     build_standalone_html,
 )
 from shaderforge.rendering.webgl1_renderer import (
+    PreparedWebGL1Renderer,
     _normalize_uniform_schema,
     _validate_uniform_values,
 )
@@ -153,6 +154,66 @@ def test_prepared_uniform_schema_and_values_are_strict() -> None:
         )
     with pytest.raises(ValueError, match="保留"):
         _normalize_uniform_schema({"u_resolution": "vec2"})
+    with pytest.raises(ValueError, match="保留"):
+        _normalize_uniform_schema({"u_sg_role_mask_mode": "float"})
+
+
+@pytest.mark.anyio
+async def test_prepared_draw_forwards_internal_diagnostic_mode() -> None:
+    class CapturingPage:
+        def __init__(self) -> None:
+            self.payloads: list[dict[str, object]] = []
+
+        def is_closed(self) -> bool:
+            return False
+
+        async def evaluate(self, _script: str, payload: dict[str, object]) -> dict:
+            self.payloads.append(payload)
+            return {
+                "success": True,
+                "rgb": [0, 0, 0],
+                "dataUrl": None,
+                "drawError": None,
+            }
+
+        async def wait_for_timeout(self, _timeout: int) -> None:
+            return None
+
+    renderer = PlaywrightWebGL1Renderer()
+    page = CapturingPage()
+    renderer._page = page  # type: ignore[assignment]
+    prepared = PreparedWebGL1Renderer(
+        owner=renderer,
+        prepared_id="diagnostic-test",
+        width=1,
+        height=1,
+        uniform_schema={},
+        compile_result=None,  # type: ignore[arg-type]
+        metadata=None,
+        prepare_duration_ms=0.0,
+        source_sha256="0" * 64,
+    )
+
+    await prepared.render_uniforms({}, diagnostic_mode=2.0)
+
+    assert page.payloads == [
+        {
+            "preparedId": "diagnostic-test",
+            "uniformValues": {},
+            "capturePng": False,
+            "diagnosticMode": 2.0,
+        }
+    ]
+    for invalid in (float("nan"), 3.0, True):
+        with pytest.raises(ValueError, match="diagnostic_mode"):
+            await prepared.render_uniforms({}, diagnostic_mode=invalid)
+    with pytest.raises(ValueError, match="不得签发"):
+        await prepared.render_uniforms(
+            {},
+            receipt_spec_sha256="0" * 64,
+            diagnostic_mode=2.0,
+        )
+    assert len(page.payloads) == 1
 
 
 @pytest.mark.anyio
@@ -170,8 +231,8 @@ def test_standalone_html_uses_same_host_and_escapes_script_terminator():
 
     assert "window.__renderShader" in html
     assert 'canvas.getContext("webgl"' in html
-    assert 'antialias: false' in html
-    assert 'preserveDrawingBuffer: true' in html
+    assert "antialias: false" in html
+    assert "preserveDrawingBuffer: true" in html
     assert "createTexture" not in html
     assert "bindTexture" not in html
     assert '"width": 80' in html

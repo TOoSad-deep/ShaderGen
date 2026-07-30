@@ -21,6 +21,8 @@ from shaderforge.uniform_optimization import (
     FlatTunableComponent,
     UniformOptimizationConfig,
     UniformOptimizationError,
+    UniformOptimizationFocusComponentV1,
+    UniformOptimizationFocusV1,
     UniformOptimizationProvenanceV1,
     UniformOptimizationSummaryV2,
     UniformPatchV1,
@@ -32,7 +34,9 @@ from shaderforge.uniform_optimization import (
     lattice_value,
     next_coordinate_move,
     record_coordinate_outcome,
+    resolve_uniform_optimization_focus,
     start_coordinate_pattern_session,
+    validate_uniform_optimization_focus,
 )
 
 
@@ -194,6 +198,104 @@ def _layered_and_program(
     return layered, compile_layered_shader(layered)
 
 
+def _two_layered_and_program():
+    reference = sha256_hex_text("focus-reference")
+    instruction = sha256_hex_text("focus-instruction")
+    plan = build_layer_plan(
+        {
+            "schema_version": "layer_plan_v1",
+            "layers": [
+                {
+                    "layer_id": "shape",
+                    "role": "subject",
+                    "z_index": 0,
+                    "region": {"x": 0, "y": 0, "width": 1, "height": 1},
+                    "dominant_colors": [[0.2, 0.3, 0.4, 1]],
+                    "confidence": 0.9,
+                },
+                {
+                    "layer_id": "accent",
+                    "role": "highlight",
+                    "z_index": 1,
+                    "region": {"x": 0, "y": 0, "width": 1, "height": 1},
+                    "dominant_colors": [[0.8, 0.7, 0.6, 1]],
+                    "confidence": 0.9,
+                },
+            ],
+        },
+        reference_sha256=reference,
+        author_identity=build_layer_author_identity(
+            model_ref="vision", prompt_version="plan_v1"
+        ),
+    )
+    layered = build_layered_shader_spec(
+        {
+            "schema_version": "layered_shader_spec_v1",
+            "canvas": {"width": 32, "height": 32},
+            "layers": [
+                {
+                    "layer_id": "shape",
+                    "role": "subject",
+                    "z_index": 0,
+                    "glsl_body": "return vec4(u_shape);",
+                    "uniform_schema": {
+                        "u_shape": {
+                            "type": "float",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.5,
+                        }
+                    },
+                    "uniform_values": {"u_shape": 0.5},
+                    "tunable_manifest": [
+                        {
+                            "path": "u_shape",
+                            "type": "float",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "step": 0.1,
+                        }
+                    ],
+                },
+                {
+                    "layer_id": "accent",
+                    "role": "highlight",
+                    "z_index": 1,
+                    "glsl_body": "return vec4(u_accent);",
+                    "uniform_schema": {
+                        "u_accent": {
+                            "type": "float",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "default": 0.5,
+                        }
+                    },
+                    "uniform_values": {"u_accent": 0.5},
+                    "tunable_manifest": [
+                        {
+                            "path": "u_accent",
+                            "type": "float",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "step": 0.1,
+                        }
+                    ],
+                },
+            ],
+        },
+        plan,
+        build_author_identity(
+            reference_sha256=reference,
+            instruction_sha256=instruction,
+            model_ref="shader",
+            prompt_version="initial_v1",
+            role="initial",
+            plan_sha256=plan.plan_sha256,
+        ),
+    )
+    return layered, compile_layered_shader(layered)
+
+
 def test_flatten_supports_all_uniform_types_in_canonical_component_order() -> None:
     layered, program = _layered_and_program()
 
@@ -212,6 +314,115 @@ def test_flatten_supports_all_uniform_types_in_canonical_component_order() -> No
         "shape:u_vec4[3]",
     ]
     assert all(item.path != "u_fixed" for item in components)
+
+
+def test_focus_resolves_exact_components_in_flattened_stable_order() -> None:
+    layered, program = _layered_and_program()
+    focus = UniformOptimizationFocusV1(
+        target_layer_id="shape",
+        objective="color",
+        active_components=(
+            UniformOptimizationFocusComponentV1("u_vec4", (3, 1)),
+            UniformOptimizationFocusComponentV1("u_vec2", (0,)),
+        ),
+        region_policy="layer_region",
+    )
+
+    result = validate_uniform_optimization_focus(focus, layered, program)
+
+    assert result.is_valid
+    assert [item.canonical_path for item in result.components] == [
+        "shape:u_vec2[0]",
+        "shape:u_vec4[1]",
+        "shape:u_vec4[3]",
+    ]
+    assert focus.to_dict()["active_components"] == [
+        {"path": "u_vec2", "component_indices": [0]},
+        {"path": "u_vec4", "component_indices": [1, 3]},
+    ]
+
+
+@pytest.mark.parametrize(
+    ("focus", "error_code"),
+    [
+        (
+            UniformOptimizationFocusV1(
+                target_layer_id="shape",
+                objective="edge",
+                active_components=(
+                    UniformOptimizationFocusComponentV1("u_missing", (0,)),
+                ),
+                region_policy="full_canvas",
+            ),
+            "non_manifest_focus",
+        ),
+        (
+            UniformOptimizationFocusV1(
+                target_layer_id="shape",
+                objective="edge",
+                active_components=(
+                    UniformOptimizationFocusComponentV1("u_vec2", (2,)),
+                ),
+                region_policy="full_canvas",
+            ),
+            "focus_component_out_of_range",
+        ),
+        (
+            UniformOptimizationFocusV1(
+                target_layer_id="other_layer",
+                objective="edge",
+                active_components=(
+                    UniformOptimizationFocusComponentV1("u_float", (0,)),
+                ),
+                region_policy="full_canvas",
+            ),
+            "unknown_focus_layer",
+        ),
+    ],
+)
+def test_focus_rejects_unknown_layer_and_out_of_range_components(
+    focus: UniformOptimizationFocusV1, error_code: str
+) -> None:
+    layered, program = _layered_and_program()
+
+    result = validate_uniform_optimization_focus(focus, layered, program)
+
+    assert not result.is_valid
+    assert result.components == ()
+    assert result.error_code == error_code
+    with pytest.raises(UniformOptimizationError) as exc_info:
+        resolve_uniform_optimization_focus(focus, layered, program)
+    assert exc_info.value.code == error_code
+
+
+def test_focus_rejects_a_uniform_owned_by_another_layer() -> None:
+    layered, program = _two_layered_and_program()
+    focus = UniformOptimizationFocusV1(
+        target_layer_id="shape",
+        objective="color",
+        active_components=(UniformOptimizationFocusComponentV1("u_accent", (0,)),),
+        region_policy="layer_region",
+    )
+
+    result = validate_uniform_optimization_focus(focus, layered, program)
+
+    assert not result.is_valid
+    assert result.error_code == "non_manifest_focus"
+
+
+def test_focus_empty_whitelist_is_a_valid_no_op_selection() -> None:
+    layered, program = _layered_and_program()
+    focus = UniformOptimizationFocusV1(
+        target_layer_id="shape",
+        objective="effect",
+        active_components=(),
+        region_policy="worst_residual_intersection",
+    )
+
+    result = validate_uniform_optimization_focus(focus, layered, program)
+
+    assert result.is_valid
+    assert result.components == ()
 
 
 def test_lattice_is_decimal_base_anchored_and_clamped() -> None:

@@ -103,7 +103,8 @@ class PreparedRenderResult:
 
     ``execution_receipt`` 只在成功 draw 后由真实 renderer 路径经可信
     issuer 签发；fake/协议注入实现必须在测试内用显式 test-only issuer
-    自行签发，缺失时下游 attestation 一律 fail-closed。
+    自行签发，缺失时下游 attestation 一律 fail-closed。诊断 draw 不是
+    ProgramSpec 的 Beauty Render，不得携带 ``execution_receipt``。
     """
 
     success: bool
