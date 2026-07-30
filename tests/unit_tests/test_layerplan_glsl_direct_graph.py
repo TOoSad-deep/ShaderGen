@@ -21,6 +21,7 @@ from agent.app.graphs.layerplan_glsl_direct import (
     run_layerplan_glsl_direct_graph,
 )
 from agent.app.nodes.layered_direct import uniform_optimization_nodes
+from agent.app.nodes.layered_direct.candidate_nodes import render_program
 from agent.app.nodes.layered_direct.progress_projection import (
     public_uniform_progress_update,
 )
@@ -29,6 +30,7 @@ from agent.app.nodes.layered_direct.uniform_optimization_nodes import (
 )
 from agent.app.services.layerplan_glsl_direct import LayerPlanGlslDirectConfig
 from shaderforge.program_spec import NormalizedRegion, canonical_json
+from shaderforge.rendering import PreparedRenderResult, RendererUnavailableError
 from shaderforge.uniform_optimization import FlatTunableComponent
 from tests.direct_fakes import (
     TEST_ISSUER,
@@ -190,6 +192,59 @@ def test_uniform_candidate_deduplicates_source_and_binding_not_provenance(
 
 
 @pytest.mark.anyio
+async def test_renderer_unavailable_evicts_every_cached_prepared_program() -> None:
+    class WorkerResetPrepared(FakePrepared):
+        async def render_uniforms(
+            self,
+            uniform_values: Any,
+            *,
+            capture_png: bool = False,
+            receipt_spec_sha256: str | None = None,
+            diagnostic_mode: float = 0.0,
+        ) -> PreparedRenderResult:
+            del (
+                uniform_values,
+                capture_png,
+                receipt_spec_sha256,
+                diagnostic_mode,
+            )
+            raise RendererUnavailableError("test-only worker reset")
+
+    context = _context()
+    renderer = cast(FakeRenderer, context.renderer)
+    candidate_key = ("candidate",)
+    context.program_cache[candidate_key] = WorkerResetPrepared(
+        renderer, "candidate-source", 64, 64
+    )
+    context.program_cache[("other",)] = FakePrepared(renderer, "other-source", 64, 64)
+    state = {
+        "direct_ledger": AttemptLedger(),
+        "prepared_cache_key": candidate_key,
+        "candidate_compiled_spec": SimpleNamespace(
+            uniform_values={},
+            spec_sha256="a" * 64,
+        ),
+        "candidate_layered_spec": None,
+        "candidate_role": "uniform_optimize",
+        "candidate_sequence": 2,
+        "events": [],
+        "completed_nodes": (),
+    }
+
+    update = await render_program(
+        cast(Any, state),
+        cast(Any, SimpleNamespace(context=context)),
+    )
+
+    assert update["draw_result"] is None
+    assert update["events"][-1]["error_code"] == "renderer_unavailable"
+    assert update["direct_ledger"].draw_count == 1
+    assert update["direct_ledger"].rejected_candidates == 1
+    assert context.program_cache == {}
+    assert renderer.close_count == 2
+
+
+@pytest.mark.anyio
 async def test_happy_path_runs_each_candidate_step_as_a_node() -> None:
     output = await run_layerplan_glsl_direct_graph(
         reference_image=reference_png(),
@@ -333,7 +388,9 @@ def test_uniform_progress_projection_allows_global_compile_budget_stop_reason() 
             },
         ),
         {},
-        cast(Any, SimpleNamespace(config=SimpleNamespace(uniform_tuning_draw_budget=2))),
+        cast(
+            Any, SimpleNamespace(config=SimpleNamespace(uniform_tuning_draw_budget=2))
+        ),
     )
 
     assert update == {

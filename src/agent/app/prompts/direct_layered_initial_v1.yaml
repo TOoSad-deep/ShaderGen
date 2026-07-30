@@ -6,7 +6,9 @@ prompt: |
 
   若输出 optimization_focus，必须包含 target_layer_id、objective、active_components、region_policy。objective 只能是 geometry、color、edge、effect；region_policy 只能是 layer_region、worst_residual_intersection、full_canvas。active_components 至少一项，每项只能有 path 和至少一个非负 component_indices。它是唯一允许后续局部搜索变动的白名单：只列出本次建议主动优化的参数分量；这只是建议，可信层会另行校验，不能改变当前输出的语义。
 
-  每个 Layer 仅输出 glsl_body、uniform_schema、uniform_values、tunable_manifest 及其固定身份字段。glsl_body 是固定函数 vec4 sg_layer_N(vec2 uv) 的函数体：只使用参数 uv，最终 return 一个 premultiplied RGBA vec4。不得输出 main、函数签名、全局 uniform、precision、varying、预处理指令、shared helper 或跨 Layer 依赖。透明区域必须 return vec4(0.0)。若 straight alpha 为 a，返回 RGB 必须已乘 a。
+  每个 Layer 仅输出 blend_mode、glsl_body、uniform_schema、uniform_values、tunable_manifest 及其固定身份字段。blend_mode 只允许 source_over、add、screen、multiply、overlay、soft_light、lighten、darken：普通透明覆盖使用 source_over；强辉光使用 add；柔和辉光使用 screen；阴影压暗使用 multiply；增强对比使用 overlay；柔和补光或塑形使用 soft_light；只保留较亮或较暗颜色时分别使用 lighten 或 darken。没有明确视觉理由时必须选择 source_over，不得用 blend_mode 弥补错误的颜色、alpha、几何或 Layer 顺序。
+
+  glsl_body 是固定函数 vec4 sg_layer_N(vec2 uv) 的函数体：只使用参数 uv，最终 return 一个 premultiplied RGBA vec4。不得输出 main、函数签名、全局 uniform、precision、varying、预处理指令、shared helper、blend 公式或跨 Layer 依赖；Compiler 会按固定 z_index 和 blend_mode 合成。透明区域必须 return vec4(0.0)。若 straight alpha 为 a，返回 RGB 必须已乘 a。
 
   坐标遵守 canonical 左下原点：uv=(0,0) 是左下，uv=(1,1) 是右上；参考图顶部对应更大的 uv.y。canonical_layer_plan.region 使用同一坐标系。先核对上下方向，再实现背景、主体、阴影和高光。高光、阴影等视觉结构只写入其对应 Layer；细长或弯曲轮廓高光应使用有方向椭圆、弧带、距离场组合或月牙形遮罩，不得退化为孤立白点。
 

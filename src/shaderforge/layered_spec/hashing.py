@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from shaderforge.layered_spec.blend_modes import BlendMode
 from shaderforge.layered_spec.models import LayeredShaderSpecV1, LayerProgram
 from shaderforge.program_spec import canonical_json, sha256_hex_text
 
@@ -13,6 +14,7 @@ def compute_layer_sha256(
     layer_id: str,
     role: str,
     z_index: int,
+    blend_mode: BlendMode,
     glsl_body: str,
     uniform_schema: tuple[Any, ...],
     uniform_values: dict[str, Any],
@@ -23,6 +25,7 @@ def compute_layer_sha256(
         "layer_id": layer_id,
         "role": role,
         "z_index": z_index,
+        "blend_mode": blend_mode,
         "glsl_body": glsl_body,
         "uniform_schema": [
             item.to_dict()
@@ -46,6 +49,7 @@ def recompute_layer_sha256(layer: LayerProgram) -> str:
         layer_id=layer.layer_id,
         role=layer.role,
         z_index=layer.z_index,
+        blend_mode=layer.blend_mode,
         glsl_body=layer.glsl_body,
         uniform_schema=layer.uniform_schema,
         uniform_values=dict(layer.uniform_values),

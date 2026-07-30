@@ -17,6 +17,7 @@ from agent.app.contracts.layered_direct_glsl import (
 )
 from agent.app.nodes.layered_direct.authors import run_initial_layered_glsl_author
 from shaderforge.layered_spec import (
+    BLEND_MODES,
     LayeredSpecError,
     apply_layer_patch,
     build_layer_patch,
@@ -234,6 +235,11 @@ def test_initial_schema_binds_canvas_and_planned_layer_identity() -> None:
     assert layers["items"] is False
     prefix = layers["prefixItems"]
     assert isinstance(prefix, list)
+    assert all("blend_mode" in layer["required"] for layer in prefix)
+    assert all(
+        layer["properties"]["blend_mode"] == {"enum": list(BLEND_MODES)}
+        for layer in prefix
+    )
     assert [
         {name: layer["properties"][name] for name in ("layer_id", "role", "z_index")}
         for layer in prefix
@@ -440,11 +446,21 @@ def test_compiler_is_deterministic_and_passes_program_spec_safety() -> None:
 
 
 def test_compiler_emits_nonsemantic_role_mask_diagnostics() -> None:
-    compiled = compile_layered_shader(_spec())
+    plan = _plan()
+    output = _model_output()
+    output["layers"][1]["blend_mode"] = "screen"
+    compiled = compile_layered_shader(
+        build_layered_shader_spec(output, plan, _initial_identity(plan))
+    )
 
     assert "uniform float u_sg_role_mask_mode;" in compiled.fragment_source
     assert "u_sg_role_mask_mode" not in {item.name for item in compiled.uniform_schema}
     assert "u_sg_role_mask_mode" not in compiled.uniform_values
+    assert "accum = sg_compose_screen(accum, layer);" in compiled.fragment_source
+    assert (
+        "sg_role_mask_subject = layer.a + sg_role_mask_subject * (1.0 - layer.a);"
+        in compiled.fragment_source
+    )
     for role in ("subject", "highlight", "detail", "shadow", "glow", "background"):
         variable = f"sg_role_mask_{role}"
         assert f"float {variable} = 0.0;" in compiled.fragment_source
@@ -475,6 +491,42 @@ def test_layered_parser_rejects_internal_role_mask_uniform_reference() -> None:
     assert exc_info.value.code == "forbidden_internal_uniform_reference"
 
 
+@pytest.mark.parametrize("blend_mode", BLEND_MODES)
+def test_compiler_routes_each_supported_blend_mode(blend_mode: str) -> None:
+    plan = _plan()
+    output = _model_output()
+    output["layers"][1]["blend_mode"] = blend_mode
+
+    layered = build_layered_shader_spec(output, plan, _initial_identity(plan))
+    compiled = compile_layered_shader(layered)
+
+    assert layered.layers[1].blend_mode == blend_mode
+    if blend_mode == "source_over":
+        assert "accum = layer + accum * (1.0 - layer.a);" in (compiled.fragment_source)
+    else:
+        assert f"accum = sg_compose_{blend_mode}(accum, layer);" in (
+            compiled.fragment_source
+        )
+    assert validate_program_spec_safety(compiled).valid
+
+
+def test_layered_spec_defaults_blend_mode_and_rejects_unknown_mode() -> None:
+    plan = _plan()
+    defaulted = build_layered_shader_spec(
+        _model_output(), plan, _initial_identity(plan)
+    )
+    assert [layer.blend_mode for layer in defaulted.layers] == [
+        "source_over",
+        "source_over",
+    ]
+
+    invalid = _model_output()
+    invalid["layers"][1]["blend_mode"] = "color_dodge"
+    with pytest.raises(LayeredSpecError) as exc_info:
+        build_layered_shader_spec(invalid, plan, _initial_identity(plan))
+    assert exc_info.value.code == "invalid_blend_mode"
+
+
 def test_compiler_repairs_constant_reversed_smoothstep_without_changing_layer() -> None:
     plan = _plan()
     output = _model_output()
@@ -501,6 +553,22 @@ def test_patch_replaces_exactly_one_layer_and_preserves_other_objects() -> None:
     assert updated.layered_spec_sha256 != base.layered_spec_sha256
     assert base.layers[1].glsl_body != updated.layers[1].glsl_body
     assert validate_program_spec_safety(compile_layered_shader(updated)).valid
+
+
+def test_patch_can_change_only_target_layer_blend_mode() -> None:
+    base = _spec()
+    raw = _patch_output(base)
+    raw["replacement"]["blend_mode"] = "screen"
+    updated = apply_layer_patch(
+        base,
+        build_layer_patch(raw),
+        _refine_identity(base),
+    )
+
+    assert updated.layers[0] is base.layers[0]
+    assert updated.layers[0].blend_mode == "source_over"
+    assert updated.layers[1].blend_mode == "screen"
+    assert updated.layers[1].layer_sha256 != base.layers[1].layer_sha256
 
 
 @pytest.mark.parametrize(

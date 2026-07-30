@@ -18,6 +18,7 @@ REQUIRED = {
     "agent/app/nodes/layered_direct/authors.py",
     "agent/app/services/layerplan_glsl_direct.py",
     "agent/app/states/layerplan_glsl_direct.py",
+    "shaderforge/layered_spec/blend_modes.py",
     "shaderforge/layered_spec/compiler.py",
     "shaderforge/program_spec/models.py",
 }

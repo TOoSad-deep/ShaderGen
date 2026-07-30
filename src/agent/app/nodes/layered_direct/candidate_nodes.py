@@ -236,6 +236,11 @@ async def prepare_program(
         }
     except (RendererUnavailableError, ValueError, OSError) as exc:
         ledger.wall_clock_ms += (context.clock() - started) * 1000.0
+        if isinstance(exc, RendererUnavailableError):
+            # A worker reset closes every prepared handle owned by the renderer.
+            # Evict the attempt cache immediately instead of retaining stale
+            # programs until final cleanup.
+            await context.release_programs()
         ledger, events = reject_candidate(
             state,
             "renderer_unavailable",
@@ -318,6 +323,10 @@ async def render_program(
         )
     except (RendererUnavailableError, ValueError, OSError) as exc:
         ledger.wall_clock_ms += (context.clock() - started) * 1000.0
+        if isinstance(exc, RendererUnavailableError):
+            # Prepared handles are worker-local; one reset invalidates the whole
+            # attempt cache, not only the program that observed the failure.
+            await context.release_programs()
         ledger, events = reject_candidate(
             state,
             "renderer_unavailable",

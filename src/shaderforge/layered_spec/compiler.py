@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import re
 
+from shaderforge.layered_spec.blend_modes import (
+    DEFAULT_BLEND_MODE,
+    emit_blend_helper_sources,
+)
 from shaderforge.layered_spec.hashing import (
     recompute_layer_sha256,
     recompute_layered_spec_sha256,
@@ -23,7 +27,7 @@ from shaderforge.program_spec import (
 )
 from shaderforge.validation import repair_constant_reversed_smoothsteps
 
-LAYERED_COMPILER_VERSION = "layered_to_program_spec_v1_3"
+LAYERED_COMPILER_VERSION = "layered_to_program_spec_v1_4"
 _ROLE_MASK_MODE_UNIFORM = "u_sg_role_mask_mode"
 _ROLE_MASK_VARIABLES = {
     "subject": "sg_role_mask_subject",
@@ -57,6 +61,7 @@ def _emit_source(layers: tuple[LayerProgram, ...]) -> str:
         f"uniform {declaration.type} {declaration.name};" for declaration in uniforms
     )
     sections = ["\n".join(declarations)]
+    sections.extend(emit_blend_helper_sources(layer.blend_mode for layer in layers))
     indexed_layers: list[tuple[int, LayerProgram]] = list(enumerate(layers))
     for index, layer in indexed_layers:
         body = "\n".join(f"    {line}" for line in layer.glsl_body.splitlines())
@@ -74,7 +79,10 @@ def _emit_source(layers: tuple[LayerProgram, ...]) -> str:
         indexed_layers, key=lambda item: (item[1].z_index, item[0])
     ):
         main.append(f"    layer = {_function_name(index, layer.layer_id)}(v_uv);")
-        main.append("    accum = layer + accum * (1.0 - layer.a);")
+        if layer.blend_mode == DEFAULT_BLEND_MODE:
+            main.append("    accum = layer + accum * (1.0 - layer.a);")
+        else:
+            main.append(f"    accum = sg_compose_{layer.blend_mode}(accum, layer);")
         role_mask_variable = _ROLE_MASK_VARIABLES[layer.role]
         main.append(
             f"    {role_mask_variable} = layer.a + {role_mask_variable} "
