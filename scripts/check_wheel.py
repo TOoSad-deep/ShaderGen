@@ -9,6 +9,8 @@ from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[1]
 REQUIRED = {
+    "agent/app/config/direct_quality_presets.py",
+    "agent/app/config/direct_quality_presets.yaml",
     "agent/app/contracts/layer_plan.py",
     "agent/app/contracts/layerplan_glsl_direct.py",
     "agent/app/graphs/layerplan_glsl_direct.py",
@@ -16,6 +18,7 @@ REQUIRED = {
     "agent/app/nodes/layered_direct/authors.py",
     "agent/app/services/layerplan_glsl_direct.py",
     "agent/app/states/layerplan_glsl_direct.py",
+    "shaderforge/layered_spec/blend_modes.py",
     "shaderforge/layered_spec/compiler.py",
     "shaderforge/program_spec/models.py",
 }

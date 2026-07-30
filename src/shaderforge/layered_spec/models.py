@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Mapping
 
+from shaderforge.layered_spec.blend_modes import BlendMode
 from shaderforge.program_spec import (
     AuthorIdentity,
     CanvasSpec,
@@ -56,6 +57,7 @@ class LayerProgram:
     layer_id: str
     role: LayerRole
     z_index: int
+    blend_mode: BlendMode
     glsl_body: str
     uniform_schema: tuple[UniformDeclaration, ...]
     uniform_values: Mapping[str, Any]
@@ -68,6 +70,7 @@ class LayerProgram:
             "layer_id": self.layer_id,
             "role": self.role,
             "z_index": self.z_index,
+            "blend_mode": self.blend_mode,
             "glsl_body": self.glsl_body,
             "uniform_schema": {
                 item.name: uniform_declaration_to_model_dict(item)

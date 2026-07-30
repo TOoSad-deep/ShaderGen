@@ -1,1 +1,1 @@
-"""Agent model configuration package."""
+"""Agent-owned model and Direct runtime configuration package."""

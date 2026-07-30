@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from agent.app.config.direct_quality_presets import DIRECT_QUALITY_PRESETS
 from agent.app.nodes.layered_direct.authors import (
     ValidatedLayeredIncumbent,
     _refine_context_sha256,
@@ -178,23 +179,23 @@ def test_direct_config_requires_trusted_implementation_identity() -> None:
 
 
 @pytest.mark.parametrize(
-    ("preset", "targets", "refinement_patience"),
-    [
-        ("fast", (0.08, 0.10), 1),
-        ("balanced", (0.06, 0.08), 1),
-        ("high", (0.04, 0.06), 1),
-        ("manual", (0.03, 0.05), 2),
-    ],
+    "preset",
+    ["fast", "balanced", "high", "manual"],
 )
 def test_optimization_policy_owns_quality_target_mapping(
     preset: str,
-    targets: tuple[float, float],
-    refinement_patience: int,
 ) -> None:
+    expected = DIRECT_QUALITY_PRESETS.for_quality_preset(
+        preset
+    ).optimization_policy
     policy = DirectOptimizationPolicy.for_quality_preset(preset)
 
-    assert (policy.target_mae, policy.target_loss) == targets
-    assert policy.refinement_patience == refinement_patience
+    assert policy.target_mae == expected.target_mae
+    assert policy.target_loss == expected.target_loss
+    assert policy.min_delta_mae == expected.min_delta_mae
+    assert policy.min_delta_loss == expected.min_delta_loss
+    assert policy.refinement_patience == expected.refinement_patience
+    assert policy.detect_duplicate_patch == expected.detect_duplicate_patch
     assert len(policy.fingerprint()) == 64
     assert (
         policy.fingerprint()
@@ -202,25 +203,37 @@ def test_optimization_policy_owns_quality_target_mapping(
     )
 
 
-def test_direct_config_owns_manual_deep_search_budget_mapping() -> None:
+def test_direct_config_owns_quality_preset_budget_mapping() -> None:
     baseline = LayerPlanGlslDirectConfig(
         implementation_identity_sha256=IMPLEMENTATION_SHA256
     )
 
-    for preset in ("fast", "balanced", "high"):
-        assert baseline.for_quality_preset(preset) is baseline
-
-    manual = baseline.for_quality_preset("manual")
-    assert manual.direct_author_llm_budget == 12
-    assert manual.compile_budget == 10
-    assert manual.draw_budget == 16
-    assert manual.refine_budget == 5
-    assert manual.plan_llm_budget == baseline.plan_llm_budget
-    assert (
-        manual.uniform_tuning_draw_budget == baseline.uniform_tuning_draw_budget
-    )
-    assert manual.fingerprint() != baseline.fingerprint()
-
+    for preset in ("fast", "balanced", "high", "manual"):
+        expected = DIRECT_QUALITY_PRESETS.for_quality_preset(preset).budgets
+        resolved = baseline.for_quality_preset(preset)
+        assert resolved is not baseline
+        assert resolved.direct_author_llm_budget == expected.direct_author_llm_budget
+        assert resolved.compile_budget == expected.compile_budget
+        assert resolved.draw_budget == expected.draw_budget
+        assert resolved.refine_budget == expected.refine_budget
+        assert resolved.plan_llm_budget == expected.plan_llm_budget
+        assert (
+            resolved.uniform_tuning_draw_budget
+            == expected.uniform_tuning_draw_budget
+        )
+        assert (
+            resolved.uniform_tuning_active_component_cap
+            == expected.uniform_tuning_active_component_cap
+        )
+        assert (
+            resolved.uniform_tuning_max_passes
+            == expected.uniform_tuning_max_passes
+        )
+        assert resolved.canvas_width == baseline.canvas_width
+        assert resolved.canvas_height == baseline.canvas_height
+        assert resolved.implementation_identity_sha256 == (
+            baseline.implementation_identity_sha256
+        )
 
 @pytest.mark.anyio
 async def test_runner_applies_manual_deep_search_profile(
@@ -247,18 +260,29 @@ async def test_runner_applies_manual_deep_search_profile(
             implementation_identity_sha256=IMPLEMENTATION_SHA256
         ),
         receipt_issuer=_TEST_ISSUER,
+        resolve_quality_preset_budgets=True,
     )
 
     result = await runner.run(_reference_png(), quality_preset="manual")
 
     assert result is expected_result
     context = captured["context"]
-    assert context.config.refine_budget == 5
-    assert context.config.direct_author_llm_budget == 12
-    assert context.config.compile_budget == 10
-    assert context.config.draw_budget == 16
-    assert context.config.uniform_tuning_draw_budget == 4
-    assert context.optimization_policy.refinement_patience == 2
+    expected = DIRECT_QUALITY_PRESETS.for_quality_preset("manual")
+    assert context.config.refine_budget == expected.budgets.refine_budget
+    assert (
+        context.config.direct_author_llm_budget
+        == expected.budgets.direct_author_llm_budget
+    )
+    assert context.config.compile_budget == expected.budgets.compile_budget
+    assert context.config.draw_budget == expected.budgets.draw_budget
+    assert (
+        context.config.uniform_tuning_draw_budget
+        == expected.budgets.uniform_tuning_draw_budget
+    )
+    assert (
+        context.optimization_policy.refinement_patience
+        == expected.optimization_policy.refinement_patience
+    )
 
 
 @pytest.mark.parametrize(

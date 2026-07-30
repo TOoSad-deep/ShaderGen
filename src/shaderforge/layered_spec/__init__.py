@@ -1,5 +1,10 @@
 """Layer 级 direct GLSL 的纯确定性领域包。."""
 
+from shaderforge.layered_spec.blend_modes import (
+    BLEND_MODES,
+    DEFAULT_BLEND_MODE,
+    BlendMode,
+)
 from shaderforge.layered_spec.compiler import (
     LAYERED_COMPILER_VERSION,
     compile_layered_shader,
@@ -26,6 +31,9 @@ from shaderforge.layered_spec.parsing import (
 from shaderforge.layered_spec.patching import apply_layer_patch
 
 __all__ = [
+    "BLEND_MODES",
+    "DEFAULT_BLEND_MODE",
+    "BlendMode",
     "LAYERED_SHADER_SPEC_V1_SCHEMA_VERSION",
     "LAYER_PATCH_V1_SCHEMA_VERSION",
     "LAYERED_COMPILER_VERSION",

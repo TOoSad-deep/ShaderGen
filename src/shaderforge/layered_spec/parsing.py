@@ -3,8 +3,13 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Mapping
+from typing import Any, Mapping, cast
 
+from shaderforge.layered_spec.blend_modes import (
+    BLEND_MODES,
+    DEFAULT_BLEND_MODE,
+    BlendMode,
+)
 from shaderforge.layered_spec.hashing import (
     compute_layer_sha256,
     compute_layered_spec_sha256,
@@ -39,12 +44,14 @@ _MODEL_LAYER_KEYS = frozenset(
         "layer_id",
         "role",
         "z_index",
+        "blend_mode",
         "glsl_body",
         "uniform_schema",
         "uniform_values",
         "tunable_manifest",
     }
 )
+_MODEL_LAYER_REQUIRED_KEYS = _MODEL_LAYER_KEYS - {"blend_mode"}
 _MODEL_PATCH_KEYS = frozenset(
     {
         "schema_version",
@@ -178,7 +185,7 @@ def _parse_layer(
 ) -> tuple[LayerProgram, CanvasSpec]:
     data = _mapping(raw, name=f"layers[{index}]")
     _reject_keys(data, _MODEL_LAYER_KEYS)
-    missing = sorted(_MODEL_LAYER_KEYS - set(data))
+    missing = sorted(_MODEL_LAYER_REQUIRED_KEYS - set(data))
     if missing:
         raise LayeredSpecError("missing_field", f"layers[{index}] 缺少字段 {missing}。")
     layer_id = data["layer_id"]
@@ -190,6 +197,13 @@ def _parse_layer(
     z_index = data["z_index"]
     if isinstance(z_index, bool) or not isinstance(z_index, int) or z_index < 0:
         raise LayeredSpecError("out_of_domain", "z_index 必须是非负整数。")
+    raw_blend_mode = data.get("blend_mode", DEFAULT_BLEND_MODE)
+    if not isinstance(raw_blend_mode, str) or raw_blend_mode not in BLEND_MODES:
+        raise LayeredSpecError(
+            "invalid_blend_mode",
+            f"blend_mode 必须是受支持的模式之一：{', '.join(BLEND_MODES)}。",
+        )
+    blend_mode = cast(BlendMode, raw_blend_mode)
     body = data["glsl_body"]
     if not isinstance(body, str) or not body.strip():
         raise LayeredSpecError("invalid_type", "glsl_body 必须是非空字符串。")
@@ -219,6 +233,7 @@ def _parse_layer(
         layer_id=layer_id,
         role=role,
         z_index=z_index,
+        blend_mode=blend_mode,
         glsl_body=body,
         uniform_schema=schema,
         uniform_values=values,
@@ -229,6 +244,7 @@ def _parse_layer(
             layer_id=layer_id,
             role=role,
             z_index=z_index,
+            blend_mode=blend_mode,
             glsl_body=body,
             uniform_schema=schema,
             uniform_values=values,

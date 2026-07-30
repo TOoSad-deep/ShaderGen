@@ -165,6 +165,7 @@ cython_debug/
 .langgraph_api/
 
 # Frontend
+/node_modules
 frontend/node_modules/
 frontend/dist/
 frontend/*.tsbuildinfo
@@ -174,13 +175,19 @@ frontend/vite.config.d.ts
 # Runtime-generated ShaderGen artifacts. Curated screenshots and golden
 # fixtures under output/playwright may still be committed explicitly.
 output/benchmarks/
+output/diagnostics/
 output/node-lab/
 output/png-to-shader/
 output/png-to-shader-shadow/
 output/png-to-shader-rollout-private/
 output/png-to-shader-direct-private/
 output/playwright/*.log
+output/playwright/*.py
 output/playwright/*.snapshot.txt
+
+# Local one-off report builders and generated office artifacts.
+/.tmp_*
+/outputs/
 
 # 本地 IDE、浏览器自动化和代理工作状态
 .DS_Store

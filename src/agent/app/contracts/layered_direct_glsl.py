@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from shaderforge.layered_spec import (
+    BLEND_MODES,
     LAYER_PATCH_V1_SCHEMA_VERSION,
     LAYERED_SHADER_SPEC_V1_SCHEMA_VERSION,
     LayeredShaderSpecV1,
@@ -66,6 +67,7 @@ def _layer_schema() -> dict[str, object]:
             "layer_id",
             "role",
             "z_index",
+            "blend_mode",
             "glsl_body",
             "uniform_schema",
             "uniform_values",
@@ -84,6 +86,7 @@ def _layer_schema() -> dict[str, object]:
                 ]
             },
             "z_index": {"type": "integer", "minimum": 0},
+            "blend_mode": {"enum": list(BLEND_MODES)},
             "glsl_body": {"type": "string", "minLength": 1, "maxLength": 30000},
             "uniform_schema": {
                 "type": "object",

@@ -160,6 +160,7 @@ def apply_uniform_patch(
         layer_id=previous_layer.layer_id,
         role=previous_layer.role,
         z_index=previous_layer.z_index,
+        blend_mode=previous_layer.blend_mode,
         glsl_body=previous_layer.glsl_body,
         uniform_schema=previous_layer.uniform_schema,
         uniform_values=projection.layer_uniform_values,
