@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date, datetime
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal, cast
 
 from shaderforge.store import ArtifactRef, LocalArtifactStore
+from shaderforge.store.output_layout import (
+    public_run_relative_path,
+    safe_png_name_slug,
+    validate_output_date,
+)
 
 PARENT_MANIFEST_SCHEMA_VERSION = "direct_shader_manifest_v1"
 EngineId = Literal["direct_glsl_layerplan_v1"]
@@ -16,10 +23,16 @@ Representation = Literal["shader_program_spec_v1"]
 _REPRESENTATION_BY_ENGINE: dict[str, str] = {
     "direct_glsl_layerplan_v1": "shader_program_spec_v1",
 }
+OUTPUT_LAYOUT_SCHEMA_VERSION = "output_layout_v1"
 
 
 class EngineRolloutArtifactError(ValueError):
     """Direct attempt 或父公开 Artifact 不满足当前产物契约."""
+
+
+def _server_local_date() -> date:
+    """Return the server-local calendar date used for human browsing."""
+    return datetime.now().astimezone().date()
 
 
 def _json_object(data: bytes, *, label: str) -> dict[str, Any]:
@@ -78,6 +91,7 @@ class EngineRolloutArtifactService:
         *,
         public_store: LocalArtifactStore,
         private_attempt_store: LocalArtifactStore,
+        date_provider: Callable[[], date] | None = None,
     ) -> None:
         """绑定相互独立的 public parent 与 private attempt 根."""
         if public_store.base_root == private_attempt_store.base_root:
@@ -90,6 +104,14 @@ class EngineRolloutArtifactService:
             )
         self.public_store = public_store
         self.private_attempt_store = private_attempt_store
+        self._date_provider = date_provider or _server_local_date
+
+    def publication_date(self) -> str:
+        """Resolve one validated server-local date for a parent run."""
+        value = self._date_provider()
+        if isinstance(value, datetime) or not isinstance(value, date):
+            raise EngineRolloutArtifactError("Artifact 日期提供器必须返回 date。")
+        return validate_output_date(value.isoformat())
 
     def read_private_attempt(self, attempt_id: str) -> SelectedEngineArtifacts:
         """从独立 private store 读取 child 的三个候选发布文件."""
@@ -114,6 +136,8 @@ class EngineRolloutArtifactService:
         representation: Representation,
         engine_run: dict[str, Any],
         selected: SelectedEngineArtifacts,
+        source_filename: str | None = None,
+        publication_date: str | None = None,
     ) -> PublishedParentArtifacts:
         """构造当前 Direct manifest 并原子发布三个父白名单文件."""
         if _REPRESENTATION_BY_ENGINE.get(engine) != representation:
@@ -134,6 +158,18 @@ class EngineRolloutArtifactService:
             label="engine manifest",
         )
         _json_object(selected.metrics_json, label="metrics")
+        try:
+            resolved_date = validate_output_date(
+                publication_date or self.publication_date()
+            )
+            png_slug = safe_png_name_slug(source_filename)
+            relative_run_root = public_run_relative_path(
+                source_filename,
+                resolved_date,
+                parent_run_id,
+            )
+        except (TypeError, ValueError) as exc:
+            raise EngineRolloutArtifactError("父 run Artifact 布局非法。") from exc
         manifest = {
             "schema_version": PARENT_MANIFEST_SCHEMA_VERSION,
             "project_id": project_id,
@@ -142,6 +178,12 @@ class EngineRolloutArtifactService:
             "representation": representation,
             "engine_run": engine_run,
             "direct_manifest": engine_manifest,
+            "output_layout": {
+                "schema_version": OUTPUT_LAYOUT_SCHEMA_VERSION,
+                "png_slug": png_slug,
+                "publication_date": resolved_date,
+                "relative_run_root": relative_run_root.as_posix(),
+            },
             "public_artifacts": {
                 "final-render": {
                     "sha256": sha256(selected.final_render).hexdigest(),
@@ -163,6 +205,7 @@ class EngineRolloutArtifactService:
                 project_id,
                 parent_run_id,
                 files,
+                relative_run_root=relative_run_root,
             )
         except (OSError, TypeError, ValueError) as exc:
             raise EngineRolloutArtifactError(
@@ -255,6 +298,7 @@ __all__ = [
     "EngineId",
     "EngineRolloutArtifactError",
     "EngineRolloutArtifactService",
+    "OUTPUT_LAYOUT_SCHEMA_VERSION",
     "PARENT_MANIFEST_SCHEMA_VERSION",
     "PublishedParentArtifacts",
     "Representation",

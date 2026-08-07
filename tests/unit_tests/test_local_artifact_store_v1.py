@@ -85,8 +85,14 @@ def test_store_resolves_registered_run_without_accepting_a_path(tmp_path: Path) 
     run.write_bytes("final/render.png", b"png", content_type="image/png")
 
     resolved = store.resolve_run("run-1")
+    index = json.loads((tmp_path / ".run-index/run-1.json").read_text())
 
     assert resolved.read_bytes("final/render.png") == b"png"
+    assert index == {
+        "schema_version": 1,
+        "project_id": "project-1",
+        "run_id": "run-1",
+    }
     with pytest.raises(FileNotFoundError, match="未找到"):
         store.resolve_run("unknown-run")
 
@@ -97,6 +103,254 @@ def test_store_rejects_run_id_collision_across_projects(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="其他 project_id"):
         store.register_run("project-2", "shared-run")
+
+
+def test_claim_run_preserves_default_layout_and_exclusively_creates_index(
+    tmp_path: Path,
+) -> None:
+    store = LocalArtifactStore(tmp_path)
+
+    claimed = store.claim_run("project", "run")
+
+    assert claimed.root == tmp_path / "project/run"
+    assert json.loads((tmp_path / ".run-index/run.json").read_text()) == {
+        "schema_version": 1,
+        "project_id": "project",
+        "run_id": "run",
+    }
+    with pytest.raises(FileExistsError, match="重复占位"):
+        store.claim_run("project", "run")
+
+
+def test_claim_run_records_custom_relative_root(tmp_path: Path) -> None:
+    store = LocalArtifactStore(tmp_path)
+
+    claimed = store.claim_run(
+        "project",
+        "run",
+        relative_run_root="图片/2026-08-07/run",
+    )
+
+    assert claimed.root == tmp_path / "图片/2026-08-07/run"
+    assert store.resolve_run("run").root == claimed.root
+    assert json.loads((tmp_path / ".run-index/run.json").read_text()) == {
+        "schema_version": 2,
+        "project_id": "project",
+        "run_id": "run",
+        "relative_run_root": "图片/2026-08-07/run",
+    }
+
+
+def test_claim_run_rejects_unindexed_existing_directory(tmp_path: Path) -> None:
+    store = LocalArtifactStore(tmp_path)
+    existing = tmp_path / "图片/2026-08-07/run"
+    existing.mkdir(parents=True)
+
+    with pytest.raises(FileExistsError, match="目录已存在"):
+        store.claim_run(
+            "project",
+            "run",
+            relative_run_root="图片/2026-08-07/run",
+        )
+
+    assert existing.is_dir()
+    assert not (tmp_path / ".run-index/run.json").exists()
+
+
+def test_claim_run_rejects_existing_index_without_creating_directory(
+    tmp_path: Path,
+) -> None:
+    store = LocalArtifactStore(tmp_path)
+    (tmp_path / ".run-index/run.json").write_text(
+        '{"project_id":"project","run_id":"run","schema_version":1}\n'
+    )
+
+    with pytest.raises(FileExistsError, match="索引已存在"):
+        store.claim_run("project", "run")
+
+    assert not (tmp_path / "project/run").exists()
+
+
+def test_claim_run_cleans_only_new_empty_directories_when_index_claim_fails(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    store = LocalArtifactStore(tmp_path)
+    existing_parent = tmp_path / "图片"
+    existing_parent.mkdir()
+
+    def fail_index_claim(run_id: str, value: object) -> None:
+        raise FileExistsError("concurrent claim")
+
+    monkeypatch.setattr(store, "_claim_run_index", fail_index_claim)
+    with pytest.raises(FileExistsError, match="concurrent claim"):
+        store.claim_run(
+            "project",
+            "run",
+            relative_run_root="图片/2026-08-07/run",
+        )
+
+    assert existing_parent.is_dir()
+    assert not (existing_parent / "2026-08-07").exists()
+    assert not (tmp_path / ".run-index/run.json").exists()
+
+
+def test_claim_run_applies_restrictive_permissions(tmp_path: Path) -> None:
+    store = LocalArtifactStore(tmp_path, restrictive_permissions=True)
+
+    claimed = store.claim_run(
+        "project",
+        "run",
+        relative_run_root="图片/2026-08-07/run",
+    )
+
+    for directory in [
+        tmp_path,
+        tmp_path / ".run-index",
+        tmp_path / "图片",
+        tmp_path / "图片/2026-08-07",
+        claimed.root,
+    ]:
+        assert stat.S_IMODE(directory.stat().st_mode) == 0o700
+    assert stat.S_IMODE((tmp_path / ".run-index/run.json").stat().st_mode) == 0o600
+
+
+def test_public_final_bundle_uses_indexed_human_readable_run_root(
+    tmp_path: Path,
+) -> None:
+    store = LocalArtifactStore(tmp_path)
+    files = {
+        "render.png": b"png",
+        "metrics.json": b"{}\n",
+        "manifest.json": b"{}\n",
+    }
+
+    refs = store.publish_public_final_bundle(
+        "project",
+        "run-1",
+        files,
+        relative_run_root="示例图/2026-08-07/run-1",
+    )
+
+    expected_root = tmp_path / "示例图/2026-08-07/run-1"
+    assert store.resolve_run("run-1").root == expected_root
+    assert store.verify_public_final_bundle("run-1") == files
+    assert (expected_root / "final/render.png").read_bytes() == b"png"
+    assert refs["render.png"].relative_path == "final/render.png"
+    assert json.loads((tmp_path / ".run-index/run-1.json").read_text()) == {
+        "schema_version": 2,
+        "project_id": "project",
+        "run_id": "run-1",
+        "relative_run_root": "示例图/2026-08-07/run-1",
+    }
+
+
+def test_public_final_bundle_does_not_overwrite_sibling_run(tmp_path: Path) -> None:
+    store = LocalArtifactStore(tmp_path)
+    first = {
+        "render.png": b"first",
+        "metrics.json": b'{"run":1}\n',
+        "manifest.json": b'{"run":1}\n',
+    }
+    second = {
+        "render.png": b"second",
+        "metrics.json": b'{"run":2}\n',
+        "manifest.json": b'{"run":2}\n',
+    }
+
+    store.publish_public_final_bundle(
+        "project",
+        "run-1",
+        first,
+        relative_run_root="same.png/2026-08-07/run-1",
+    )
+    store.publish_public_final_bundle(
+        "project",
+        "run-2",
+        second,
+        relative_run_root="same.png/2026-08-07/run-2",
+    )
+
+    assert store.verify_public_final_bundle("run-1") == first
+    assert store.verify_public_final_bundle("run-2") == second
+
+
+def test_public_final_retry_reuses_indexed_root(tmp_path: Path) -> None:
+    store = LocalArtifactStore(tmp_path)
+    files = {
+        "render.png": b"png",
+        "metrics.json": b"{}\n",
+        "manifest.json": b"{}\n",
+    }
+    original = Path("image.png/2026-08-07/run")
+    recomputed = Path("image.png/2026-08-08/run")
+
+    store.publish_public_final_bundle(
+        "project",
+        "run",
+        files,
+        relative_run_root=original,
+    )
+    store.publish_public_final_bundle(
+        "project",
+        "run",
+        files,
+        relative_run_root=recomputed,
+    )
+
+    assert store.resolve_run("run").root == tmp_path / original
+    assert not (tmp_path / recomputed).exists()
+
+
+@pytest.mark.parametrize(
+    "relative_run_root",
+    (
+        "/absolute/run",
+        "image.png/../run",
+        "image.png/2026-08-07/other-run",
+        "image.png\\2026-08-07\\run",
+        "image.png/2026-08-07/ru\nn",
+        ".run-index/run",
+    ),
+)
+def test_public_final_bundle_rejects_unsafe_relative_run_root(
+    tmp_path: Path,
+    relative_run_root: str,
+) -> None:
+    store = LocalArtifactStore(tmp_path)
+
+    with pytest.raises(ValueError, match="relative_run_root"):
+        store.publish_public_final_bundle(
+            "project",
+            "run",
+            {
+                "render.png": b"png",
+                "metrics.json": b"{}\n",
+                "manifest.json": b"{}\n",
+            },
+            relative_run_root=relative_run_root,
+        )
+
+
+@pytest.mark.parametrize(
+    "index_bytes",
+    (
+        b"not-json\n",
+        (
+            b'{"project_id":"project","relative_run_root":"../run",'
+            b'"run_id":"run","schema_version":2}\n'
+        ),
+    ),
+)
+def test_store_rejects_corrupt_or_escaping_run_index(
+    tmp_path: Path,
+    index_bytes: bytes,
+) -> None:
+    store = LocalArtifactStore(tmp_path)
+    (tmp_path / ".run-index/run.json").write_bytes(index_bytes)
+
+    with pytest.raises(ValueError, match="索引损坏"):
+        store.resolve_run("run")
 
 
 def test_restrictive_store_uses_0700_directories_and_0600_files(

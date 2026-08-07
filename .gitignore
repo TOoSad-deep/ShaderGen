@@ -177,9 +177,11 @@ frontend/vite.config.d.ts
 /outputs/weekly-report-2026-07-24/
 
 # Runtime-generated ShaderGen artifacts. Curated screenshots and golden
-# fixtures under output/playwright may still be committed explicitly.
+# fixtures under output/visual-acceptance may still be committed explicitly.
 output/benchmarks/
 output/diagnostics/
+output/.layout-migrations/
+output/legacy/
 output/node-lab/
 output/png-to-shader/
 output/png-to-shader-shadow/

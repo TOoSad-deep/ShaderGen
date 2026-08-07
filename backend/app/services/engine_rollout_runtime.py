@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from math import isfinite
@@ -47,6 +46,7 @@ from backend.app.services.engine_rollout import (
 )
 from shaderforge.config import RUNTIME_TIMEOUTS
 from shaderforge.store import LocalArtifactStore, RunArtifactStore
+from shaderforge.store.output_layout import private_attempt_relative_path
 
 logger = logging.getLogger("backend.engine_rollout_runtime")
 
@@ -55,7 +55,6 @@ _PUBLIC_ARTIFACTS = {
     "metrics": ("metrics.json", "application/json; charset=utf-8", "metrics.json"),
     "manifest": ("manifest.json", "application/json; charset=utf-8", "manifest.json"),
 }
-_PRIVATE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _DIRECT_GRAPH_NODES = frozenset(DIRECT_GRAPH_NODE_NAMES)
 _SAFE_PROGRESS_REASON_CODES = frozenset(
     {
@@ -621,19 +620,34 @@ def _claim_private_attempt(
 ) -> None:
     project_id = request.project_id
     attempt_id = str(context.attempt_id)
-    if not (
-        _PRIVATE_IDENTIFIER.fullmatch(project_id)
-        and _PRIVATE_IDENTIFIER.fullmatch(attempt_id)
-    ):
-        raise EngineAttemptFailure("engine_attempt_identity_invalid")
-    project_root = store.base_root / project_id
-    project_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    project_root.chmod(0o700)
     try:
-        (project_root / attempt_id).mkdir(mode=0o700)
+        relative_run_root = private_attempt_relative_path(
+            request.filename,
+            request.publication_date,
+            str(context.parent_run_id),
+            attempt_id,
+        )
+        store.claim_run(
+            project_id,
+            attempt_id,
+            relative_run_root=relative_run_root,
+        )
     except FileExistsError as exc:
         raise EngineAttemptFailure("engine_attempt_duplicate") from exc
-    store.register_run(project_id, attempt_id)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise EngineAttemptFailure("engine_attempt_identity_invalid") from exc
+
+
+def _private_artifact_location(
+    store: LocalArtifactStore,
+    attempt_id: str,
+) -> dict[str, str]:
+    """Return a non-sensitive, root-relative description of one attempt."""
+    run = store.resolve_run(attempt_id)
+    return {
+        "path_schema_version": "source-date-parent-attempt-v1",
+        "relative_run_root": run.root.relative_to(store.base_root).as_posix(),
+    }
 
 
 def _write_private_failure(
@@ -651,6 +665,10 @@ def _write_private_failure(
             "attempt_index": context.attempt_index,
             "status": "failed",
             "failure_code": failure_code,
+            "artifact_location": _private_artifact_location(
+                store,
+                str(context.attempt_id),
+            ),
             "safe_summary": result.to_safe_summary() if result is not None else None,
             "diagnostics": (
                 result.to_private_diagnostics() if result is not None else []
@@ -784,6 +802,10 @@ def _write_private_success(
             "attempt_id": str(context.attempt_id),
             "attempt_index": context.attempt_index,
             "artifact_scope": context.artifact_scope,
+            "artifact_location": _private_artifact_location(
+                store,
+                str(context.attempt_id),
+            ),
             "safe_summary": result.to_safe_summary(),
             "render_retention": {
                 "schema_version": "direct_process_renders_v1",
@@ -1018,10 +1040,12 @@ class EngineRolloutRuntime:
         run_id: str,
         quality_preset: str = "balanced",
         instruction: str = "",
+        filename: str | None = None,
         on_progress: Callable[[dict[str, Any], bytes | None], None] | None = None,
     ) -> EngineRolloutGenerationResult:
         parent_run_id = UUID(run_id)
         plan = self.plan(parent_run_id=parent_run_id, project_id=project_id)
+        publication_date = self.artifacts.publication_date()
         if on_progress is not None:
             on_progress(
                 {
@@ -1040,6 +1064,8 @@ class EngineRolloutRuntime:
                 content_type=content_type,
                 instruction=instruction,
                 quality_preset=quality_preset,
+                publication_date=publication_date,
+                filename=filename,
                 progress_callback=on_progress,
             ),
             plan=plan,

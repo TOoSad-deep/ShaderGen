@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import date
 from pathlib import Path
 from uuid import uuid4
 
@@ -84,6 +85,7 @@ def _artifacts(tmp_path: Path) -> EngineRolloutArtifactService:
             tmp_path / "private",
             restrictive_permissions=True,
         ),
+        date_provider=lambda: date(2026, 8, 7),
     )
 
 
@@ -129,6 +131,8 @@ async def test_direct_coordinator_uses_fresh_attempts_and_publishes_winner(
             content_type="image/png",
             instruction="",
             quality_preset="balanced",
+            publication_date="2026-08-07",
+            filename="../玻璃 图标.png",
             progress_callback=lambda event, render: progress_events.append(
                 (event, render)
             ),
@@ -149,7 +153,13 @@ async def test_direct_coordinator_uses_fresh_attempts_and_publishes_winner(
     ]
     manifest = json.loads(
         (
-            tmp_path / "public" / "project" / str(parent_id) / "final" / "manifest.json"
+            tmp_path
+            / "public"
+            / "玻璃-图标"
+            / "2026-08-07"
+            / str(parent_id)
+            / "final"
+            / "manifest.json"
         ).read_text()
     )
     assert manifest["engine"] == "direct_glsl_layerplan_v1"
@@ -171,6 +181,7 @@ async def test_three_direct_failures_return_safe_attempt_refs(tmp_path: Path) ->
                 content_type="image/png",
                 instruction="",
                 quality_preset="balanced",
+                publication_date="2026-08-07",
             ),
             plan=resolve_parent_run_plan(
                 parent_run_id=parent_id,
@@ -179,7 +190,7 @@ async def test_three_direct_failures_return_safe_attempt_refs(tmp_path: Path) ->
         )
     assert exc_info.value.code == "direct_attempts_failed"
     assert len(exc_info.value.attempt_refs) == 3
-    assert not (tmp_path / "public" / "project" / str(parent_id)).exists()
+    assert not (tmp_path / "public" / ".run-index" / f"{parent_id}.json").exists()
 
 
 @pytest.mark.anyio
@@ -211,6 +222,7 @@ async def test_unexpected_attempt_failure_logs_safe_location_without_message(
                 content_type="image/png",
                 instruction="",
                 quality_preset="balanced",
+                publication_date="2026-08-07",
             ),
             plan=resolve_parent_run_plan(
                 parent_run_id=parent_id,
@@ -254,6 +266,7 @@ async def test_attempt_timeout_is_recorded_and_fresh_executor_is_closed(
                 content_type="image/png",
                 instruction="",
                 quality_preset="balanced",
+                publication_date="2026-08-07",
             ),
             plan=resolve_parent_run_plan(
                 parent_run_id=parent_id,

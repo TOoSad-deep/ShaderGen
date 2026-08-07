@@ -213,59 +213,283 @@ class LocalArtifactStore:
             restrictive_permissions=self.restrictive_permissions,
         )
 
-    def register_run(self, project_id: str, run_id: str) -> RunArtifactStore:
+    def _validate_relative_run_root(
+        self,
+        relative_run_root: str | Path,
+        run_id: str,
+    ) -> Path:
+        """校验调用方提供的 public run 相对目录，拒绝路径歧义和越界."""
+        raw_path = os.fspath(relative_run_root)
+        if not isinstance(raw_path, str):
+            raise TypeError("relative_run_root 必须是 str 或 Path。")
+        if "\\" in raw_path or any(
+            not character.isprintable() for character in raw_path
+        ):
+            raise ValueError("relative_run_root 包含非法字符。")
+        relative = Path(raw_path)
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or ".run-index" in relative.parts
+            or relative.parts[-1] != run_id
+        ):
+            raise ValueError("relative_run_root 必须是以 run_id 结尾的安全相对路径。")
+
+        candidate = self.base_root / relative
+        current = self.base_root
+        for part in relative.parts:
+            current /= part
+            if current.is_symlink():
+                raise ValueError("relative_run_root 不得经过 symlink。")
+        resolved = candidate.resolve(strict=False)
+        if not resolved.is_relative_to(self.base_root) or resolved == self.base_root:
+            raise ValueError("relative_run_root 越过 Artifact 根目录。")
+        return relative
+
+    def _start_relative_run(self, relative_run_root: Path) -> RunArtifactStore:
+        """创建已校验的自定义 run 根，不改变默认 project/run 行为."""
+        run_root = self.base_root / relative_run_root
+        run_root.mkdir(parents=True, exist_ok=True)
+        if self.restrictive_permissions:
+            current = self.base_root
+            os.chmod(current, 0o700)
+            for part in relative_run_root.parts:
+                current /= part
+                os.chmod(current, 0o700)
+        return RunArtifactStore(
+            run_root,
+            restrictive_permissions=self.restrictive_permissions,
+        )
+
+    def _load_run_index(self, run_id: str) -> tuple[str, Path | None] | None:
+        """读取 v1/v2 run index；v1 继续隐式使用 project/run."""
+        try:
+            value = json.loads(self._run_index.read_bytes(f"{run_id}.json"))
+        except FileNotFoundError:
+            return None
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("运行 Artifact 索引损坏。") from exc
+        if (
+            not isinstance(value, dict)
+            or value.get("run_id") != run_id
+            or not isinstance(value.get("project_id"), str)
+        ):
+            raise ValueError("运行 Artifact 索引损坏。")
+        try:
+            project = _safe_identifier(value["project_id"], "project_id")
+            schema_version = value.get("schema_version")
+            if type(schema_version) is int and schema_version == 1:
+                return project, None
+            if (
+                type(schema_version) is int
+                and schema_version == 2
+                and isinstance(value.get("relative_run_root"), str)
+            ):
+                relative = self._validate_relative_run_root(
+                    value["relative_run_root"],
+                    run_id,
+                )
+                return project, relative
+        except (TypeError, ValueError) as exc:
+            raise ValueError("运行 Artifact 索引损坏。") from exc
+        raise ValueError("运行 Artifact 索引损坏。")
+
+    def _run_from_index_location(
+        self,
+        project_id: str,
+        run_id: str,
+        relative_run_root: Path | None,
+    ) -> RunArtifactStore:
+        if relative_run_root is None:
+            return self.start_run(project_id, run_id)
+        return self._start_relative_run(relative_run_root)
+
+    def _claim_run_index(
+        self,
+        run_id: str,
+        value: Mapping[str, object],
+    ) -> None:
+        """用完整临时文件和 hard-link 原子声明一个尚不存在的 index."""
+        destination = self._run_index.path_for(f"{run_id}.json")
+        data = (
+            json.dumps(
+                value,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            + "\n"
+        ).encode("utf-8")
+        descriptor, temporary_name = tempfile.mkstemp(
+            dir=self._run_index.root,
+            prefix=f".{run_id}.",
+            suffix=".claim",
+        )
+        temporary_path = Path(temporary_name)
+        try:
+            with os.fdopen(descriptor, "wb") as temporary_file:
+                os.fchmod(temporary_file.fileno(), 0o600)
+                temporary_file.write(data)
+                temporary_file.flush()
+                os.fsync(temporary_file.fileno())
+            try:
+                os.link(temporary_path, destination, follow_symlinks=False)
+            except FileExistsError as exc:
+                raise FileExistsError("run_id 索引已存在，不能重复占位。") from exc
+            temporary_path.unlink()
+            _fsync_directory(self._run_index.root)
+        finally:
+            if temporary_path.exists():
+                temporary_path.unlink()
+                _fsync_directory(self._run_index.root)
+
+    @staticmethod
+    def _cleanup_empty_claim_directories(
+        run_root: Path | None,
+        created_parents: list[Path],
+    ) -> None:
+        """失败时只删除本次创建且仍为空的 run/parent 目录."""
+        directories = [*reversed(created_parents)]
+        if run_root is not None:
+            directories.insert(0, run_root)
+        for directory in directories:
+            try:
+                directory.rmdir()
+            except (FileNotFoundError, OSError):
+                break
+
+    def claim_run(
+        self,
+        project_id: str,
+        run_id: str,
+        *,
+        relative_run_root: str | Path | None = None,
+    ) -> RunArtifactStore:
+        """独占声明一个全新 run 目录和索引，任一已存在即 fail closed."""
+        project = _safe_identifier(project_id, "project_id")
+        run = _safe_identifier(run_id, "run_id")
+        requested_relative = (
+            self._validate_relative_run_root(relative_run_root, run)
+            if relative_run_root is not None
+            else Path(project) / run
+        )
+        index_path = self._run_index.path_for(f"{run}.json")
+        if os.path.lexists(index_path):
+            raise FileExistsError("run_id 索引已存在，不能重复占位。")
+
+        created_parents: list[Path] = []
+        created_run = False
+        run_root = self.base_root / requested_relative
+        try:
+            current = self.base_root
+            for part in requested_relative.parts[:-1]:
+                current /= part
+                try:
+                    current.mkdir()
+                except FileExistsError:
+                    if current.is_symlink() or not current.is_dir():
+                        raise ValueError("run 根目录父路径无效。")
+                else:
+                    created_parents.append(current)
+                if self.restrictive_permissions:
+                    os.chmod(current, 0o700)
+            try:
+                run_root.mkdir()
+            except FileExistsError as exc:
+                raise FileExistsError("run 目录已存在，不能重复占位。") from exc
+            created_run = True
+            if self.restrictive_permissions:
+                os.chmod(self.base_root, 0o700)
+                os.chmod(run_root, 0o700)
+            claimed = RunArtifactStore(
+                run_root,
+                restrictive_permissions=self.restrictive_permissions,
+            )
+            if claimed.root != run_root or not claimed.root.is_relative_to(
+                self.base_root
+            ):
+                raise ValueError("run 根目录在占位期间发生替换。")
+            index_value: dict[str, object] = {
+                "schema_version": 1 if relative_run_root is None else 2,
+                "project_id": project,
+                "run_id": run,
+            }
+            if relative_run_root is not None:
+                index_value["relative_run_root"] = requested_relative.as_posix()
+            self._claim_run_index(run, index_value)
+            return claimed
+        except Exception:
+            if not os.path.lexists(index_path):
+                self._cleanup_empty_claim_directories(
+                    run_root if created_run else None,
+                    created_parents,
+                )
+            raise
+
+    def register_run(
+        self,
+        project_id: str,
+        run_id: str,
+        *,
+        relative_run_root: str | Path | None = None,
+    ) -> RunArtifactStore:
         """登记 run_id 到 project_id 的持久索引并返回隔离运行目录."""
         project = _safe_identifier(project_id, "project_id")
         run = _safe_identifier(run_id, "run_id")
-        index_path = f"{run}.json"
-        try:
-            existing = json.loads(self._run_index.read_bytes(index_path))
-        except FileNotFoundError:
-            existing = None
+        requested_relative = (
+            self._validate_relative_run_root(relative_run_root, run)
+            if relative_run_root is not None
+            else None
+        )
+        existing = self._load_run_index(run)
         if existing is not None:
-            if not isinstance(existing, dict) or existing.get("project_id") != project:
+            existing_project, existing_relative = existing
+            if existing_project != project:
                 raise ValueError("run_id 已登记到其他 project_id。")
-        else:
-            self._run_index.write_json(
-                index_path,
-                {
-                    "schema_version": 1,
-                    "project_id": project,
-                    "run_id": run,
-                },
-            )
-        return self.start_run(project, run)
+            return self._run_from_index_location(project, run, existing_relative)
+
+        index_value: dict[str, object] = {
+            "schema_version": 1 if requested_relative is None else 2,
+            "project_id": project,
+            "run_id": run,
+        }
+        if requested_relative is not None:
+            index_value["relative_run_root"] = requested_relative.as_posix()
+        self._run_index.write_json(f"{run}.json", index_value)
+        return self._run_from_index_location(project, run, requested_relative)
 
     def resolve_run(self, run_id: str) -> RunArtifactStore:
         """仅通过已登记 run_id 恢复运行目录，不接受客户端文件路径."""
         run = _safe_identifier(run_id, "run_id")
-        try:
-            value = json.loads(self._run_index.read_bytes(f"{run}.json"))
-        except FileNotFoundError as exc:
-            raise FileNotFoundError("未找到对应运行 Artifact。") from exc
-        if (
-            not isinstance(value, dict)
-            or value.get("schema_version") != 1
-            or value.get("run_id") != run
-            or not isinstance(value.get("project_id"), str)
-        ):
-            raise ValueError("运行 Artifact 索引损坏。")
-        return self.start_run(value["project_id"], run)
+        indexed = self._load_run_index(run)
+        if indexed is None:
+            raise FileNotFoundError("未找到对应运行 Artifact。")
+        project, relative = indexed
+        return self._run_from_index_location(project, run, relative)
 
     def publish_public_final_bundle(
         self,
         project_id: str,
         run_id: str,
         files: Mapping[str, bytes],
+        *,
+        relative_run_root: str | Path | None = None,
     ) -> dict[str, ArtifactRef]:
         """原子、write-once 发布父 run 的三个公开白名单 Artifact.
 
         三个文件先写入同一 run 根下的 staging 目录，再以目录 rename 一次提交；
         只有提交完成后才登记公开 run index。目标已存在时只允许内容完全一致的
-        幂等重试，任何缺失、额外文件或内容漂移均 fail closed。
+        幂等重试，任何缺失、额外文件或内容漂移均 fail closed。调用方可指定
+        人类可读的相对 run 根；已有索引时始终复用索引中的既有目录。
         """
         project = _safe_identifier(project_id, "project_id")
         run_id_value = _safe_identifier(run_id, "run_id")
+        requested_relative = (
+            self._validate_relative_run_root(relative_run_root, run_id_value)
+            if relative_run_root is not None
+            else None
+        )
         if set(files) != PUBLIC_FINAL_BUNDLE_FILES:
             raise ValueError("公开 final bundle 必须恰好包含三个白名单文件。")
         normalized: dict[str, bytes] = {}
@@ -273,13 +497,22 @@ class LocalArtifactStore:
             if not isinstance(data, bytes):
                 raise TypeError(f"公开 Artifact {name} 必须是 bytes。")
             normalized[name] = data
-        run = self.start_run(project, run_id_value)
-        try:
-            registered = self.resolve_run(run_id_value)
-        except FileNotFoundError:
-            registered = None
-        if registered is not None and registered.root != run.root:
-            raise ValueError("run_id 已登记到其他 project_id。")
+        indexed = self._load_run_index(run_id_value)
+        if indexed is not None:
+            indexed_project, indexed_relative = indexed
+            if indexed_project != project:
+                raise ValueError("run_id 已登记到其他 project_id。")
+            run = self._run_from_index_location(
+                project,
+                run_id_value,
+                indexed_relative,
+            )
+        else:
+            run = self._run_from_index_location(
+                project,
+                run_id_value,
+                requested_relative,
+            )
         final_dir = run.root / "final"
         staging = run.root / f".final.staging-{os.getpid()}-{uuid4().hex[:8]}"
         staging.mkdir(mode=0o700)
@@ -305,7 +538,13 @@ class LocalArtifactStore:
             if published_new:
                 _fsync_directory(run.root)
             self._verify_final_directory(final_dir, normalized)
-            self.register_run(project, run_id_value)
+            registered = self.register_run(
+                project,
+                run_id_value,
+                relative_run_root=requested_relative,
+            )
+            if registered.root != run.root:
+                raise ValueError("run_id 已登记到其他运行目录。")
             self._verify_final_directory(final_dir, normalized)
         finally:
             shutil.rmtree(staging, ignore_errors=True)

@@ -44,6 +44,7 @@ async def generate_scene_shader_from_image(
     quality_preset: str,
     instruction: str,
     service: Any,
+    filename: str | None = None,
     on_progress: Callable[[dict[str, Any], bytes | None], None] | None = None,
 ) -> Any:
     return await service.generate(
@@ -53,6 +54,7 @@ async def generate_scene_shader_from_image(
         run_id=run_id,
         quality_preset=quality_preset,
         instruction=instruction,
+        filename=filename,
         on_progress=on_progress,
     )
 

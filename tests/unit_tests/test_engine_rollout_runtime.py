@@ -12,6 +12,7 @@ from backend.app.services.engine_rollout import (
 )
 from backend.app.services.engine_rollout_runtime import (
     DirectEngineAttemptExecutor,
+    _claim_private_attempt,
     _direct_response_payload,
     _publish_node_progress,
     _safe_node_progress_update,
@@ -29,6 +30,42 @@ def test_runtime_is_direct_only_and_uses_isolated_stores(tmp_path: Path) -> None
     assert runtime.artifacts.public_store.base_root == public.base_root
     assert runtime.artifacts.private_attempt_store.restrictive_permissions is True
     assert runtime.coordinator._direct_attempt_limit == 3
+
+
+def test_private_attempt_claim_uses_parent_human_readable_layout(
+    tmp_path: Path,
+) -> None:
+    store = LocalArtifactStore(tmp_path / "private", restrictive_permissions=True)
+    parent_run_id = uuid4()
+    context = EngineAttemptContext(
+        parent_run_id=parent_run_id,
+        attempt_id=uuid4(),
+        attempt_index=0,
+    )
+    request = ParentRunRequest(
+        parent_run_id=parent_run_id,
+        project_id="project",
+        image=b"image",
+        content_type="image/png",
+        instruction="",
+        quality_preset="balanced",
+        publication_date="2026-08-07",
+        filename="粉色 气泡.png",
+    )
+
+    _claim_private_attempt(store, request, context)
+
+    expected = (
+        tmp_path
+        / "private"
+        / "粉色-气泡"
+        / "2026-08-07"
+        / str(parent_run_id)
+        / str(context.attempt_id)
+    )
+    assert store.resolve_run(str(context.attempt_id)).root == expected
+    with pytest.raises(EngineAttemptFailure, match="engine_attempt_duplicate"):
+        _claim_private_attempt(store, request, context)
 
 
 def _policy_result(
@@ -107,6 +144,7 @@ def test_node_progress_projects_only_safe_uniform_decision_fields() -> None:
         content_type="image/png",
         instruction="",
         quality_preset="balanced",
+        publication_date="2026-08-07",
         progress_callback=lambda event, _render: events.append(event),
     )
     _publish_node_progress(
@@ -213,6 +251,7 @@ async def test_attempt_forwards_quality_preset_to_agent_runner(
             content_type="image/png",
             instruction="match",
             quality_preset="high",
+            publication_date="2026-08-07",
             progress_callback=lambda event, _render: progress_events.append(event),
         ),
         context,

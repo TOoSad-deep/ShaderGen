@@ -23,7 +23,11 @@ def _png() -> bytes:
 
 
 class _Runtime:
+    def __init__(self) -> None:
+        self.last_kwargs: dict[str, object] = {}
+
     async def generate(self, image, content_type, **kwargs):
+        self.last_kwargs = dict(kwargs)
         on_progress = kwargs.get("on_progress")
         if on_progress is not None:
             on_progress(
@@ -104,7 +108,8 @@ def test_generate_api_returns_only_current_direct_discriminators(
         )
     )
     with TestClient(app) as client:
-        client.app.state.shader_runtime = _Runtime()
+        runtime = _Runtime()
+        client.app.state.shader_runtime = runtime
         response = client.post(
             "/api/shader/generate",
             headers={"Origin": "http://localhost:5173"},
@@ -116,6 +121,7 @@ def test_generate_api_returns_only_current_direct_discriminators(
     assert payload["engine"] == "direct_glsl_layerplan_v1"
     assert payload["representation"] == "shader_program_spec_v1"
     assert payload["engine_run"]["attempt_refs"][0]["status"] == "succeeded"
+    assert runtime.last_kwargs["filename"] == "reference.png"
     assert response.headers["Access-Control-Expose-Headers"] == "X-Request-ID"
 
 

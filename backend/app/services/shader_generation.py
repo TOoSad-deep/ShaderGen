@@ -225,6 +225,7 @@ async def execute_shader_generation(
                 run_id=str(command.run_id),
                 quality_preset=command.quality_preset,
                 instruction=command.instruction,
+                filename=command.filename,
                 service=dependencies.runtime,
                 on_progress=publish if progress is not None else None,
             )

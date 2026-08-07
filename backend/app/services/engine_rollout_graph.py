@@ -336,6 +336,8 @@ async def publish_parent(
             representation=DIRECT_REPRESENTATION,
             engine_run=engine_run,
             selected=selected.artifacts,
+            source_filename=request.filename,
+            publication_date=request.publication_date,
         )
     except EngineRolloutArtifactError as exc:
         failure = ParentRunFailure(

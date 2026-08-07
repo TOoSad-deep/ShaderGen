@@ -108,6 +108,8 @@ class ParentRunRequest:
     content_type: str
     instruction: str
     quality_preset: str
+    publication_date: str
+    filename: str | None = None
     progress_callback: Callable[[dict[str, Any], bytes | None], None] | None = None
 
 
